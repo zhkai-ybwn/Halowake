@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
@@ -12,6 +12,7 @@ use crate::git::analyzer::build_analysis_context;
 use crate::git::config::AnalysisConfig;
 use crate::git::models::{
     GitAiPayload, GitCommitPromptFileTrace, GitCommitPromptPreview, GitCommitPromptTrace,
+    GitReviewAttention, GitReviewAttentionResult,
 };
 use crate::git::parser::parse_git_status_line;
 use crate::git::runner;
@@ -19,6 +20,224 @@ use crate::git::runner;
 const MAX_TOTAL_EVIDENCE_CHARS: usize = 12000;
 const MAX_CANDIDATE_LINES_PER_FILE: usize = 80;
 const MIN_EVIDENCE_SCORE: i32 = 40;
+
+pub fn build_review_attention(
+    repo_path: &str,
+    selected_files: &[String],
+) -> Result<GitReviewAttentionResult, String> {
+    build_review_attention_with_progress(repo_path, selected_files, |_, _, _, _| {})
+}
+
+pub fn build_review_attention_with_progress<F>(
+    repo_path: &str,
+    selected_files: &[String],
+    mut on_progress: F,
+) -> Result<GitReviewAttentionResult, String>
+where
+    F: FnMut(usize, usize, &str, Option<&str>),
+{
+    let profile = load_prompt_profile(repo_path);
+    let action_map = load_file_actions(repo_path);
+    let mut files = Vec::new();
+    let total = selected_files.len();
+    on_progress(0, total, "profile", None);
+
+    for (index, file_path) in selected_files.iter().enumerate() {
+        on_progress(index, total, "cleaning", Some(file_path));
+        let action = action_map
+            .get(&normalize_match_path(file_path))
+            .cloned()
+            .unwrap_or_else(|| "modified".to_string());
+        let classification = classify_file(file_path, &profile, &action);
+        if let Some(category) = review_skip_category(&classification) {
+            files.push(GitReviewAttention {
+                path: file_path.clone(),
+                score: 0,
+                categories: vec![category.to_string()],
+                eligible: false,
+                skipped: true,
+            });
+            on_progress(index + 1, total, "skipped", Some(file_path));
+            continue;
+        }
+        let raw_diff = runner::load_selected_file_diff(repo_path, file_path)?;
+        let action = if action == "modified" {
+            detect_action_from_diff_header(&raw_diff)
+        } else {
+            action
+        };
+        let cleaned = clean_diff_candidates(file_path, &raw_diff, &classification, &action);
+        let evidence_count = cleaned.candidates.len();
+        let cleaned_chars = cleaned
+            .candidates
+            .iter()
+            .map(|line| line.text.chars().count())
+            .sum::<usize>();
+        let changed_lines = raw_diff
+            .lines()
+            .filter(|line| {
+                (line.starts_with('+') && !line.starts_with("+++"))
+                    || (line.starts_with('-') && !line.starts_with("---"))
+            })
+            .count();
+        let categories = review_categories(file_path, &classification, &raw_diff);
+        let score = score_review_attention(
+            &profile,
+            &classification,
+            &action,
+            evidence_count,
+            cleaned_chars,
+            changed_lines,
+            &categories,
+            cleaned.skipped,
+        );
+
+        files.push(GitReviewAttention {
+            path: file_path.clone(),
+            score,
+            categories,
+            eligible: score >= 50 && !cleaned.skipped,
+            skipped: false,
+        });
+        on_progress(index + 1, total, "scoring", Some(file_path));
+    }
+
+    files.sort_by(|left, right| right.score.cmp(&left.score).then_with(|| left.path.cmp(&right.path)));
+    on_progress(total, total, "complete", None);
+    Ok(GitReviewAttentionResult { files })
+}
+
+fn review_skip_category(classification: &FileClassification) -> Option<&'static str> {
+    if classification.role == "generated" {
+        return Some("generated");
+    }
+
+    match classification.kind.as_str() {
+        "asset" => Some("resource"),
+        "i18n" => Some("i18n"),
+        "lockfile" => Some("dependency"),
+        "internal" => Some("generated"),
+        "docs" => Some("docs"),
+        _ => None,
+    }
+}
+
+fn score_review_attention(
+    profile: &PromptProfile,
+    classification: &FileClassification,
+    action: &str,
+    evidence_count: usize,
+    cleaned_chars: usize,
+    changed_lines: usize,
+    categories: &[String],
+    skipped: bool,
+) -> i32 {
+    let mut score = 8;
+
+    match classification.role.as_str() {
+        "primary" => { score += 18; }
+        "tooling" => { score += 12; }
+        "secondary" => { score += 4; }
+        "generated" | "internal" => { score -= 18; }
+        _ => {}
+    }
+
+    if let Some(weight) = profile.attention_weights.get(&classification.kind) {
+        score += *weight;
+    }
+
+    for category in categories {
+        score += match category.as_str() {
+            "security" => 18,
+            "data" => 14,
+            "api" => 10,
+            "logic" => 10,
+            "types" => 7,
+            "config" => 8,
+            "markup" => 5,
+            "style" => 3,
+            "test" => 2,
+            _ => 0,
+        };
+    }
+
+    match action {
+        "deleted" | "renamed" => { score += 10; }
+        "added" | "untracked" => { score += 6; }
+        _ => {}
+    }
+
+    if changed_lines >= 180 {
+        score += 16;
+    } else if changed_lines >= 60 {
+        score += 9;
+    } else if changed_lines >= 20 {
+        score += 4;
+    }
+
+    if skipped {
+        score -= 24;
+    } else if evidence_count >= 24 || cleaned_chars >= 1800 {
+        score += 18;
+    } else if evidence_count >= 8 || cleaned_chars >= 600 {
+        score += 10;
+    } else if evidence_count == 0 {
+        score -= 10;
+    }
+
+    score.clamp(0, 100)
+}
+
+fn review_categories(path: &str, classification: &FileClassification, diff: &str) -> Vec<String> {
+    let lower_path = normalize_match_path(path);
+    let content = diff.to_lowercase();
+    let mut categories = Vec::new();
+
+    if ["auth", "permission", "authorization", "password", "token", "secret", "role"].iter().any(|term| content.contains(term)) {
+        push_category(&mut categories, "security");
+    }
+    if ["migration", "database", "sql", "storage", "repository", "persist"].iter().any(|term| content.contains(term)) {
+        push_category(&mut categories, "data");
+    }
+    if ["#[tauri::command]", "route", "endpoint", "controller", "invoke(", "fetch(", "axios"].iter().any(|term| content.contains(term)) {
+        push_category(&mut categories, "api");
+    }
+    if ["interface ", "type ", "struct ", "enum ", "trait ", "schema"].iter().any(|term| content.contains(term)) {
+        push_category(&mut categories, "types");
+    }
+    if classification.kind == "config" {
+        push_category(&mut categories, "config");
+    }
+    if classification.kind == "test" {
+        push_category(&mut categories, "test");
+    }
+    if classification.kind == "style" || content.contains("<style") {
+        push_category(&mut categories, "style");
+    }
+    if lower_path.ends_with(".html")
+        || content.contains("<template")
+        || ([".vue", ".tsx", ".jsx"].iter().any(|ext| lower_path.ends_with(ext))
+            && ["<div", "<section", "<button", "<input", "<form"].iter().any(|term| content.contains(term)))
+    {
+        push_category(&mut categories, "markup");
+    }
+    if classification.kind == "source"
+        && (categories.is_empty()
+            || [" if ", "match ", "for ", "while ", "await ", "async ", "return ", "=>", "fn ", "function "]
+                .iter()
+                .any(|term| content.contains(term)))
+    {
+        push_category(&mut categories, "logic");
+    }
+
+    categories
+}
+
+fn push_category(categories: &mut Vec<String>, category: &str) {
+    if !categories.iter().any(|item| item == category) {
+        categories.push(category.to_string());
+    }
+}
 
 pub fn build_analysis_schema(language: &str) -> Value {
     let (title_desc, body_desc, summary_desc, risks_desc) = match language {
@@ -293,6 +512,7 @@ pub fn build_selected_commit_prompt(
 
     let budget_plan = build_budget_plan(&files);
     apply_group_budgets(&mut files, &budget_plan);
+    preserve_small_source_changes(&mut files);
     let group_summary = build_group_summary(&files);
 
     let mut cleaned_chars = 0;
@@ -527,6 +747,8 @@ struct PromptBudgetPlan {
 struct PromptProfile {
     roles: Vec<(String, Vec<String>)>,
     scopes: Vec<(String, Vec<String>)>,
+    attention_weights: BTreeMap<String, i32>,
+    localization_patterns: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -549,14 +771,12 @@ fn load_prompt_profile(repo_path: &str) -> PromptProfile {
     let mut profile = fallback_prompt_profile();
     let repo_root = runner::run_git(repo_path, &["rev-parse", "--show-toplevel"])
         .unwrap_or_else(|_| repo_path.to_string());
-    let profile_path = Path::new(repo_root.trim()).join(".lumina").join("git-profile.json");
+    let repo_root = Path::new(repo_root.trim());
+    profile.localization_patterns = detect_localization_patterns(repo_root);
+    let profile_path = repo_root.join(".lumina").join("git-profile.json");
 
-    let Ok(content) = fs::read_to_string(profile_path) else {
-        return profile;
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&content) else {
-        return profile;
-    };
+    let Ok(content) = fs::read_to_string(profile_path) else { return profile; };
+    let Ok(value) = serde_json::from_str::<Value>(&content) else { return profile; };
 
     let roles = read_role_patterns(&value);
     if !roles.is_empty() {
@@ -566,6 +786,17 @@ fn load_prompt_profile(repo_path: &str) -> PromptProfile {
     let scopes = read_scope_patterns(&value);
     if !scopes.is_empty() {
         profile.scopes = scopes;
+    }
+
+    let attention_weights = read_attention_weights(&value);
+    if !attention_weights.is_empty() {
+        profile.attention_weights = attention_weights;
+    }
+
+    for pattern in read_localization_patterns(&value) {
+        if !profile.localization_patterns.contains(&pattern) {
+            profile.localization_patterns.push(pattern);
+        }
     }
 
     profile
@@ -653,7 +884,147 @@ fn fallback_prompt_profile() -> PromptProfile {
                 vec!["*.json".to_string(), "*.toml".to_string(), "*.config.*".to_string()],
             ),
         ],
+        attention_weights: BTreeMap::from([
+            ("source".to_string(), 10),
+            ("config".to_string(), 8),
+            ("style".to_string(), 3),
+            ("lockfile".to_string(), -5),
+        ]),
+        localization_patterns: Vec::new(),
     }
+}
+
+fn read_localization_patterns(value: &Value) -> Vec<String> {
+    value
+        .get("review")
+        .and_then(|review| review.get("localizationPatterns"))
+        .and_then(Value::as_array)
+        .map(|patterns| patterns.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+fn detect_localization_patterns(repo_root: &Path) -> Vec<String> {
+    let mut patterns = BTreeSet::new();
+    let mut visited = 0usize;
+    scan_localization_directories(repo_root, repo_root, 0, &mut visited, &mut patterns);
+    patterns.into_iter().collect()
+}
+
+fn scan_localization_directories(
+    repo_root: &Path,
+    directory: &Path,
+    depth: usize,
+    visited: &mut usize,
+    patterns: &mut BTreeSet<String>,
+) {
+    if depth > 8 || *visited >= 6000 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else { return; };
+    let mut child_directories = Vec::new();
+    let mut locale_directories = Vec::new();
+    let mut locale_codes = BTreeSet::new();
+
+    for entry in entries.flatten() {
+        *visited += 1;
+        if *visited >= 6000 {
+            break;
+        }
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else { continue; };
+        if file_type.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if !matches!(name.as_str(), ".git" | ".lumina" | "node_modules" | "target" | "dist" | "build" | "vendor") {
+                if normalize_locale_code(&name).is_some() {
+                    let resource_names = localization_resource_names(&path);
+                    if !resource_names.is_empty() {
+                        locale_directories.push((path.clone(), resource_names));
+                    }
+                }
+                child_directories.push(path);
+            }
+            continue;
+        }
+        if file_type.is_file() {
+            if let Some(code) = locale_code_from_file(&path) {
+                locale_codes.insert(code);
+            }
+        }
+    }
+
+    if locale_codes.len() >= 2 {
+        if let Ok(relative) = directory.strip_prefix(repo_root) {
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            if !relative.is_empty() {
+                patterns.insert(format!("{}/**", relative));
+            }
+        }
+    }
+
+    let has_parallel_resources = locale_directories.iter().enumerate().any(|(index, (_, names))| {
+        locale_directories.iter().skip(index + 1).any(|(_, other_names)| {
+            names.iter().any(|name| other_names.contains(name))
+        })
+    });
+    if has_parallel_resources {
+        for (locale_directory, _) in &locale_directories {
+            if let Ok(relative) = locale_directory.strip_prefix(repo_root) {
+                let relative = relative.to_string_lossy().replace('\\', "/");
+                patterns.insert(format!("{}/**", relative));
+            }
+        }
+    }
+
+    for child in child_directories {
+        scan_localization_directories(repo_root, &child, depth + 1, visited, patterns);
+    }
+}
+
+fn localization_resource_names(directory: &Path) -> BTreeSet<String> {
+    let Ok(entries) = fs::read_dir(directory) else { return BTreeSet::new(); };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() {
+                return None;
+            }
+            Some(path.file_name()?.to_string_lossy().to_lowercase())
+        })
+        .collect()
+}
+
+fn locale_code_from_file(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_string_lossy().to_lowercase();
+    if !matches!(extension.as_str(), "json" | "json5" | "yaml" | "yml" | "ts" | "js" | "mjs" | "cjs" | "properties") {
+        return None;
+    }
+    let stem = path.file_stem()?.to_string_lossy().to_lowercase();
+    let candidate = stem.rsplit('.').next()?.replace('_', "-");
+    normalize_locale_code(&candidate)
+}
+
+fn normalize_locale_code(candidate: &str) -> Option<String> {
+    let language = candidate.split('-').next()?;
+    const LANGUAGE_CODES: &[&str] = &[
+        "ar", "bg", "ca", "cs", "da", "de", "el", "en", "es", "et", "fa", "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja", "ko", "lt", "lv", "ms", "nb", "nl", "nn", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "vi", "zh",
+        "ara", "deu", "eng", "fra", "ita", "jpn", "kor", "por", "rus", "spa", "zho",
+    ];
+    LANGUAGE_CODES.contains(&language).then_some(candidate.to_string())
+}
+
+fn read_attention_weights(value: &Value) -> BTreeMap<String, i32> {
+    value
+        .get("review")
+        .and_then(|review| review.get("attentionWeights"))
+        .and_then(Value::as_object)
+        .map(|weights| {
+            weights
+                .iter()
+                .filter_map(|(kind, weight)| weight.as_i64().map(|weight| (kind.clone(), weight as i32)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn read_role_patterns(value: &Value) -> Vec<(String, Vec<String>)> {
@@ -701,7 +1072,11 @@ fn read_scope_patterns(value: &Value) -> Vec<(String, Vec<String>)> {
 }
 
 fn classify_file(path: &str, profile: &PromptProfile, action: &str) -> FileClassification {
-    let kind = classify_kind(path);
+    let kind = if profile.localization_patterns.iter().any(|pattern| matches_pattern(path, pattern)) {
+        "i18n".to_string()
+    } else {
+        classify_kind(path)
+    };
     let role = if kind == "internal" {
         "internal".to_string()
     } else {
@@ -777,15 +1152,17 @@ fn classify_kind(path: &str) -> String {
         || lower.ends_with("cargo.lock")
     {
         "lockfile".to_string()
-    } else if lower.contains("/i18n/") || lower.contains("/locales/") {
-        "i18n".to_string()
     } else if lower.contains(".test.") || lower.contains(".spec.") || lower.contains("/tests/") {
         "test".to_string()
     } else if matches!(ext, "ts" | "tsx" | "js" | "jsx" | "vue" | "rs") {
         "source".to_string()
     } else if matches!(ext, "css" | "scss" | "less" | "sass") {
         "style".to_string()
-    } else if matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp") {
+    } else if matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp" | "avif"
+            | "woff" | "woff2" | "ttf" | "otf" | "mp3" | "mp4" | "webm"
+    ) {
         "asset".to_string()
     } else if lower.ends_with(".gitignore") {
         "ignore".to_string()
@@ -1515,4 +1892,155 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
         result.push(ch);
     }
     result
+}
+
+fn preserve_small_source_changes(files: &mut [PreparedPromptFile]) {
+    for file in files {
+        if file.classification.kind != "source"
+            || !file.selected.is_empty()
+            || file.candidates.is_empty()
+            || file.candidates.len() > 6
+        {
+            continue;
+        }
+
+        if let Some(candidate) = file.candidates.iter().max_by_key(|line| line.score) {
+            file.selected.push(candidate.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    use super::{
+        apply_group_budgets, build_budget_plan, clean_diff_candidates, detect_localization_patterns,
+        fallback_prompt_profile, preserve_small_source_changes, review_skip_category,
+        score_review_attention, FileClassification, PreparedPromptFile,
+    };
+
+    #[test]
+    fn prioritizes_primary_source_with_substantial_evidence() {
+        let classification = FileClassification {
+            role: "primary".to_string(),
+            scope: "frontend".to_string(),
+            kind: "source".to_string(),
+            strategy: "primary source evidence".to_string(),
+            max_lines: 40,
+            skip_verbose: false,
+        };
+
+        let profile = fallback_prompt_profile();
+        let score = score_review_attention(
+            &profile,
+            &classification,
+            "modified",
+            12,
+            900,
+            80,
+            &["logic".to_string()],
+            false,
+        );
+
+        assert!(score >= 60);
+    }
+
+    #[test]
+    fn deprioritizes_generated_or_summary_only_changes() {
+        let classification = FileClassification {
+            role: "generated".to_string(),
+            scope: "root".to_string(),
+            kind: "lockfile".to_string(),
+            strategy: "summarize only".to_string(),
+            max_lines: 1,
+            skip_verbose: true,
+        };
+
+        let profile = fallback_prompt_profile();
+        let score = score_review_attention(
+            &profile,
+            &classification,
+            "modified",
+            0,
+            0,
+            0,
+            &["dependency".to_string()],
+            true,
+        );
+
+        assert!(score < 50);
+    }
+
+    #[test]
+    fn skips_assets_and_i18n_before_diff_scoring() {
+        for kind in ["asset", "i18n"] {
+            let classification = FileClassification {
+                role: "secondary".to_string(),
+                scope: "frontend".to_string(),
+                kind: kind.to_string(),
+                strategy: "summarize only".to_string(),
+                max_lines: 1,
+                skip_verbose: true,
+            };
+
+            assert!(review_skip_category(&classification).is_some());
+        }
+    }
+
+    #[test]
+    fn preserves_a_single_field_definition_as_commit_evidence() {
+        let classification = FileClassification {
+            role: "primary".to_string(),
+            scope: "frontend".to_string(),
+            kind: "source".to_string(),
+            strategy: "primary source evidence".to_string(),
+            max_lines: 40,
+            skip_verbose: false,
+        };
+        let diff = "diff --git a/form.ts b/form.ts\n@@ -1,1 +1,2 @@\n const form = {\n+  securitySuiteLabel: [{ value: '', disabled: true }],";
+        let cleaned = clean_diff_candidates("form.ts", diff, &classification, "modified");
+        let mut files = vec![PreparedPromptFile {
+            path: "form.ts".to_string(),
+            classification,
+            action: "modified".to_string(),
+            raw_chars: diff.chars().count(),
+            candidates: cleaned.candidates,
+            selected: Vec::new(),
+            skipped: false,
+            reason: None,
+        }];
+
+        let budget = build_budget_plan(&files);
+        apply_group_budgets(&mut files, &budget);
+        assert!(files[0].selected.is_empty(), "the regression requires the normal threshold to omit this line");
+
+        preserve_small_source_changes(&mut files);
+
+        assert_eq!(files[0].selected.len(), 1);
+        assert!(files[0].selected[0].text.contains("securitySuiteLabel"));
+    }
+
+    #[test]
+    fn detects_localization_by_language_file_cluster_without_directory_keywords() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("lumina-locale-test-{unique}"));
+        let messages = root.join("client").join("messages");
+        fs::create_dir_all(&messages).unwrap();
+        fs::write(messages.join("en-US.ts"), "export default {}").unwrap();
+        fs::write(messages.join("zh-CN.ts"), "export default {}").unwrap();
+        let english = root.join("shared").join("en");
+        let chinese = root.join("shared").join("zh-CN");
+        fs::create_dir_all(&english).unwrap();
+        fs::create_dir_all(&chinese).unwrap();
+        fs::write(english.join("common.json"), "{}").unwrap();
+        fs::write(chinese.join("common.json"), "{}").unwrap();
+
+        let patterns = detect_localization_patterns(&root);
+
+        assert!(patterns.iter().any(|pattern| pattern == "client/messages/**"));
+        assert!(patterns.iter().any(|pattern| pattern == "shared/en/**"));
+        assert!(patterns.iter().any(|pattern| pattern == "shared/zh-CN/**"));
+        fs::remove_dir_all(root).unwrap();
+    }
 }

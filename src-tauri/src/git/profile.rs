@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -8,6 +9,7 @@ use crate::git::runner::run_git;
 
 const PROFILE_DIR: &str = ".lumina";
 const PROFILE_FILE: &str = "git-profile.json";
+const LOCAL_EXCLUDE_PATTERN: &str = ".lumina/";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,6 +141,7 @@ fn default_profile(repo_root: &str) -> Value {
             "scopeStrategy": "dominant-scope"
         },
         "review": {
+            "localizationPatterns": [],
             "attentionWeights": {
                 "source": 10,
                 "config": 8,
@@ -151,6 +154,35 @@ fn default_profile(repo_root: &str) -> Value {
 
 fn repo_root(repo_path: &str) -> Result<String, String> {
     run_git(repo_path, &["rev-parse", "--show-toplevel"])
+}
+
+fn ensure_local_exclude(repo_root: &str) -> Result<(), String> {
+    let exclude_path = run_git(repo_root, &["rev-parse", "--git-path", "info/exclude"])?;
+    let exclude_path = PathBuf::from(exclude_path.trim());
+    let exclude_path = if exclude_path.is_absolute() {
+        exclude_path
+    } else {
+        Path::new(repo_root).join(exclude_path)
+    };
+    let content = fs::read_to_string(&exclude_path).unwrap_or_default();
+    if content.lines().any(|line| line.trim() == LOCAL_EXCLUDE_PATTERN) {
+        return Ok(());
+    }
+
+    if let Some(parent) = exclude_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建 Git 本地忽略目录失败 {}: {}", parent.display(), e))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&exclude_path)
+        .map_err(|e| format!("打开 Git 本地忽略文件失败 {}: {}", exclude_path.display(), e))?;
+    if !content.is_empty() && !content.ends_with('\n') {
+        writeln!(file).map_err(|e| format!("更新 Git 本地忽略文件失败 {}: {}", exclude_path.display(), e))?;
+    }
+    writeln!(file, "{}", LOCAL_EXCLUDE_PATTERN)
+        .map_err(|e| format!("更新 Git 本地忽略文件失败 {}: {}", exclude_path.display(), e))
 }
 
 fn read_profile(repo_root: &str, created: bool) -> Result<GitProjectProfileFile, String> {
@@ -168,6 +200,7 @@ fn read_profile(repo_root: &str, created: bool) -> Result<GitProjectProfileFile,
 
 pub fn ensure_project_profile(repo_path: &str) -> Result<GitProjectProfileFile, String> {
     let root = repo_root(repo_path)?;
+    ensure_local_exclude(&root)?;
     let path = profile_path(&root);
 
     if path.exists() {
@@ -186,6 +219,32 @@ pub fn ensure_project_profile(repo_path: &str) -> Result<GitProjectProfileFile, 
         .map_err(|e| format!("写入 Lumina 项目配置失败 {}: {}", path.display(), e))?;
 
     read_profile(&root, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[test]
+    fn project_profile_is_ignored_in_local_git_exclude() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let repo = std::env::temp_dir().join(format!("lumina-profile-test-{unique}"));
+        fs::create_dir_all(&repo).unwrap();
+        assert!(Command::new("git").arg("init").arg(&repo).status().unwrap().success());
+
+        ensure_project_profile(repo.to_str().unwrap()).unwrap();
+        ensure_project_profile(repo.to_str().unwrap()).unwrap();
+
+        let exclude = fs::read_to_string(repo.join(".git").join("info").join("exclude")).unwrap();
+        assert_eq!(exclude.lines().filter(|line| line.trim() == LOCAL_EXCLUDE_PATTERN).count(), 1);
+        let status = run_git(repo.to_str().unwrap(), &["status", "--porcelain"]).unwrap();
+        assert!(status.is_empty());
+
+        fs::remove_dir_all(repo).unwrap();
+    }
 }
 
 pub fn load_project_profile(repo_path: &str) -> Result<GitProjectProfileFile, String> {

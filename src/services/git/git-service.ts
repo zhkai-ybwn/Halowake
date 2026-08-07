@@ -9,6 +9,7 @@ export interface GitSnapshot {
   stagedFiles: string[]
   stagedDiff: string
   fileStats: GitFileStat[]
+  branches: GitBranch[]
 }
 
 export interface GitRepositoryState {
@@ -29,6 +30,24 @@ export interface GitFileStat {
   removed: number | null
 }
 
+export interface GitReviewAttention {
+  path: string
+  score: number
+  categories: string[]
+  eligible: boolean
+  skipped: boolean
+}
+
+export interface GitReviewAttentionResult {
+  files: GitReviewAttention[]
+}
+
+export async function scoreGitReviewFiles(repoPath: string, selectedFiles: string[]): Promise<GitReviewAttentionResult> {
+  return await invoke<GitReviewAttentionResult>('score_git_review_files', {
+    payload: { repoPath, selectedFiles },
+  })
+}
+
 export async function loadGitSnapshot(repoPath: string): Promise<GitSnapshot> {
   return await invoke<GitSnapshot>('load_git_snapshot', { repoPath })
 }
@@ -39,16 +58,25 @@ export interface GitFileDiffResponse {
   diff: string
 }
 
+export interface GitBranch {
+  name: string
+  kind: 'local' | 'remote'
+  current: boolean
+  upstream?: string | null
+  upstreamStatus?: string | null
+}
+
 export async function loadGitFileDiff(payload: {
   repoPath: string
   filePath: string
   staged: boolean
+  fullContext?: boolean
 }): Promise<GitFileDiffResponse> {
   return await invoke<GitFileDiffResponse>('load_git_file_diff', { payload })
 }
 
-export async function loadGitFileHeadDiff(repoPath: string, filePath: string): Promise<GitFileDiffResponse> {
-  return await invoke<GitFileDiffResponse>('load_git_file_head_diff', { payload: { repoPath, filePath } })
+export async function loadGitFileHeadDiff(repoPath: string, filePath: string, fullContext = false): Promise<GitFileDiffResponse> {
+  return await invoke<GitFileDiffResponse>('load_git_file_head_diff', { payload: { repoPath, filePath, fullContext } })
 }
 
 export async function commitGitChanges(payload: {
@@ -144,6 +172,50 @@ export async function revertGitFile(repoPath: string, filePath: string): Promise
   return await invoke<GitCommandResult>('revert_git_file', { payload: { repoPath, filePath } })
 }
 
+export async function stageGitFiles(repoPath: string, filePaths: string[]): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('stage_git_files', { payload: { repoPath, filePaths } })
+}
+
+export async function unstageGitFiles(repoPath: string, filePaths: string[]): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('unstage_git_files', { payload: { repoPath, filePaths } })
+}
+
+export async function loadGitBranches(repoPath: string): Promise<GitBranch[]> {
+  return await invoke<GitBranch[]>('load_git_branches', { repoPath })
+}
+
+export async function createGitBranch(repoPath: string, branch: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('create_git_branch', { payload: { repoPath, branch } })
+}
+
+export async function switchGitBranch(repoPath: string, branch: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('switch_git_branch', { payload: { repoPath, branch } })
+}
+
+export async function checkoutGitRemoteBranch(repoPath: string, remoteBranch: string, localBranch: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('checkout_git_remote_branch', { payload: { repoPath, remoteBranch, localBranch } })
+}
+
+export async function mergeGitBranch(repoPath: string, sourceBranch: string, noFastForward: boolean): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('merge_git_branch', { payload: { repoPath, sourceBranch, noFastForward } })
+}
+
+export async function deleteGitBranch(repoPath: string, branch: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('delete_git_branch', { payload: { repoPath, branch } })
+}
+
+export async function setGitBranchUpstream(repoPath: string, branch: string, upstream?: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('set_git_branch_upstream', { payload: { repoPath, branch, upstream: upstream || null } })
+}
+
+export async function initGitRepository(repoPath: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('init_git_repository', { repoPath })
+}
+
+export async function cloneGitRepository(remoteUrl: string, destinationPath: string): Promise<GitCommandResult> {
+  return await invoke<GitCommandResult>('clone_git_repository', { payload: { remoteUrl, destinationPath } })
+}
+
 export async function abortGitMerge(repoPath: string): Promise<GitCommandResult> {
   return await invoke<GitCommandResult>('abort_git_merge', { payload: { repoPath } })
 }
@@ -168,6 +240,6 @@ export async function loadGitCommitDetail(repoPath: string, hash: string): Promi
   return await invoke<GitCommitDetail>('load_git_commit_detail', { payload: { repoPath, hash } })
 }
 
-export async function loadGitCommitFileDiff(repoPath: string, hash: string, filePath: string): Promise<GitCommitFileDiffResponse> {
-  return await invoke<GitCommitFileDiffResponse>('load_git_commit_file_diff', { payload: { repoPath, hash, filePath } })
+export async function loadGitCommitFileDiff(repoPath: string, hash: string, filePath: string, fullContext = false): Promise<GitCommitFileDiffResponse> {
+  return await invoke<GitCommitFileDiffResponse>('load_git_commit_file_diff', { payload: { repoPath, hash, filePath, fullContext } })
 }

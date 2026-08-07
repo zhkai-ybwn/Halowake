@@ -19,21 +19,27 @@
         <span class="sync-dot"></span>
         {{ syncLabel }}
       </span>
-      <div class="action-group">
-        <WorkbenchButton :disabled="pullDisabled" @click="$emit('pull')">
-          {{ pulling ? t('gitAssistant.ai.pulling') : t('gitAssistant.ai.pull') }}
-        </WorkbenchButton>
-        <WorkbenchButton :disabled="fetchDisabled" @click="$emit('fetch')">
-          {{ fetching ? t('gitAssistant.ai.fetching') : t('gitAssistant.ai.fetch') }}
-        </WorkbenchButton>
-        <WorkbenchButton :disabled="pushDisabled" @click="$emit('push')">
-          {{ pushing ? t('gitAssistant.ai.pushing') : t('gitAssistant.ai.push') }}
-        </WorkbenchButton>
+      <div v-if="hasSnapshot" class="action-group">
+        <NDropdown trigger="click" :options="syncOptions" @select="action => $emit('sync-action', String(action))">
+          <WorkbenchButton :disabled="syncDisabled">{{ t('gitAssistant.repo.syncActions') }}</WorkbenchButton>
+        </NDropdown>
       </div>
       <div class="action-group action-group-project">
+        <WorkbenchButton v-if="hasSnapshot" :disabled="loading || !repoPath" @click="$emit('open-branch-selector')">
+          {{ t('gitAssistant.repo.manageBranches') }}
+        </WorkbenchButton>
+        <WorkbenchButton v-if="hasSnapshot" :disabled="loading || !repoPath" @click="$emit('open-merge')">
+          {{ t('gitAssistant.repo.mergeBranch') }}
+        </WorkbenchButton>
+        <WorkbenchButton v-if="!hasSnapshot" :disabled="loading" @click="$emit('clone-repository')">
+          {{ t('gitAssistant.repo.cloneRepository') }}
+        </WorkbenchButton>
+        <WorkbenchButton v-if="!hasSnapshot" :disabled="loading" @click="$emit('init-repository')">
+          {{ t('gitAssistant.repo.initRepository') }}
+        </WorkbenchButton>
         <WorkbenchButton @click="$emit('pick-directory')">{{ t('gitAssistant.repo.chooseDirectory') }}</WorkbenchButton>
-        <WorkbenchButton variant="primary" :disabled="loading || !repoPath" @click="$emit('refresh')">
-          {{ loading ? t('gitAssistant.repo.refreshing') : t('gitAssistant.repo.refreshRepo') }}
+        <WorkbenchButton v-if="hasSnapshot" variant="primary" :disabled="loading || !repoPath" @click="$emit('refresh')">
+          {{ t('gitAssistant.repo.refreshRepo') }}
         </WorkbenchButton>
       </div>
     </template>
@@ -42,6 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { NDropdown } from 'naive-ui'
 import { useLocale } from '@/hooks/useLocale'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
@@ -61,15 +68,18 @@ const props = defineProps<{
   recommendedCount: number
   repositoryState: GitRepositoryState | null
   recentRepos: RecentGitRepo[]
+  hasSnapshot: boolean
 }>()
 
 defineEmits<{
   (e: 'pick-directory'): void
   (e: 'refresh'): void
-  (e: 'fetch'): void
-  (e: 'pull'): void
-  (e: 'push'): void
+  (e: 'sync-action', value: string): void
   (e: 'manage-repos'): void
+  (e: 'open-branch-selector'): void
+  (e: 'open-merge'): void
+  (e: 'clone-repository'): void
+  (e: 'init-repository'): void
 }>()
 
 const { t } = useLocale()
@@ -114,6 +124,12 @@ const pullDisabled = computed(() =>
 const fetchDisabled = computed(() =>
   props.fetching || props.pulling || props.pushing || props.loading || !props.repositoryState?.remoteName,
 )
+const syncDisabled = computed(() => props.fetching || props.pulling || props.pushing || props.loading || !props.repositoryState?.remoteName)
+const syncOptions = computed(() => [
+  { label: props.pulling ? t('gitAssistant.ai.pulling') : t('gitAssistant.ai.pull'), key: 'pull', disabled: pullDisabled.value },
+  { label: props.fetching ? t('gitAssistant.ai.fetching') : t('gitAssistant.ai.fetch'), key: 'fetch', disabled: fetchDisabled.value },
+  { label: props.pushing ? t('gitAssistant.ai.pushing') : t('gitAssistant.ai.push'), key: 'push', disabled: pushDisabled.value },
+])
 
 export interface RecentGitRepo {
   path: string

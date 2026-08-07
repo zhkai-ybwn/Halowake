@@ -4,15 +4,25 @@ use crate::git::models::{
     AiModelConfig, AiProviderType, GitAiAnalysis, GitAiPayload, GitCommitPayload,
     GitCommitPromptPayload, GitCommitPromptPreview, GitFileDiffPayload, GitFileDiffResponse,
     GitCommandResult, GitCommitDetail, GitCommitDetailPayload, GitCommitFileDiffPayload,
-    GitCommitFileDiffResponse, GitConfigureRemotePayload, GitFileActionPayload, GitFilesActionPayload,
-    GitLogEntry, GitLogPayload, GitPromptAiPayload, GitPullPayload, GitPushPayload, GitRebasePayload, GitRepoPayload,
-    GitRepairUpstreamPayload, GitSnapshot, GitSyncStatus,
+    GitBranch, GitBranchPayload, GitBranchUpstreamPayload, GitClonePayload, GitCommitFileDiffResponse,
+    GitConfigureRemotePayload, GitRemoteBranchCheckoutPayload,
+    GitFileActionPayload, GitFilesActionPayload,
+    GitLogEntry, GitLogPayload, GitMergePayload, GitPromptAiPayload, GitPullPayload, GitPushPayload, GitRebasePayload, GitRepoPayload,
+    GitRepairUpstreamPayload, GitReviewAttentionPayload, GitReviewAttentionResult, GitSnapshot, GitSyncStatus,
 };
-use crate::git::prompt::{build_analysis_prompt, build_selected_commit_prompt};
+use crate::git::prompt::{build_analysis_prompt, build_review_attention_with_progress, build_selected_commit_prompt};
 use crate::git::profile::{self, GitProjectProfileFile};
 use crate::git::runner;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
+
+static AI_GENERATION_TASKS: OnceLock<Mutex<HashMap<String, tokio::task::AbortHandle>>> = OnceLock::new();
+
+fn ai_generation_tasks() -> &'static Mutex<HashMap<String, tokio::task::AbortHandle>> {
+    AI_GENERATION_TASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,9 +36,23 @@ pub async fn load_git_snapshot(repo_path: String) -> Result<GitSnapshot, String>
     run_git_task("加载仓库状态", move || runner::load_git_snapshot(&repo_path)).await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelGitAiPayload {
+    pub request_id: String,
+}
+
 #[tauri::command]
 pub async fn load_git_file_diff(payload: GitFileDiffPayload) -> Result<GitFileDiffResponse, String> {
-    run_git_task("加载文件 Diff", move || runner::load_file_diff(&payload.repo_path, &payload.file_path, payload.staged)).await
+    run_git_task("加载文件 Diff", move || {
+        runner::load_file_diff(
+            &payload.repo_path,
+            &payload.file_path,
+            payload.staged,
+            payload.full_context.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -117,6 +141,61 @@ pub async fn revert_git_file(payload: GitFileActionPayload) -> Result<GitCommand
 }
 
 #[tauri::command]
+pub async fn stage_git_files(payload: GitFilesActionPayload) -> Result<GitCommandResult, String> {
+    run_git_task("暂存文件", move || runner::stage_files(&payload)).await
+}
+
+#[tauri::command]
+pub async fn unstage_git_files(payload: GitFilesActionPayload) -> Result<GitCommandResult, String> {
+    run_git_task("取消暂存文件", move || runner::unstage_files(&payload)).await
+}
+
+#[tauri::command]
+pub async fn load_git_branches(repo_path: String) -> Result<Vec<GitBranch>, String> {
+    run_git_task("加载分支", move || runner::load_branches(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn create_git_branch(payload: GitBranchPayload) -> Result<GitCommandResult, String> {
+    run_git_task("创建并切换分支", move || runner::create_branch(&payload)).await
+}
+
+#[tauri::command]
+pub async fn switch_git_branch(payload: GitBranchPayload) -> Result<GitCommandResult, String> {
+    run_git_task("切换分支", move || runner::switch_branch(&payload)).await
+}
+
+#[tauri::command]
+pub async fn checkout_git_remote_branch(payload: GitRemoteBranchCheckoutPayload) -> Result<GitCommandResult, String> {
+    run_git_task("检出远端分支", move || runner::checkout_remote_branch(&payload)).await
+}
+
+#[tauri::command]
+pub async fn merge_git_branch(payload: GitMergePayload) -> Result<GitCommandResult, String> {
+    run_git_task("合并分支", move || runner::merge_branch(&payload)).await
+}
+
+#[tauri::command]
+pub async fn delete_git_branch(payload: GitBranchPayload) -> Result<GitCommandResult, String> {
+    run_git_task("删除分支", move || runner::delete_branch(&payload)).await
+}
+
+#[tauri::command]
+pub async fn set_git_branch_upstream(payload: GitBranchUpstreamPayload) -> Result<GitCommandResult, String> {
+    run_git_task("设置分支上游", move || runner::set_branch_upstream(&payload)).await
+}
+
+#[tauri::command]
+pub async fn init_git_repository(repo_path: String) -> Result<GitCommandResult, String> {
+    run_git_task("初始化仓库", move || runner::init_repository(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn clone_git_repository(payload: GitClonePayload) -> Result<GitCommandResult, String> {
+    run_git_task("克隆仓库", move || runner::clone_repository(&payload)).await
+}
+
+#[tauri::command]
 pub async fn abort_git_merge(payload: GitRepoPayload) -> Result<GitCommandResult, String> {
     run_git_task("中止 merge", move || runner::abort_merge(&payload)).await
 }
@@ -184,7 +263,35 @@ pub async fn generate_git_ai_analysis(payload: GitAiPayload) -> Result<GitAiAnal
 
 #[tauri::command]
 pub async fn generate_git_ai_analysis_from_prompt(payload: GitPromptAiPayload) -> Result<GitAiAnalysis, String> {
-    call_ai_with_prompt(&payload.model, &payload.prompt).await
+    let request_id = payload.request_id;
+    let task = tokio::spawn(async move { call_ai_with_prompt(&payload.model, &payload.prompt).await });
+    ai_generation_tasks()
+        .lock()
+        .map_err(|_| "AI 生成任务状态不可用".to_string())?
+        .insert(request_id.clone(), task.abort_handle());
+
+    let result = match task.await {
+        Ok(result) => result,
+        Err(error) if error.is_cancelled() => Err("AI_GENERATION_CANCELLED".to_string()),
+        Err(error) => Err(format!("AI 生成任务异常: {}", error)),
+    };
+    if let Ok(mut tasks) = ai_generation_tasks().lock() {
+        tasks.remove(&request_id);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn cancel_git_ai_analysis(payload: CancelGitAiPayload) -> Result<bool, String> {
+    let task = ai_generation_tasks()
+        .lock()
+        .map_err(|_| "AI 生成任务状态不可用".to_string())?
+        .remove(&payload.request_id);
+    if let Some(task) = task {
+        task.abort();
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 async fn call_ai_with_prompt(model: &AiModelConfig, prompt: &str) -> Result<GitAiAnalysis, String> {
@@ -194,6 +301,26 @@ async fn call_ai_with_prompt(model: &AiModelConfig, prompt: &str) -> Result<GitA
             qwencloud::call_openai_compatible_generate(model, prompt).await
         }
     }
+}
+
+#[tauri::command]
+pub async fn score_git_review_files(app: AppHandle, payload: GitReviewAttentionPayload) -> Result<GitReviewAttentionResult, String> {
+    let repo_path = payload.repo_path.clone();
+    run_git_task("计算代码审查优先级", move || {
+        build_review_attention_with_progress(
+            &payload.repo_path,
+            &payload.selected_files,
+            |completed, total, phase, file_path| {
+                let _ = app.emit("git-review-score-progress", serde_json::json!({
+                    "repoPath": repo_path.as_str(),
+                    "completed": completed,
+                    "total": total,
+                    "phase": phase,
+                    "filePath": file_path,
+                }));
+            },
+        )
+    }).await
 }
 
 async fn run_git_task<T, F>(task_name: &str, task: F) -> Result<T, String>

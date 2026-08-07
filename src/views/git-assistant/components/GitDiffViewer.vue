@@ -8,7 +8,7 @@
           <span class="meta-pill" :class="`tone-${statusMeta[activeFile.type].tone}`">
             {{ t(statusMeta[activeFile.type].labelKey) }}
           </span>
-          <span class="meta-pill">{{ t('gitAssistant.detail.score', { score: activeFile.score }) }}</span>
+          <span class="meta-pill">{{ activeFile.score === null ? '-' : t('gitAssistant.detail.score', { score: activeFile.score }) }}</span>
           <span v-if="activeFile.recommended" class="meta-pill meta-pill--accent">
             {{ t('gitAssistant.detail.reviewRecommended') }}
           </span>

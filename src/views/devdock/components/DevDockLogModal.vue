@@ -1,5 +1,13 @@
 <template>
-  <NModal :show="show" class="process-log-modal" :auto-focus="false" :mask-closable="true" @update:show="handleShowUpdate" @after-leave="$emit('afterLeave')">
+  <NModal
+    :show="show"
+    class="process-log-modal"
+    :auto-focus="false"
+    :mask-closable="true"
+    :trap-focus="false"
+    @update:show="handleShowUpdate"
+    @after-leave="$emit('afterLeave')"
+  >
     <WorkbenchModalPanel size="log" :close-label="t('common.dismiss')" @close="$emit('close')">
       <section class="process-log-dialog">
         <header class="process-log-dialog__header">
@@ -7,15 +15,54 @@
             <h3>{{ logs?.process.projectName ?? '' }} · {{ logs?.process.scriptName ?? '' }}</h3>
             <p>{{ description }}</p>
           </div>
-          <label class="process-log-search">
-            <Icon icon="solar:magnifer-linear" />
-            <input v-model.trim="search" type="search" :placeholder="t('devdock.processes.searchLogs')" />
-            <span>{{ t('devdock.processes.logMatches', { count: visibleLines.length }) }}</span>
-          </label>
+          <div class="process-log-controls">
+            <div class="process-log-search" @click="focusSearch">
+              <Icon icon="solar:magnifer-linear" />
+              <input
+                ref="searchInputRef"
+                :value="search"
+                type="search"
+                :placeholder="t('devdock.processes.searchLogs')"
+                @click.stop
+                @mousedown.stop
+                @input="search = ($event.target as HTMLInputElement).value.trim()"
+                @keydown.stop
+              />
+              <span>{{ t('devdock.processes.logMatches', { count: visibleLines.length }) }}</span>
+            </div>
+            <div
+              class="process-log-filters"
+              role="group"
+              :aria-label="t('devdock.processes.logLevelFilter')"
+            >
+              <button
+                v-for="option in filterOptions"
+                :key="option.level"
+                type="button"
+                :class="[
+                  'process-log-filter',
+                  option.level,
+                  { active: levelFilter === option.level },
+                ]"
+                @click="levelFilter = option.level"
+              >
+                <span>{{ option.label }}</span>
+                <strong>{{ option.count }}</strong>
+              </button>
+            </div>
+          </div>
         </header>
         <section v-if="logs" ref="viewportRef" class="process-log-list wb-log" aria-live="polite">
-          <pre v-for="line in visibleLines" :key="`${line.timestamp}:${line.stream}:${line.text}`" class="wb-log-line" :class="line.stream"><span class="wb-log-stream">{{ line.showStream ? line.stream : '' }}</span><span v-html="renderLogLine(line.text)" /></pre>
-          <pre v-if="!visibleLines.length" class="wb-log-line log-pending"><span class="wb-log-stream">WAIT</span><span>{{ search ? t('devdock.processes.noLogMatches') : t('devdock.processes.waitingLogs') }}</span></pre>
+          <pre
+            v-for="line in visibleLines"
+            :key="`${line.timestamp}:${line.stream}:${line.text}`"
+            class="wb-log-line"
+            :class="[line.stream, line.level]"
+          ><span class="wb-log-level">{{ line.level }}</span><span class="wb-log-stream">{{ line.showStream ? line.stream : '' }}</span><span v-html="renderLogLine(line.text)" /></pre>
+          <pre
+            v-if="!visibleLines.length"
+            class="wb-log-line log-pending"
+          ><span class="wb-log-level">WAIT</span><span class="wb-log-stream"></span><span>{{ search || levelFilter !== 'all' ? t('devdock.processes.noLogMatches') : t('devdock.processes.waitingLogs') }}</span></pre>
         </section>
         <section v-else class="process-empty">
           <strong>{{ t('devdock.processes.emptyLogsTitle') }}</strong>
@@ -33,6 +80,9 @@ import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
 import { useLocale } from '@/hooks/useLocale'
 import type { ProjectProcessLogs } from '@/services/project/project-service'
 
+type LogLevel = 'info' | 'warning' | 'error'
+type LogLevelFilter = 'all' | LogLevel
+
 const props = defineProps<{
   logs: ProjectProcessLogs | null
   show: boolean
@@ -45,6 +95,8 @@ const emit = defineEmits<{
 
 const { t } = useLocale()
 const search = ref('')
+const levelFilter = ref<LogLevelFilter>('all')
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const viewportRef = ref<HTMLElement | null>(null)
 const ansiUp = new AnsiUp()
 ansiUp.escape_html = true
@@ -57,9 +109,42 @@ const description = computed(() => {
     : props.logs.process.command
 })
 
+const classifiedLines = computed(() =>
+  (props.logs?.lines.filter(line => line.text.trim()) ?? []).map(line => ({
+    ...line,
+    level: classifyLogLevel(line.stream, line.text),
+  }))
+)
+
+const filterOptions = computed(() => {
+  const counts = classifiedLines.value.reduce(
+    (result, line) => {
+      result[line.level] += 1
+      return result
+    },
+    { info: 0, warning: 0, error: 0 }
+  )
+  const total = classifiedLines.value.length
+
+  return [
+    { level: 'all' as const, label: t('devdock.processes.logLevelAll'), count: total },
+    { level: 'info' as const, label: t('devdock.processes.logLevelInfo'), count: counts.info },
+    {
+      level: 'warning' as const,
+      label: t('devdock.processes.logLevelWarning'),
+      count: counts.warning,
+    },
+    { level: 'error' as const, label: t('devdock.processes.logLevelError'), count: counts.error },
+  ]
+})
+
 const visibleLines = computed(() => {
   const keyword = search.value.trim().toLowerCase()
-  const lines = props.logs?.lines.filter(line => line.text.trim() && (!keyword || line.text.toLowerCase().includes(keyword))) ?? []
+  const lines = classifiedLines.value.filter(
+    line =>
+      (levelFilter.value === 'all' || line.level === levelFilter.value) &&
+      (!keyword || line.text.toLowerCase().includes(keyword))
+  )
   return lines.map((line, index) => ({
     ...line,
     showStream: index === 0 || lines[index - 1].stream !== line.stream,
@@ -71,9 +156,10 @@ watch(
   show => {
     if (show) {
       search.value = ''
+      levelFilter.value = 'all'
       scrollToBottom()
     }
-  },
+  }
 )
 
 watch(
@@ -82,11 +168,11 @@ watch(
     if (!search.value) {
       scrollToBottom()
     }
-  },
+  }
 )
 
-watch(search, value => {
-  if (value) {
+watch([search, levelFilter], ([searchValue, levelValue]) => {
+  if (searchValue || levelValue !== 'all') {
     scrollToTop()
   } else {
     scrollToBottom()
@@ -99,8 +185,19 @@ function handleShowUpdate(show: boolean) {
   }
 }
 
+function focusSearch() {
+  searchInputRef.value?.focus()
+}
+
 function renderLogLine(text: string) {
   return ansiUp.ansi_to_html(text)
+}
+
+function classifyLogLevel(stream: 'stdout' | 'stderr', text: string): LogLevel {
+  const content = text.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '').toLowerCase()
+  if (/\b(error|err|failed|failure|fatal|exception|panic)\b/.test(content)) return 'error'
+  if (/\b(warn|warning|deprecated)\b/.test(content)) return 'warning'
+  return stream === 'stderr' ? 'error' : 'info'
 }
 
 function scrollToBottom() {
@@ -136,7 +233,7 @@ function scrollToTop() {
   border-bottom: 1px solid var(--lumina-card-border);
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
   min-height: 70px;
   padding: 12px 54px 12px 16px;
 
@@ -163,6 +260,11 @@ function scrollToTop() {
   }
 }
 
+.process-log-controls {
+  display: grid;
+  gap: 8px;
+}
+
 .process-log-search {
   align-items: center;
   background: var(--lumina-surface-1);
@@ -173,6 +275,9 @@ function scrollToTop() {
   grid-template-columns: 16px minmax(0, 1fr) auto;
   height: 34px;
   padding: 0 10px;
+  pointer-events: auto;
+  position: relative;
+  z-index: 4;
 
   svg {
     color: var(--lumina-text-secondary);
@@ -187,6 +292,9 @@ function scrollToTop() {
     font-size: 12px;
     min-width: 0;
     outline: none;
+    pointer-events: auto;
+    position: relative;
+    z-index: 1;
   }
 
   span {
@@ -201,12 +309,62 @@ function scrollToTop() {
   }
 }
 
+.process-log-filters {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.process-log-filter {
+  align-items: center;
+  background: var(--lumina-surface-1);
+  border: 1px solid var(--lumina-card-border);
+  border-radius: var(--lumina-radius-sm);
+  color: var(--lumina-text-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: 10px;
+  gap: 5px;
+  height: 28px;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 6px;
+
+  strong {
+    color: inherit;
+    font-size: 10px;
+  }
+
+  &:hover {
+    background: var(--lumina-button-secondary-hover);
+    color: var(--lumina-text);
+  }
+
+  &.active {
+    background: color-mix(in srgb, var(--lumina-primary) 12%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-primary) 52%, var(--lumina-card-border));
+    color: var(--lumina-primary);
+  }
+
+  &.warning.active {
+    background: color-mix(in srgb, #e5a100 14%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, #e5a100 52%, var(--lumina-card-border));
+    color: #d99500;
+  }
+
+  &.error.active {
+    background: color-mix(in srgb, var(--lumina-danger) 12%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-danger) 52%, var(--lumina-card-border));
+    color: var(--lumina-danger);
+  }
+}
+
 .process-log-list {
   padding: 12px 14px 14px;
 
   .wb-log-line {
     font-size: 13px;
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 54px 48px minmax(0, 1fr);
     line-height: 1.4;
     min-height: 19px;
   }
@@ -216,8 +374,24 @@ function scrollToTop() {
     line-height: 1.42;
   }
 
-  .stderr {
+  .wb-log-level {
+    color: var(--lumina-text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.42;
+    text-transform: uppercase;
+  }
+
+  .warning .wb-log-level {
+    color: #d99500;
+  }
+
+  .error {
     color: #ffb4a8;
+
+    .wb-log-level {
+      color: var(--lumina-danger);
+    }
   }
 }
 

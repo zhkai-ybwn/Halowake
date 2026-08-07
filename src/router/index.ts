@@ -7,7 +7,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: { name: 'git-assistant' }
+        redirect: { name: 'devdock' }
       },
       {
         path: 'git',
@@ -23,13 +23,18 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/SettingsView.vue')
-      }
+      },
     ]
   },
   {
     path: '/log',
     name: 'git-log',
     component: () => import('@/views/git-log/GitLogView.vue')
+  },
+  {
+    path: '/diff',
+    name: 'git-diff',
+    component: () => import('@/views/git-diff/GitDiffView.vue')
   }
 ]
 

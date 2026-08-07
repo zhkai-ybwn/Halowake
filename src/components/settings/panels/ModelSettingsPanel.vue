@@ -103,7 +103,12 @@
           </div>
 
           <div class="model-item__footer">
-            <span class="test-result" :class="{ error: testErrors[model.id] }">
+            <span
+              class="test-result"
+              :class="{ error: testErrors[model.id] }"
+              role="status"
+              aria-live="polite"
+            >
               {{ testErrors[model.id] || testResults[model.id] || maskApiKey(model.apiKey) }}
             </span>
             <div class="footer-actions">
@@ -206,14 +211,14 @@ function providerLabel(provider: AiProviderType) {
 .panel-header,
 .model-item__footer {
   align-items: center;
-  display: flex;
   gap: var(--lumina-gap-md);
-  justify-content: space-between;
 }
 
 .panel-header {
   background: color-mix(in srgb, var(--lumina-surface-2) 70%, var(--lumina-card-bg));
   border-bottom: 1px solid var(--lumina-card-border);
+  display: flex;
+  justify-content: space-between;
   padding: 18px 20px;
 }
 
@@ -420,12 +425,23 @@ input {
 
 .footer-actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
+}
+
+.footer-actions .ghost-button {
+  white-space: nowrap;
+}
+
+.model-item__footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .test-result {
   color: var(--lumina-text-secondary);
   font-size: 12px;
+  line-height: 1.5;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -433,6 +449,25 @@ input {
 }
 
 .test-result.error {
+  background: color-mix(in srgb, var(--lumina-danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lumina-danger) 22%, transparent);
+  border-radius: 6px;
   color: var(--lumina-danger);
+  max-height: 64px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .model-item__footer {
+    grid-template-columns: 1fr;
+  }
+
+  .footer-actions {
+    justify-content: flex-end;
+  }
 }
 </style>

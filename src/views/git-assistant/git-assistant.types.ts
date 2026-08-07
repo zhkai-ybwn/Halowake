@@ -34,7 +34,8 @@ export interface GitAssistantFileView extends GitFileStatus {
   extension: string
   addedLines: number | null
   removedLines: number | null
-  score: number
+  score: number | null
+  scoreCategories: string[]
   recommended: boolean
 }
 

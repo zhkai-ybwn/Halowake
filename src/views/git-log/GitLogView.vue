@@ -118,42 +118,23 @@
       </section>
     </section>
 
-    <!-- Diff Modal -->
-    <NModal v-model:show="showFileDiff" class="diff-modal" :mask-closable="true">
-      <WorkbenchModalPanel size="diff" :close-label="t('gitAssistant.prompt.close')" @close="showFileDiff = false">
-        <div class="diff-viewer panel-shell">
-          <header class="diff-header">
-            <div class="diff-header__main">
-              <div class="panel-eyebrow">{{ t('gitAssistant.detail.eyebrow') }}</div>
-              <h2>{{ diffFileView?.path || '' }}</h2>
-            </div>
-          </header>
-          <div v-if="diffLoading" class="diff-loading">{{ t('gitAssistant.log.loading') }}</div>
-          <div v-else class="diff-content">
-            <pre class="diff-text">{{ fileDiffText }}</pre>
-          </div>
-        </div>
-      </WorkbenchModalPanel>
-    </NModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NDatePicker, NInput, NModal, NSelect } from 'naive-ui'
+import { NDatePicker, NInput, NSelect } from 'naive-ui'
 import { useLocale } from '@/hooks/useLocale'
 import {
   type GitCommitChangedFile,
   type GitCommitDetail,
   type GitLogEntry,
   loadGitCommitDetail,
-  loadGitCommitFileDiff,
   loadGitLog,
 } from '@/services/git/git-service'
 import { STATUS_META } from '@/views/git-assistant/git-assistant.config'
-import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
-import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
 import { emit as tauriEmit, listen } from '@tauri-apps/api/event'
+import { openGitDiffWindow } from '@/services/git/git-diff-window'
 
 const { t } = useLocale()
 
@@ -171,12 +152,6 @@ const logKeyword = ref('')
 const logAuthorFilter = ref('all')
 const logDateFrom = ref<number | null>(null)
 const logDateTo = ref<number | null>(null)
-
-// Diff state
-const showFileDiff = ref(false)
-const diffFileView = ref<GitAssistantFileView | null>(null)
-const fileDiffText = ref('')
-const diffLoading = ref(false)
 
 // ── Helpers ──
 function parseGitLogDate(date: string) {
@@ -219,16 +194,6 @@ function logFileStatusMeta(statusCode: string) {
   }
   const type = typeMap[code] ?? 'unknown'
   return STATUS_META[type]
-}
-
-function mapCommitStatusToFileType(status: string) {
-  const code = status.slice(0, 1)
-  if (code === 'A') return 'added'
-  if (code === 'D') return 'deleted'
-  if (code === 'R') return 'renamed'
-  if (code === 'C') return 'copied'
-  if (code === 'M') return 'modified'
-  return 'unknown'
 }
 
 function setDefaultLogDateRange(entries: GitLogEntry[]) {
@@ -296,30 +261,11 @@ async function handleSelectLogEntry(hash: string) {
 async function handleOpenLogFileDiff(file: GitCommitChangedFile) {
   if (!repoPath.value || !activeLogHash.value || !file.path) return
   activeLogFilePath.value = file.path
-  showFileDiff.value = true
-  diffLoading.value = true
-  fileDiffText.value = ''
-  const fileName = file.path.split(/[/\\]/).pop() || file.path
-  diffFileView.value = {
-    raw: `${file.status} ${file.path}`, x: file.status.slice(0, 1), y: ' ',
-    path: file.path, originalPath: file.originalPath ?? undefined,
-    type: mapCommitStatusToFileType(file.status), staged: false, unstaged: false,
-    fileName, directory: file.path.slice(0, Math.max(0, file.path.length - fileName.length)).replace(/[\\/]$/, ''),
-    extension: getFileExtension(file.path), addedLines: file.added, removedLines: file.removed, score: 0, recommended: false,
-  }
-  try {
-    const result = await loadGitCommitFileDiff(repoPath.value, activeLogHash.value, file.path)
-    fileDiffText.value = result.diff
-  } catch (err) {
-    console.error(err)
-  } finally {
-    diffLoading.value = false
-  }
+  await openGitDiffWindow({ kind: 'commit', repoPath: repoPath.value, hash: activeLogHash.value, filePath: file.path })
 }
 
 // ── Tauri Events ──
 let unlistenInit: (() => void) | null = null
-let unlistenOpenDiff: (() => void) | null = null
 
 onMounted(async () => {
   unlistenInit = await listen<{ repoPath: string; filePath: string; branch: string }>('git-log-init', async (event) => {
@@ -329,19 +275,12 @@ onMounted(async () => {
     await loadLog()
   })
 
-  unlistenOpenDiff = await listen<{ repoPath: string; filePath: string }>('git-log-open-file-diff', async (event) => {
-    if (!gitLogDetail.value) return
-    const file = gitLogDetail.value.changedFiles.find(f => f.path === event.payload.filePath)
-    if (file) await handleOpenLogFileDiff(file)
-  })
-
   // Request init data from main window
   await tauriEmit('git-log-request-init')
 })
 
 onUnmounted(() => {
   unlistenInit?.()
-  unlistenOpenDiff?.()
 })
 </script>
 
@@ -691,60 +630,4 @@ onUnmounted(() => {
 .tone-info { color: var(--lumina-primary); }
 .tone-muted { color: var(--lumina-text-secondary); }
 
-// Diff viewer styles
-.diff-viewer {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.diff-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--lumina-card-border);
-}
-
-.diff-header__main {
-  h2 {
-    font-size: 13px;
-    margin: 4px 0 0;
-  }
-}
-
-.panel-eyebrow {
-  color: var(--lumina-text-secondary);
-  font-size: 11px;
-}
-
-.diff-loading {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 12px;
-  justify-content: center;
-  padding: 40px;
-}
-
-.diff-content {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
-
-.diff-text {
-  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0;
-  padding: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.panel-shell {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-md);
-  overflow: hidden;
-}
 </style>

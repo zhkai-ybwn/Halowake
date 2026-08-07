@@ -415,14 +415,30 @@ function handleSortChange(event: Event) {
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 46px;
-  padding: 8px 10px;
+  min-height: 42px;
+  padding: 6px 10px;
 }
 
 .project-row-actions {
   display: flex;
   gap: 6px;
   justify-self: end;
+}
+
+@media (hover: hover) {
+  .project-row-actions {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(4px);
+    transition: opacity 140ms ease, transform 140ms ease;
+  }
+
+  .project-row:hover .project-row-actions,
+  .project-row:focus-within .project-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
 }
 
 .row-action {
@@ -535,7 +551,7 @@ function handleSortChange(event: Event) {
 
 .project-row-details {
   border-top: 1px solid var(--lumina-card-border);
-  padding: 10px;
+  padding: 8px 10px;
 }
 
 .project-empty {
@@ -552,7 +568,7 @@ function handleSortChange(event: Event) {
 
 .script-list {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
 
@@ -581,8 +597,12 @@ function handleSortChange(event: Event) {
   }
 
   &.running {
-    background: color-mix(in srgb, var(--lumina-success) 9%, var(--lumina-surface-1));
-    border-color: color-mix(in srgb, var(--lumina-success) 40%, var(--lumina-card-border));
+    background: color-mix(in srgb, var(--lumina-success) 13%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-success) 58%, var(--lumina-card-border));
+
+    strong {
+      color: color-mix(in srgb, var(--lumina-success) 78%, var(--lumina-text));
+    }
   }
 
   &.starting {

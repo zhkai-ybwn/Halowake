@@ -11,10 +11,11 @@ use std::thread;
 use std::os::windows::process::CommandExt;
 
 use crate::git::models::{
-    GitCommandProgressEvent, GitCommandResult, GitCommitChangedFile, GitCommitDetail, GitCommitDetailPayload,
+    GitBranch, GitBranchKind, GitBranchPayload, GitBranchUpstreamPayload, GitClonePayload, GitCommandProgressEvent,
+    GitCommandResult, GitCommitChangedFile, GitCommitDetail, GitCommitDetailPayload, GitRemoteBranchCheckoutPayload,
     GitCommitFileDiffPayload, GitCommitFileDiffResponse, GitCommitPayload, GitConfigureRemotePayload, GitFileActionPayload,
     GitFileDiffResponse, GitFileStat, GitFilesActionPayload, GitLogEntry, GitLogPayload, GitPullPayload,
-    GitPushPayload, GitRebasePayload, GitRepoPayload, GitRepairUpstreamPayload, GitRepositoryState, GitSnapshot,
+    GitMergePayload, GitPushPayload, GitRebasePayload, GitRepoPayload, GitRepairUpstreamPayload, GitRepositoryState, GitSnapshot,
     GitSyncRecommendedAction, GitSyncStatus,
 };
 
@@ -839,6 +840,22 @@ fn has_unmerged_files(repo_path: &str) -> bool {
     })
 }
 
+fn working_tree_is_clean(repo_path: &str) -> Result<bool, String> {
+    let worktree_clean = git_command(repo_path)
+        .args(["diff", "--quiet"])
+        .status()
+        .map_err(|e| format!("检查工作区状态失败: {}", e))?
+        .success();
+    let index_clean = git_command(repo_path)
+        .args(["diff", "--cached", "--quiet"])
+        .status()
+        .map_err(|e| format!("检查暂存区状态失败: {}", e))?
+        .success();
+    let untracked = run_git_raw(repo_path, &["ls-files", "--others", "--exclude-standard"])?;
+
+    Ok(worktree_clean && index_clean && untracked.trim().is_empty())
+}
+
 fn git_path_exists(repo_path: &str, git_path: &str) -> bool {
     let Ok(relative_path) = run_git(repo_path, &["rev-parse", "--git-path", git_path]) else {
         return false;
@@ -959,13 +976,14 @@ pub fn sync_status(payload: &GitRepoPayload) -> Result<GitSyncStatus, String> {
 }
 
 pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
-    let (repo_root, branch, repository_state, status_raw, staged_files_raw, file_stats) = thread::scope(|scope| {
+    let (repo_root, branch, repository_state, status_raw, staged_files_raw, file_stats, branches) = thread::scope(|scope| {
         let repo_root = scope.spawn(|| run_git(repo_path, &["rev-parse", "--show-toplevel"]));
         let branch = scope.spawn(|| run_git(repo_path, &["branch", "--show-current"]));
         let repository_state = scope.spawn(|| load_repository_state(repo_path));
         let status_raw = scope.spawn(|| run_git_raw(repo_path, &["status", "--porcelain=v1", "--untracked-files=all"]));
         let staged_files_raw = scope.spawn(|| run_git(repo_path, &["diff", "--cached", "--name-only"]));
         let file_stats = scope.spawn(|| load_file_stats(repo_path));
+        let branches = scope.spawn(|| load_branches(repo_path));
 
         Ok::<_, String>((
             repo_root.join().map_err(|_| "读取仓库根目录任务异常".to_string())??,
@@ -974,6 +992,7 @@ pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
             status_raw.join().map_err(|_| "读取文件状态任务异常".to_string())??,
             staged_files_raw.join().map_err(|_| "读取暂存文件任务异常".to_string())??,
             file_stats.join().map_err(|_| "读取文件统计任务异常".to_string())??,
+            branches.join().map_err(|_| "读取分支任务异常".to_string())??,
         ))
     })?;
 
@@ -999,6 +1018,7 @@ pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
         // Selected-file prompts load only the necessary diffs on demand.
         staged_diff: String::new(),
         file_stats,
+        branches,
     })
 }
 
@@ -1051,11 +1071,12 @@ fn parse_numstat_line(line: &str) -> Option<GitFileStat> {
     })
 }
 
-pub fn load_file_diff(repo_path: &str, file_path: &str, staged: bool) -> Result<GitFileDiffResponse, String> {
+pub fn load_file_diff(repo_path: &str, file_path: &str, staged: bool, full_context: bool) -> Result<GitFileDiffResponse, String> {
+    let unified = if full_context { "--unified=2147483647" } else { "--unified=3" };
     let args = if staged {
-        vec!["diff", "--cached", "--unified=3", "--no-color", "--", file_path]
+        vec!["diff", "--cached", unified, "--no-color", "--", file_path]
     } else {
-        vec!["diff", "--unified=3", "--no-color", "--", file_path]
+        vec!["diff", unified, "--no-color", "--", file_path]
     };
 
     let diff = run_git_raw(repo_path, &args)?;
@@ -1068,7 +1089,11 @@ pub fn load_file_diff(repo_path: &str, file_path: &str, staged: bool) -> Result<
 }
 
 pub fn load_file_head_diff(payload: &GitFileActionPayload) -> Result<GitFileDiffResponse, String> {
-    let diff = load_selected_file_diff(&payload.repo_path, &payload.file_path)?;
+    let diff = load_selected_file_diff_with_context(
+        &payload.repo_path,
+        &payload.file_path,
+        payload.full_context.unwrap_or(false),
+    )?;
 
     Ok(GitFileDiffResponse {
         file_path: payload.file_path.clone(),
@@ -1078,8 +1103,13 @@ pub fn load_file_head_diff(payload: &GitFileActionPayload) -> Result<GitFileDiff
 }
 
 pub fn load_selected_file_diff(repo_path: &str, file_path: &str) -> Result<String, String> {
-    let unstaged = run_git_raw(repo_path, &["diff", "--unified=3", "--no-color", "--", file_path])?;
-    let staged = run_git_raw(repo_path, &["diff", "--cached", "--unified=3", "--no-color", "--", file_path])?;
+    load_selected_file_diff_with_context(repo_path, file_path, false)
+}
+
+fn load_selected_file_diff_with_context(repo_path: &str, file_path: &str, full_context: bool) -> Result<String, String> {
+    let unified = if full_context { "--unified=2147483647" } else { "--unified=3" };
+    let unstaged = run_git_raw(repo_path, &["diff", unified, "--no-color", "--", file_path])?;
+    let staged = run_git_raw(repo_path, &["diff", "--cached", unified, "--no-color", "--", file_path])?;
     let mut result = String::new();
 
     if !staged.trim().is_empty() {
@@ -1094,20 +1124,20 @@ pub fn load_selected_file_diff(repo_path: &str, file_path: &str) -> Result<Strin
     }
 
     if result.trim().is_empty() {
-        return load_untracked_file_diff(repo_path, file_path);
+        return load_untracked_file_diff(repo_path, file_path, unified);
     }
 
     Ok(result)
 }
 
-fn load_untracked_file_diff(repo_path: &str, file_path: &str) -> Result<String, String> {
+fn load_untracked_file_diff(repo_path: &str, file_path: &str, unified: &str) -> Result<String, String> {
     let output = silent_command("git")
         .args([
             "-c",
             "core.quotePath=false",
             "diff",
             "--no-index",
-            "--unified=3",
+            unified,
             "--no-color",
             "--",
             "/dev/null",
@@ -1315,6 +1345,62 @@ where
 
 pub fn pull_changes(payload: &GitPullPayload) -> Result<GitCommandResult, String> {
     pull_changes_with_progress(payload, |_| {})
+}
+
+pub fn merge_branch(payload: &GitMergePayload) -> Result<GitCommandResult, String> {
+    let source_branch = payload.source_branch.trim();
+    if source_branch.is_empty() {
+        return Err("请选择要合并的分支。".to_string());
+    }
+
+    let state = load_repository_state(&payload.repo_path);
+    if state.merge_in_progress || state.rebase_in_progress || has_unmerged_files(&payload.repo_path) {
+        return Err("当前仓库已有未完成的 merge 或 rebase，请先解决冲突、继续或中止当前操作。".to_string());
+    }
+    if !working_tree_is_clean(&payload.repo_path)? {
+        return Err("合并前请先提交、暂存或还原当前工作区变更，避免覆盖未提交内容。".to_string());
+    }
+
+    let current_branch = run_git(&payload.repo_path, &["branch", "--show-current"])?;
+    if current_branch.trim() == source_branch {
+        return Err("不能将当前分支合并到自身。".to_string());
+    }
+    run_git(&payload.repo_path, &["rev-parse", "--verify", &format!("{}^{{commit}}", source_branch)])
+        .map_err(|_| format!("未找到可合并的分支或提交：{}", source_branch))?;
+
+    let mut args = vec!["merge", "--no-edit"];
+    if payload.no_fast_forward {
+        args.push("--no-ff");
+    }
+    args.push(source_branch);
+    let (success, result) = run_git_capture_status(&payload.repo_path, &args)?;
+
+    if !success {
+        if has_unmerged_files(&payload.repo_path) {
+            return Ok(GitCommandResult {
+                message: "合并已开始，但产生冲突。请解决冲突后标记 resolved，再完成 merge。".to_string(),
+                suggestion: Some("请在冲突列表中打开文件解决冲突，然后点击 Continue merge；如需放弃本次合并，使用 Abort merge。".to_string()),
+                ..result
+            });
+        }
+
+        let suggestion = git_error_suggestion(&result.stderr);
+        return Err(format_command_error(
+            &result.command,
+            &result.stdout,
+            &result.stderr,
+            suggestion.as_deref(),
+        ));
+    }
+
+    Ok(GitCommandResult {
+        message: if result.stdout.trim().is_empty() {
+            "Merge completed".to_string()
+        } else {
+            result.stdout.trim().to_string()
+        },
+        ..result
+    })
 }
 
 pub fn pull_changes_with_progress<F>(payload: &GitPullPayload, mut on_progress: F) -> Result<GitCommandResult, String>
@@ -1638,6 +1724,178 @@ pub fn mark_files_resolved(payload: &GitFilesActionPayload) -> Result<GitCommand
     })
 }
 
+pub fn stage_files(payload: &GitFilesActionPayload) -> Result<GitCommandResult, String> {
+    run_file_index_action(payload, "add", "已暂存文件", |repo_path, file_path| {
+        run_git_capture(repo_path, &["add", "-A", "--", file_path])
+    })
+}
+
+pub fn unstage_files(payload: &GitFilesActionPayload) -> Result<GitCommandResult, String> {
+    run_file_index_action(payload, "restore --staged", "已取消暂存文件", |repo_path, file_path| {
+        run_git_capture(repo_path, &["restore", "--staged", "--", file_path])
+    })
+}
+
+fn run_file_index_action<F>(
+    payload: &GitFilesActionPayload,
+    action: &str,
+    message: &str,
+    mut execute: F,
+) -> Result<GitCommandResult, String>
+where
+    F: FnMut(&str, &str) -> Result<GitCommandResult, String>,
+{
+    let files = payload
+        .file_paths
+        .iter()
+        .map(|file| file.trim())
+        .filter(|file| !file.is_empty())
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return Err(format!("没有可执行 {} 的文件。", action));
+    }
+
+    let mut commands = Vec::new();
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    for file in files {
+        let result = execute(&payload.repo_path, file)?;
+        commands.push(result.command);
+        stdout.push_str(&result.stdout);
+        stderr.push_str(&result.stderr);
+    }
+
+    Ok(GitCommandResult {
+        command: commands.join("\n"),
+        message: message.to_string(),
+        stdout,
+        stderr,
+        suggestion: None,
+    })
+}
+
+pub fn load_branches(repo_path: &str) -> Result<Vec<GitBranch>, String> {
+    let output = run_git_raw(repo_path, &["branch", "--all", "--no-color"])?;
+    let branches = output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let current = line.starts_with('*');
+            let name = line.trim_start_matches('*').trim();
+            if name.is_empty() || name.contains(" -> ") {
+                return None;
+            }
+            let (kind, name) = if let Some(name) = name.strip_prefix("remotes/") {
+                (GitBranchKind::Remote, name)
+            } else {
+                (GitBranchKind::Local, name)
+            };
+            Some(GitBranch {
+                name: name.to_string(),
+                kind,
+                current,
+                upstream: None,
+                upstream_status: None,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    log::info!("Loaded {} branches for {}", branches.len(), repo_path);
+    if branches.is_empty() {
+        log::warn!("Empty branch output for {}: {:?}", repo_path, output);
+    }
+
+    Ok(branches)
+}
+
+pub fn create_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
+    let branch = validate_branch_name(&payload.branch)?;
+    let result = run_git_capture(&payload.repo_path, &["checkout", "-b", branch])?;
+    Ok(GitCommandResult { message: format!("已创建并切换到分支: {}", branch), ..result })
+}
+
+pub fn switch_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
+    let branch = validate_branch_name(&payload.branch)?;
+    let result = run_git_capture(&payload.repo_path, &["checkout", branch])?;
+    Ok(GitCommandResult { message: format!("已切换到分支: {}", branch), ..result })
+}
+
+pub fn checkout_remote_branch(payload: &GitRemoteBranchCheckoutPayload) -> Result<GitCommandResult, String> {
+    let remote_branch = payload.remote_branch.trim();
+    let local_branch = validate_branch_name(&payload.local_branch)?;
+    if !remote_branch.contains('/') || remote_branch.starts_with('-') {
+        return Err("远端分支无效。".to_string());
+    }
+    if run_git(&payload.repo_path, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", local_branch)]).is_ok() {
+        return switch_branch(&GitBranchPayload {
+            repo_path: payload.repo_path.clone(),
+            branch: local_branch.to_string(),
+        });
+    }
+    let result = run_git_capture(
+        &payload.repo_path,
+        &["checkout", "--track", "-b", local_branch, remote_branch],
+    )?;
+    Ok(GitCommandResult {
+        message: format!("已检出远端分支 {} 到本地分支 {}", remote_branch, local_branch),
+        ..result
+    })
+}
+
+pub fn delete_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
+    let branch = validate_branch_name(&payload.branch)?;
+    let current = run_git(&payload.repo_path, &["branch", "--show-current"])?;
+    if current.trim() == branch {
+        return Err("不能删除当前分支。请先切换到其他分支。".to_string());
+    }
+    let result = run_git_capture(&payload.repo_path, &["branch", "-d", branch])?;
+    Ok(GitCommandResult { message: format!("已删除分支: {}", branch), ..result })
+}
+
+pub fn set_branch_upstream(payload: &GitBranchUpstreamPayload) -> Result<GitCommandResult, String> {
+    let branch = validate_branch_name(&payload.branch)?;
+    let result = match payload.upstream.as_deref().map(str::trim).filter(|upstream| !upstream.is_empty()) {
+        Some(upstream) if upstream.contains('/') && !upstream.starts_with('-') => {
+            let option = format!("--set-upstream-to={}", upstream);
+            run_git_capture(&payload.repo_path, &["branch", &option, branch])?
+        }
+        Some(_) => return Err("上游分支无效。".to_string()),
+        None => run_git_capture(&payload.repo_path, &["branch", "--unset-upstream", branch])?,
+    };
+    Ok(GitCommandResult { message: format!("已更新分支 {} 的上游设置", branch), ..result })
+}
+
+pub fn init_repository(repo_path: &str) -> Result<GitCommandResult, String> {
+    let result = run_git_capture(repo_path, &["init"])?;
+    Ok(GitCommandResult { message: "已初始化 Git 仓库".to_string(), ..result })
+}
+
+pub fn clone_repository(payload: &GitClonePayload) -> Result<GitCommandResult, String> {
+    let remote_url = payload.remote_url.trim();
+    let destination = payload.destination_path.trim();
+    if remote_url.is_empty() || destination.is_empty() {
+        return Err("仓库地址和目标目录不能为空。".to_string());
+    }
+    let parent = Path::new(destination)
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| "目标目录无效。".to_string())?;
+    let parent_path = parent.to_string_lossy();
+    let result = run_git_capture(&parent_path, &["clone", remote_url, destination])?;
+    Ok(GitCommandResult { message: format!("已克隆仓库到: {}", destination), ..result })
+}
+
+fn validate_branch_name(branch: &str) -> Result<&str, String> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("分支名不能为空。".to_string());
+    }
+    if branch.starts_with('-') {
+        return Err("分支名不能以连字符开头。".to_string());
+    }
+    Ok(branch)
+}
+
 pub fn revert_file(payload: &GitFileActionPayload) -> Result<GitCommandResult, String> {
     let file_path = payload.file_path.trim();
     if file_path.is_empty() {
@@ -1788,7 +2046,15 @@ pub fn load_git_commit_file_diff(payload: &GitCommitFileDiffPayload) -> Result<G
 
     let diff = run_git_raw(
         &payload.repo_path,
-        &["show", "--format=", "--unified=3", "--no-color", hash, "--", file_path],
+        &[
+            "show",
+            "--format=",
+            if payload.full_context.unwrap_or(false) { "--unified=2147483647" } else { "--unified=3" },
+            "--no-color",
+            hash,
+            "--",
+            file_path,
+        ],
     )?;
 
     Ok(GitCommitFileDiffResponse {
@@ -2105,6 +2371,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         revert_file(&GitFileActionPayload {
             repo_path: repo.to_string_lossy().to_string(),
             file_path: "tracked.txt".to_string(),
+            full_context: None,
         })
         .expect("revert tracked file");
 
@@ -2121,6 +2388,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         revert_file(&GitFileActionPayload {
             repo_path: repo.to_string_lossy().to_string(),
             file_path: "new.txt".to_string(),
+            full_context: None,
         })
         .expect("remove untracked file");
 
@@ -2187,6 +2455,142 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 
         assert!(result.is_err());
         assert_eq!(run_git(&repo.to_string_lossy(), &["diff", "--cached", "--name-only"]).unwrap(), "staged.txt");
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn stages_and_unstages_selected_file() {
+        let repo = temp_repo("stage-unstage");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.email", "lumina@example.test"]);
+        write_file(&repo.join("file.txt"), "initial\n");
+        git(&repo, &["add", "--", "file.txt"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        write_file(&repo.join("file.txt"), "changed\n");
+
+        let payload = GitFilesActionPayload {
+            repo_path: repo.to_string_lossy().to_string(),
+            file_paths: vec!["file.txt".to_string()],
+        };
+        stage_files(&payload).expect("stage file");
+        assert_eq!(run_git(&payload.repo_path, &["diff", "--cached", "--name-only"]).unwrap(), "file.txt");
+
+        unstage_files(&payload).expect("unstage file");
+        assert!(run_git(&payload.repo_path, &["diff", "--cached", "--name-only"]).unwrap().is_empty());
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn manages_branches_and_protects_current_branch() {
+        let repo = temp_repo("branch-management");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.email", "lumina@example.test"]);
+        write_file(&repo.join("file.txt"), "initial\n");
+        git(&repo, &["add", "--", "file.txt"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        let repo_path = repo.to_string_lossy().to_string();
+
+        create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).expect("create branch");
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "feature/test");
+        assert!(load_git_snapshot(&repo_path).unwrap().branches.iter().any(|branch| branch.name == "feature/test"));
+        assert!(delete_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).is_err());
+
+        let main_branch = run_git(&repo_path, &["branch", "--format=%(refname:short)"])
+            .unwrap()
+            .lines()
+            .find(|branch| *branch != "feature/test")
+            .expect("base branch")
+            .to_string();
+        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: main_branch }).expect("switch branch");
+        delete_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).expect("delete branch");
+        assert!(load_branches(&repo_path).unwrap().iter().all(|branch| branch.name != "feature/test"));
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn merges_selected_branch_and_rejects_dirty_worktree() {
+        let repo = temp_repo("merge-branch");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.email", "lumina@example.test"]);
+        write_file(&repo.join("file.txt"), "initial\n");
+        git(&repo, &["add", "--", "file.txt"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        let repo_path = repo.to_string_lossy().to_string();
+        let base_branch = run_git(&repo_path, &["branch", "--show-current"]).expect("base branch");
+
+        git(&repo, &["switch", "-c", "feature/merge"]);
+        write_file(&repo.join("feature.txt"), "feature change\n");
+        git(&repo, &["add", "--", "feature.txt"]);
+        git(&repo, &["commit", "-m", "feature"]);
+        git(&repo, &["switch", &base_branch]);
+
+        merge_branch(&GitMergePayload {
+            repo_path: repo_path.clone(),
+            source_branch: "feature/merge".to_string(),
+            no_fast_forward: false,
+        })
+        .expect("merge feature branch");
+        assert!(run_git(&repo_path, &["merge-base", "--is-ancestor", "feature/merge", "HEAD"]).is_ok());
+
+        git(&repo, &["switch", "-c", "feature/no-ff"]);
+        write_file(&repo.join("no-ff.txt"), "no fast forward\n");
+        git(&repo, &["add", "--", "no-ff.txt"]);
+        git(&repo, &["commit", "-m", "no fast forward"]);
+        git(&repo, &["switch", &base_branch]);
+        merge_branch(&GitMergePayload {
+            repo_path: repo_path.clone(),
+            source_branch: "feature/no-ff".to_string(),
+            no_fast_forward: true,
+        })
+        .expect("merge feature branch without fast-forward");
+        assert_eq!(
+            run_git(&repo_path, &["rev-list", "--parents", "-n", "1", "HEAD"])
+                .expect("merge parents")
+                .split_whitespace()
+                .count(),
+            3,
+        );
+
+        write_file(&repo.join("file.txt"), "uncommitted\n");
+        let error = merge_branch(&GitMergePayload {
+            repo_path,
+            source_branch: "feature/merge".to_string(),
+            no_fast_forward: true,
+        })
+        .expect_err("reject dirty worktree");
+        assert!(error.contains("合并前请先提交"));
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn lists_remote_branches_and_checks_them_out_with_tracking() {
+        let repo = temp_repo("remote-branch-checkout");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.email", "lumina@example.test"]);
+        write_file(&repo.join("file.txt"), "initial\n");
+        git(&repo, &["add", "--", "file.txt"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        let repo_path = repo.to_string_lossy().to_string();
+        git(&repo, &["remote", "add", "origin", "https://example.test/repo.git"]);
+        git(&repo, &["update-ref", "refs/remotes/origin/release", "HEAD"]);
+
+        let branches = load_branches(&repo_path).expect("load branches");
+        assert!(branches.iter().any(|branch| branch.name == "origin/release" && matches!(branch.kind, GitBranchKind::Remote)));
+
+        checkout_remote_branch(&GitRemoteBranchCheckoutPayload {
+            repo_path: repo_path.clone(),
+            remote_branch: "origin/release".to_string(),
+            local_branch: "release".to_string(),
+        })
+        .expect("checkout tracked remote branch");
+
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release");
+        assert_eq!(run_git(&repo_path, &["config", "branch.release.remote"]).unwrap(), "origin");
+        assert_eq!(run_git(&repo_path, &["config", "branch.release.merge"]).unwrap(), "refs/heads/release");
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 }

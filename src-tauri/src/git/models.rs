@@ -11,6 +11,7 @@ pub struct GitSnapshot {
     pub staged_files: Vec<String>,
     pub staged_diff: String,
     pub file_stats: Vec<GitFileStat>,
+    pub branches: Vec<GitBranch>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +42,7 @@ pub struct GitFileDiffPayload {
     pub repo_path: String,
     pub file_path: String,
     pub staged: bool,
+    pub full_context: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +98,7 @@ pub struct GitRepairUpstreamPayload {
 pub struct GitFileActionPayload {
     pub repo_path: String,
     pub file_path: String,
+    pub full_context: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +106,61 @@ pub struct GitFileActionPayload {
 pub struct GitFilesActionPayload {
     pub repo_path: String,
     pub file_paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchPayload {
+    pub repo_path: String,
+    pub branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergePayload {
+    pub repo_path: String,
+    pub source_branch: String,
+    pub no_fast_forward: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRemoteBranchCheckoutPayload {
+    pub repo_path: String,
+    pub remote_branch: String,
+    pub local_branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchUpstreamPayload {
+    pub repo_path: String,
+    pub branch: String,
+    pub upstream: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitClonePayload {
+    pub remote_url: String,
+    pub destination_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub kind: GitBranchKind,
+    pub current: bool,
+    pub upstream: Option<String>,
+    pub upstream_status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitBranchKind {
+    Local,
+    Remote,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +189,7 @@ pub struct GitCommitFileDiffPayload {
     pub repo_path: String,
     pub hash: String,
     pub file_path: String,
+    pub full_context: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -244,7 +303,31 @@ pub struct GitCommitPromptPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitReviewAttentionPayload {
+    pub repo_path: String,
+    pub selected_files: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitReviewAttention {
+    pub path: String,
+    pub score: i32,
+    pub categories: Vec<String>,
+    pub eligible: bool,
+    pub skipped: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitReviewAttentionResult {
+    pub files: Vec<GitReviewAttention>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitPromptAiPayload {
+    pub request_id: String,
     pub prompt: String,
     pub model: AiModelConfig,
 }

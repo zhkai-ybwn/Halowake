@@ -48,6 +48,8 @@ impl Drop for ProjectProcessState {
 struct ManagedProcess {
     child: Arc<Mutex<Child>>,
     logs: Arc<Mutex<VecDeque<ProjectProcessLogLine>>>,
+    detected_ports: Arc<Mutex<Vec<u16>>>,
+    detected_urls: Arc<Mutex<Vec<String>>>,
     status: Arc<Mutex<ProjectProcessStatus>>,
     meta: ProjectProcessMeta,
 }
@@ -269,11 +271,7 @@ fn start_process(
         .unwrap_or_else(|| display_name_from_path(&payload.project_path));
 
     let mut command = package_manager_process_command(&package_manager, &script.name);
-    command
-        .current_dir(&payload.project_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    configure_managed_command(&mut command, &payload.project_path);
 
     let mut child = command
         .spawn()
@@ -283,6 +281,8 @@ fn start_process(
     let stderr = child.stderr.take();
     let child = Arc::new(Mutex::new(child));
     let logs = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_LIMIT)));
+    let detected_ports = Arc::new(Mutex::new(Vec::new()));
+    let detected_urls = Arc::new(Mutex::new(Vec::new()));
     let status = Arc::new(Mutex::new(ProjectProcessStatus {
         state: "running".to_string(),
         exit_code: None,
@@ -301,16 +301,30 @@ fn start_process(
     };
 
     if let Some(stdout) = stdout {
-        spawn_log_reader(stdout, "stdout", Arc::clone(&logs));
+        spawn_log_reader(
+            stdout,
+            "stdout",
+            Arc::clone(&logs),
+            Arc::clone(&detected_ports),
+            Arc::clone(&detected_urls),
+        );
     }
     if let Some(stderr) = stderr {
-        spawn_log_reader(stderr, "stderr", Arc::clone(&logs));
+        spawn_log_reader(
+            stderr,
+            "stderr",
+            Arc::clone(&logs),
+            Arc::clone(&detected_ports),
+            Arc::clone(&detected_urls),
+        );
     }
     spawn_waiter(Arc::clone(&child), Arc::clone(&status));
 
     let managed = ManagedProcess {
         child,
         logs,
+        detected_ports,
+        detected_urls,
         status,
         meta,
     };
@@ -388,14 +402,8 @@ fn stop_process(process: &ManagedProcess) -> Result<(), String> {
 
 fn snapshot_process(process: &ManagedProcess) -> ProjectProcessSnapshot {
     let logs = process.logs.lock().ok();
-    let ports = logs
-        .as_ref()
-        .map(|lines| detect_ports(lines))
-        .unwrap_or_default();
-    let urls = logs
-        .as_ref()
-        .map(|lines| detect_urls(lines))
-        .unwrap_or_default();
+    let ports = process.detected_ports.lock().map(|ports| ports.clone()).unwrap_or_default();
+    let urls = process.detected_urls.lock().map(|urls| urls.clone()).unwrap_or_default();
     let mut status = process_status(process);
     if status.state == "exited" && ports.iter().any(|port| is_port_listening(*port)) {
         status.state = "running".to_string();
@@ -426,15 +434,8 @@ fn snapshot_process(process: &ManagedProcess) -> ProjectProcessSnapshot {
 
 fn detect_ports(lines: &VecDeque<ProjectProcessLogLine>) -> Vec<u16> {
     let mut ports = Vec::new();
-    for line in lines.iter().rev().take(80) {
-        let text = strip_ansi(&line.text);
-        for token in text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != ':' && ch != '.' && ch != '/') {
-            if let Some(port) = parse_port_token(token) {
-                if !ports.contains(&port) {
-                    ports.push(port);
-                }
-            }
-        }
+    for line in lines.iter().rev() {
+        append_detected_ports(&line.text, &mut ports);
         if ports.len() >= 4 {
             break;
         }
@@ -445,23 +446,38 @@ fn detect_ports(lines: &VecDeque<ProjectProcessLogLine>) -> Vec<u16> {
 
 fn detect_urls(lines: &VecDeque<ProjectProcessLogLine>) -> Vec<String> {
     let mut urls = Vec::new();
-    for line in lines.iter().rev().take(80) {
-        let text = strip_ansi(&line.text);
-        for token in text.split_whitespace() {
-            let candidate = token
-                .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | '"' | '\'' | '|' | '`' | '#' | '!'))
-                .trim_end_matches('.')
-                .trim_end_matches(':')
-                .trim_end_matches(',');
-            if (candidate.starts_with("http://") || candidate.starts_with("https://"))
-                && is_localhost_url(candidate)
-                && !urls.iter().any(|url| url == candidate)
-            {
-                urls.push(candidate.to_string());
+    for line in lines.iter().rev() {
+        append_detected_urls(&line.text, &mut urls);
+    }
+    urls
+}
+
+fn append_detected_ports(text: &str, ports: &mut Vec<u16>) {
+    let text = strip_ansi(text);
+    for token in text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != ':' && ch != '.' && ch != '/') {
+        if let Some(port) = parse_port_token(token) {
+            if !ports.contains(&port) {
+                ports.push(port);
             }
         }
     }
-    urls
+}
+
+fn append_detected_urls(text: &str, urls: &mut Vec<String>) {
+    let text = strip_ansi(text);
+    for token in text.split_whitespace() {
+        let candidate = token
+            .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | '"' | '\'' | '|' | '`' | '#' | '!'))
+            .trim_end_matches('.')
+            .trim_end_matches(':')
+            .trim_end_matches(',');
+        if (candidate.starts_with("http://") || candidate.starts_with("https://"))
+            && is_localhost_url(candidate)
+            && !urls.iter().any(|url| url == candidate)
+        {
+            urls.push(candidate.to_string());
+        }
+    }
 }
 
 fn is_localhost_url(url: &str) -> bool {
@@ -512,9 +528,9 @@ fn is_private_ip(host: &str) -> bool {
 
 fn process_ports(process: &ManagedProcess) -> Vec<u16> {
     process
-        .logs
+        .detected_ports
         .lock()
-        .map(|lines| detect_ports(&lines))
+        .map(|ports| ports.clone())
         .unwrap_or_default()
 }
 
@@ -559,6 +575,8 @@ fn clone_process(process: &ManagedProcess) -> ManagedProcess {
     ManagedProcess {
         child: Arc::clone(&process.child),
         logs: Arc::clone(&process.logs),
+        detected_ports: Arc::clone(&process.detected_ports),
+        detected_urls: Arc::clone(&process.detected_urls),
         status: Arc::clone(&process.status),
         meta: process.meta.clone(),
     }
@@ -587,7 +605,13 @@ fn prune_finished_processes(processes: &mut HashMap<String, ManagedProcess>) {
     }
 }
 
-fn spawn_log_reader<R>(reader: R, stream: &'static str, logs: Arc<Mutex<VecDeque<ProjectProcessLogLine>>>)
+fn spawn_log_reader<R>(
+    reader: R,
+    stream: &'static str,
+    logs: Arc<Mutex<VecDeque<ProjectProcessLogLine>>>,
+    detected_ports: Arc<Mutex<Vec<u16>>>,
+    detected_urls: Arc<Mutex<Vec<String>>>,
+)
 where
     R: std::io::Read + Send + 'static,
 {
@@ -596,6 +620,8 @@ where
         for line in reader.lines().map_while(Result::ok) {
             push_log(
                 &logs,
+                &detected_ports,
+                &detected_urls,
                 ProjectProcessLogLine {
                     stream: stream.to_string(),
                     text: line,
@@ -626,7 +652,19 @@ fn spawn_waiter(child: Arc<Mutex<Child>>, status: Arc<Mutex<ProjectProcessStatus
     });
 }
 
-fn push_log(logs: &Arc<Mutex<VecDeque<ProjectProcessLogLine>>>, line: ProjectProcessLogLine) {
+fn push_log(
+    logs: &Arc<Mutex<VecDeque<ProjectProcessLogLine>>>,
+    detected_ports: &Arc<Mutex<Vec<u16>>>,
+    detected_urls: &Arc<Mutex<Vec<String>>>,
+    line: ProjectProcessLogLine,
+) {
+    if let Ok(mut ports) = detected_ports.lock() {
+        append_detected_ports(&line.text, &mut ports);
+        ports.sort_unstable();
+    }
+    if let Ok(mut urls) = detected_urls.lock() {
+        append_detected_urls(&line.text, &mut urls);
+    }
     if let Ok(mut logs) = logs.lock() {
         if logs.len() >= LOG_LIMIT {
             logs.pop_front();
@@ -639,6 +677,18 @@ fn silent_command(program: &str) -> Command {
     let mut command = Command::new(program);
     hide_command_window(&mut command);
     command
+}
+
+fn configure_managed_command(command: &mut Command, project_path: &str) {
+    command
+        .current_dir(project_path)
+        // Do not let npx download missing packages from a managed script. Its installer
+        // can spawn an untracked Windows Terminal window; dependencies should be installed
+        // explicitly in the project before DevDock starts the script.
+        .env("npm_config_yes", "false")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 }
 
 #[cfg(windows)]
@@ -839,6 +889,62 @@ mod tests {
     }
 
     #[test]
+    fn detects_angular_url_before_later_log_output() {
+        let mut lines = VecDeque::from([ProjectProcessLogLine {
+            stream: "stdout".to_string(),
+            text: "Angular Live Development Server is listening on 0.0.0.0:4300, open your browser on http://localhost:4300/".to_string(),
+            timestamp: 1,
+        }]);
+        for index in 2..=102 {
+            lines.push_back(ProjectProcessLogLine {
+                stream: "stdout".to_string(),
+                text: format!("later application log {index}"),
+                timestamp: index,
+            });
+        }
+
+        assert_eq!(detect_ports(&lines), vec![4300]);
+        assert_eq!(detect_urls(&lines), vec!["http://localhost:4300/".to_string()]);
+    }
+
+    #[test]
+    fn keeps_detected_endpoints_after_startup_log_is_evicted() {
+        let logs = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_LIMIT)));
+        let detected_ports = Arc::new(Mutex::new(Vec::new()));
+        let detected_urls = Arc::new(Mutex::new(Vec::new()));
+
+        push_log(
+            &logs,
+            &detected_ports,
+            &detected_urls,
+            ProjectProcessLogLine {
+                stream: "stdout".to_string(),
+                text: "Local: http://localhost:4300/".to_string(),
+                timestamp: 1,
+            },
+        );
+        for index in 0..LOG_LIMIT {
+            push_log(
+                &logs,
+                &detected_ports,
+                &detected_urls,
+                ProjectProcessLogLine {
+                    stream: "stdout".to_string(),
+                    text: format!("later application log {index}"),
+                    timestamp: index as u128 + 2,
+                },
+            );
+        }
+
+        assert!(detect_urls(&logs.lock().unwrap()).is_empty());
+        assert_eq!(*detected_ports.lock().unwrap(), vec![4300]);
+        assert_eq!(
+            *detected_urls.lock().unwrap(),
+            vec!["http://localhost:4300/".to_string()]
+        );
+    }
+
+    #[test]
     fn package_manager_command_uses_hidden_shell_on_windows() {
         let command = package_manager_process_command("corepack pnpm", "dev");
 
@@ -861,6 +967,18 @@ mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(args, vec!["pnpm", "run", "dev"]);
         }
+    }
+
+    #[test]
+    fn managed_command_disables_npx_temporary_installs() {
+        let mut command = Command::new("npm");
+        configure_managed_command(&mut command, ".");
+
+        let install_setting = command
+            .get_envs()
+            .find_map(|(key, value)| (key == "npm_config_yes").then_some(value))
+            .flatten();
+        assert_eq!(install_setting, Some(std::ffi::OsStr::new("false")));
     }
 
     #[cfg(windows)]
@@ -893,6 +1011,8 @@ mod tests {
         let process = ManagedProcess {
             child: Arc::new(Mutex::new(child)),
             logs: Arc::new(Mutex::new(VecDeque::new())),
+            detected_ports: Arc::new(Mutex::new(Vec::new())),
+            detected_urls: Arc::new(Mutex::new(Vec::new())),
             status: Arc::new(Mutex::new(ProjectProcessStatus {
                 state: "running".to_string(),
                 exit_code: None,

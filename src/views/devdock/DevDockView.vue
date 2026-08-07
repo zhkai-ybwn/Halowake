@@ -4,7 +4,8 @@
       <WorkbenchIdentity :label="t('devdock.overview.eyebrow')" :value="t('devdock.overview.title')" />
       <div class="toolbar-tags" :aria-label="t('devdock.projects.summary', { count: projects.length, scanned: scannedCount })">
         <WorkbenchTag :label="t('devdock.projects.totalLabel')" :value="projects.length" />
-        <WorkbenchTag :label="t('devdock.projects.scannedLabel')" :value="scannedCount" tone="primary" />
+        <WorkbenchTag v-if="scannedCount !== projects.length" :label="t('devdock.projects.scannedLabel')" :value="scannedCount" tone="primary" />
+        <WorkbenchTag v-if="processes.length" :label="t('devdock.processes.running')" :value="processes.length" tone="success" />
       </div>
 
       <template #actions>

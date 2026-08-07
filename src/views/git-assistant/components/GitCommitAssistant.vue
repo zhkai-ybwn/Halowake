@@ -84,9 +84,9 @@ const { t } = useLocale()
 
 .commit-panel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-rows: auto auto auto auto;
-  padding: 14px 14px 12px;
+  padding: 12px;
 
   > * {
     position: relative;
@@ -190,7 +190,7 @@ h3 {
 }
 
 .field-textarea {
-  min-height: 104px;
+  min-height: 82px;
   resize: vertical;
 }
 

@@ -77,11 +77,11 @@ export function useGitSnapshot() {
     persistRecentRepos()
   }
 
-  async function loadSnapshotByPath(path: string) {
+  async function loadSnapshotByPath(path: string, silent = false) {
     if (!path) return
 
     const requestId = ++snapshotRequestId
-    loading.value = true
+    if (!silent) loading.value = true
     error.value = ''
 
     try {
@@ -107,7 +107,7 @@ export function useGitSnapshot() {
         error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
       }
     } finally {
-      if (requestId === snapshotRequestId) {
+      if (!silent && requestId === snapshotRequestId) {
         loading.value = false
       }
     }

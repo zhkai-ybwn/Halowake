@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
 import {
   buildGitCommitPrompt,
+  cancelGitAiAnalysis,
   generateGitAiAnalysisFromPrompt,
   type GitCommitPromptPreview,
 } from '@/services/git/git-ai-service'
@@ -30,7 +31,7 @@ export function useGitCommit(
   getDisplayRepoPath: () => string,
   getSnapshot: () => { branch: string } | null,
   getSelectedFileViews: () => GitAssistantFileView[],
-  getSelectedConflictedFiles: () => GitAssistantFileView[],
+  getConflictedFiles: () => GitAssistantFileView[],
   getReviewSelectedRaws: () => string[],
   setError: (msg: string) => void,
   startGitCommand: (title: string, phase: string, nextAction?: '' | 'push' | 'pull') => void,
@@ -60,6 +61,8 @@ export function useGitCommit(
     localStorage.setItem('lumina.commitLanguage', val)
   })
   let promptProgressTimers: number[] = []
+  let activeAiRequestId = ''
+  let aiGenerationCancelled = false
 
   function createHistoryId() {
     return `commit-message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -163,7 +166,7 @@ export function useGitCommit(
     const displayRepoPath = getDisplayRepoPath()
     if (!snapshot || !displayRepoPath) return
 
-    const conflictedFiles = getSelectedConflictedFiles()
+    const conflictedFiles = getConflictedFiles()
     if (conflictedFiles.length) {
       setError(t('gitAssistant.conflict.resolveBeforeCommit'))
       return
@@ -177,6 +180,8 @@ export function useGitCommit(
     }
 
     aiLoading.value = true
+    aiGenerationCancelled = false
+    activeAiRequestId = `commit-message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     setError('')
     startPromptProgress()
 
@@ -188,6 +193,8 @@ export function useGitCommit(
         language: commitLanguage.value,
       })
 
+      if (aiGenerationCancelled) return
+
       if (autoSendPromptToApi.value) {
         const model = aiSettings.getModelForTask('commit-message')
         if (!model) {
@@ -195,9 +202,11 @@ export function useGitCommit(
         }
         setPromptProgressStep('gitAssistant.ai.progressCallingApi')
         const result = await generateGitAiAnalysisFromPrompt({
+          requestId: activeAiRequestId,
           prompt: promptPreview.value.prompt,
           model,
         })
+        if (aiGenerationCancelled) return
         commitTitle.value = result.title
         commitBody.value = result.body
         saveCommitMessageHistory('ai')
@@ -205,11 +214,27 @@ export function useGitCommit(
 
       promptDrawerOpen.value = true
     } catch (err) {
-      console.error(err)
-      setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+      const cancelled = aiGenerationCancelled || (err instanceof Error && err.message.includes('AI_GENERATION_CANCELLED'))
+      if (!cancelled) {
+        console.error(err)
+        setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+      }
     } finally {
       aiLoading.value = false
+      activeAiRequestId = ''
       stopPromptProgress()
+    }
+  }
+
+  async function handleCancelAiAnalysis() {
+    if (!aiLoading.value) return
+    aiGenerationCancelled = true
+    setPromptProgressStep('gitAssistant.ai.progressStopping')
+    if (!activeAiRequestId) return
+    try {
+      await cancelGitAiAnalysis(activeAiRequestId)
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -217,7 +242,7 @@ export function useGitCommit(
     const displayRepoPath = getDisplayRepoPath()
     if (!displayRepoPath || !commitTitle.value.trim()) return
 
-    const conflictedFiles = getSelectedConflictedFiles()
+    const conflictedFiles = getConflictedFiles()
     if (conflictedFiles.length) {
       setError(t('gitAssistant.conflict.resolveBeforeCommit'))
       return
@@ -273,6 +298,7 @@ export function useGitCommit(
     saveCommitMessageHistory,
     restoreCommitMessage,
     handleGenerateAiAnalysis,
+    handleCancelAiAnalysis,
     handleCommit,
   }
 }

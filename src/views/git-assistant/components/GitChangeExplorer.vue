@@ -37,6 +37,34 @@
       <button type="button" @click="$emit('set-review-selection', visibleRaws)">
         {{ t('gitAssistant.files.filters.files') }}
       </button>
+      <div class="review-score-action">
+        <div
+          class="review-score-progress"
+          :class="{ 'is-hidden': !reviewScoring }"
+          :aria-hidden="!reviewScoring"
+          role="status"
+        >
+          <span>{{ reviewProgressText }}</span>
+          <i><b :style="{ width: `${reviewProgressPercent}%` }"></b></i>
+        </div>
+        <span class="review-score-help" tabindex="0" :aria-label="t('gitAssistant.files.scoreHelpLabel')">
+          ?
+          <span class="review-score-help__popover" role="tooltip">{{ t('gitAssistant.files.scoreNotice') }}</span>
+        </span>
+        <button
+          class="review-score-button"
+          :class="{ 'is-running': reviewScoring }"
+          type="button"
+          :disabled="!hasSnapshot || loading || reviewScoring || !totalCount"
+          @click="$emit('request-review-score')"
+        >
+          {{ reviewScoring
+            ? t('gitAssistant.files.scoring')
+            : hasReviewScores
+              ? t('gitAssistant.files.rescore')
+              : t('gitAssistant.files.scoreChanges') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="!hasSnapshot && !loading" class="panel-empty">
@@ -107,7 +135,18 @@
         </div>
         <div class="line-cell added-lines">{{ formatLineCount(file.addedLines) }}</div>
         <div class="line-cell removed-lines">{{ formatLineCount(file.removedLines) }}</div>
-        <div class="score-cell">{{ file.score }}</div>
+        <div class="score-cell">{{ file.score ?? '-' }}</div>
+        <div class="review-reason-cell">
+          <span
+            v-for="category in file.scoreCategories.slice(0, 2)"
+            :key="category"
+            class="review-category"
+            :class="`tone-${reviewCategoryTone(category)}`"
+          >
+            {{ t(`gitAssistant.files.reviewCategories.${category}`) }}
+          </span>
+          <span v-if="!file.scoreCategories.length">-</span>
+        </div>
       </div>
     </div>
 
@@ -147,6 +186,14 @@ const props = defineProps<{
   totalCount: number
   activeFileRaw: string | null
   reviewSelectedRaws: string[]
+  reviewScoring: boolean
+  hasReviewScores: boolean
+  reviewScoreProgress: {
+    completed: number
+    total: number
+    phase: string
+    filePath: string
+  }
 }>()
 
 const emit = defineEmits<{
@@ -156,19 +203,57 @@ const emit = defineEmits<{
   (e: 'select-file', raw: string): void
   (e: 'open-diff', raw: string): void
   (e: 'request-refresh'): void
-  (e: 'file-action', payload: { action: 'open-diff' | 'diff-previous' | 'file-history' | 'open-external' | 'mark-resolved' | 'revert'; raw: string }): void
+  (e: 'file-action', payload: { action: 'open-diff' | 'diff-previous' | 'file-history' | 'open-external' | 'mark-resolved' | 'revert' | 'stage' | 'unstage'; raw: string }): void
   (e: 'toggle-review-selection', payload: { raw: string; checked: boolean }): void
   (e: 'set-review-selection', raws: string[]): void
+  (e: 'request-review-score'): void
 }>()
 
 const statusMeta = STATUS_META
 const { t } = useLocale()
+const reviewCategoryTones: Record<string, string> = {
+  security: 'danger',
+  data: 'warning',
+  api: 'info',
+  logic: 'warning',
+  types: 'info',
+  config: 'muted',
+  markup: 'info',
+  style: 'muted',
+  test: 'success',
+  i18n: 'muted',
+  resource: 'muted',
+  dependency: 'muted',
+  generated: 'muted',
+  docs: 'muted',
+}
+
+function reviewCategoryTone(category: string) {
+  return reviewCategoryTones[category] ?? 'muted'
+}
 
 const visibleFiles = computed(() => props.groups.flatMap(group => group.files))
 const visibleRaws = computed(() => visibleFiles.value.map(file => file.raw))
 const selectedRawSet = computed(() => new Set(props.reviewSelectedRaws))
 const selectedVisibleCount = computed(() => visibleRaws.value.filter(raw => selectedRawSet.value.has(raw)).length)
 const allVisibleSelected = computed(() => visibleRaws.value.length > 0 && selectedVisibleCount.value === visibleRaws.value.length)
+const reviewProgressPercent = computed(() => {
+  if (!props.reviewScoreProgress.total) return 4
+  return Math.max(4, Math.round((props.reviewScoreProgress.completed / props.reviewScoreProgress.total) * 100))
+})
+const reviewProgressText = computed(() => {
+  const progress = props.reviewScoreProgress
+  if (progress.phase === 'profile') return t('gitAssistant.files.scoreProgressProfile')
+  if (progress.phase === 'complete') return t('gitAssistant.files.scoreProgressComplete')
+  if (progress.filePath) {
+    return t('gitAssistant.files.scoreProgressFile', {
+      completed: progress.completed,
+      total: progress.total,
+      file: progress.filePath.split(/[\\/]/).pop() || progress.filePath,
+    })
+  }
+  return t('gitAssistant.files.scoreProgressPreparing')
+})
 const partiallyVisibleSelected = computed(() => selectedVisibleCount.value > 0 && !allVisibleSelected.value)
 const unversionedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'untracked').map(file => file.raw))
 const versionedRaws = computed(() => visibleFiles.value.filter(file => file.type !== 'untracked').map(file => file.raw))
@@ -190,6 +275,7 @@ const columnWidths = reactive({
   added: 112,
   removed: 118,
   score: 70,
+  reason: 340,
 })
 
 const resizableColumns = [
@@ -199,15 +285,30 @@ const resizableColumns = [
   { key: 'added', labelKey: 'gitAssistant.files.tableAdded' },
   { key: 'removed', labelKey: 'gitAssistant.files.tableRemoved' },
   { key: 'score', labelKey: 'gitAssistant.files.tableScore' },
+  { key: 'reason', labelKey: 'gitAssistant.files.tableReviewReason' },
 ] as const
 
 type ResizableColumnKey = keyof typeof columnWidths
 
 const gridStyle = computed(() => ({
-  gridTemplateColumns: `34px minmax(160px, ${columnWidths.path}px) ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px`,
+  gridTemplateColumns: `34px minmax(160px, ${columnWidths.path}px) ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px minmax(220px, ${columnWidths.reason}px)`,
 }))
 const contextFile = computed(() => visibleFiles.value.find(file => file.raw === contextFileRaw.value) ?? null)
 const contextMenuOptions = computed(() => [
+  {
+    label: t('gitAssistant.files.menu.stage'),
+    key: 'stage',
+    disabled: !contextFile.value?.unstaged,
+  },
+  {
+    label: t('gitAssistant.files.menu.unstage'),
+    key: 'unstage',
+    disabled: !contextFile.value?.staged,
+  },
+  {
+    type: 'divider',
+    key: 'divider-stage',
+  },
   {
     label: t('gitAssistant.files.menu.openDiff'),
     key: 'open-diff',
@@ -312,7 +413,7 @@ function handleContextMenuSelect(key: string | number) {
     return
   }
 
-  if (key === 'open-diff' || key === 'diff-previous' || key === 'file-history' || key === 'open-external' || key === 'mark-resolved' || key === 'revert') {
+  if (key === 'open-diff' || key === 'diff-previous' || key === 'file-history' || key === 'open-external' || key === 'mark-resolved' || key === 'revert' || key === 'stage' || key === 'unstage') {
     emit('file-action', { action: key, raw: file.raw })
   }
 }
@@ -390,6 +491,140 @@ onUnmounted(stopColumnResize)
       border-color: var(--lumina-card-border);
       color: var(--lumina-text);
     }
+
+    &:disabled {
+      color: var(--lumina-text-secondary);
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+  }
+}
+
+.check-toolbar__separator {
+  background: var(--lumina-card-border);
+  height: 16px;
+  margin: 0 2px;
+  width: 1px;
+}
+
+.review-score-action {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.review-score-progress {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  width: 248px;
+
+  &.is-hidden {
+    visibility: hidden;
+  }
+
+  span {
+    flex: 1;
+    font-size: 10px;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  i {
+    background: color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
+    border-radius: 999px;
+    display: block;
+    height: 3px;
+    overflow: hidden;
+    width: 92px;
+  }
+
+  b {
+    background: var(--lumina-primary);
+    border-radius: inherit;
+    display: block;
+    height: 100%;
+    transition: width 160ms ease;
+  }
+}
+
+.review-score-help {
+  align-items: center;
+  border: 1px solid var(--lumina-card-border);
+  border-radius: 50%;
+  color: var(--lumina-text-secondary);
+  cursor: help;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px !important;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  position: relative;
+  width: 18px;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--lumina-primary);
+    color: var(--lumina-primary);
+    outline: none;
+  }
+}
+
+.review-score-help__popover {
+  background: var(--lumina-surface-1);
+  border: 1px solid var(--lumina-card-border);
+  border-radius: 8px;
+  bottom: calc(100% + 8px);
+  box-shadow: var(--lumina-shadow-md);
+  color: var(--lumina-text) !important;
+  font-size: 11px !important;
+  font-weight: 500;
+  line-height: 1.55;
+  opacity: 0;
+  padding: 9px 11px;
+  pointer-events: none;
+  position: absolute;
+  right: -44px;
+  text-align: left;
+  transform: translateY(3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  visibility: hidden;
+  white-space: normal;
+  width: 300px;
+  z-index: 8;
+}
+
+.review-score-help:hover .review-score-help__popover,
+.review-score-help:focus-visible .review-score-help__popover {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.check-toolbar .review-score-button {
+  background: var(--lumina-primary);
+  border-color: var(--lumina-primary);
+  color: var(--lumina-primary-contrast, #fff);
+  flex: 0 0 auto;
+  padding: 0 11px;
+
+  &:hover:not(:disabled) {
+    background: var(--lumina-primary-hover, var(--lumina-primary));
+    border-color: var(--lumina-primary-hover, var(--lumina-primary));
+    color: var(--lumina-primary-contrast, #fff);
+  }
+
+  &.is-running:disabled {
+    background: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
+    color: var(--lumina-primary-contrast, #fff);
+    cursor: wait;
+    opacity: 1;
   }
 }
 
@@ -499,7 +734,8 @@ onUnmounted(stopColumnResize)
 .extension-cell,
 .status-cell,
 .line-cell,
-.score-cell {
+.score-cell,
+.review-reason-cell {
   align-items: center;
   border-right: 1px solid color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
   display: flex;
@@ -543,6 +779,28 @@ onUnmounted(stopColumnResize)
 .score-cell {
   color: var(--lumina-text-secondary);
   justify-content: flex-end;
+}
+
+.review-reason-cell {
+  align-items: center;
+  color: var(--lumina-text-secondary);
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-category {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  line-height: 18px;
+  padding: 0 7px;
 }
 
 .attention-dot {

@@ -161,8 +161,8 @@ const rememberChoice = ref(false)
 const preferencesStore = usePreferencesStore()
 
 const navItems = computed(() => [
-  { route: 'git-assistant', label: t('workbench.git'), icon: 'solar:code-square-linear' },
   { route: 'devdock', label: t('workbench.devdock'), icon: 'solar:folder-linear' },
+  { route: 'git-assistant', label: t('workbench.git'), icon: 'solar:code-square-linear' },
 ])
 
 const windowTitle = computed(() => {
@@ -194,7 +194,7 @@ onUnmounted(() => {
 
 function toggleSettings() {
   if (route.name === 'settings') {
-    router.push({ name: 'git-assistant' })
+    router.push({ name: 'devdock' })
     return
   }
   router.push({ name: 'settings' })

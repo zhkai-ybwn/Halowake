@@ -49,8 +49,13 @@ export async function buildGitCommitPrompt(payload: {
 }
 
 export async function generateGitAiAnalysisFromPrompt(payload: {
+  requestId: string
   prompt: string
   model: AiModelConfig
 }): Promise<GitAiAnalysis> {
   return invoke<GitAiAnalysis>('generate_git_ai_analysis_from_prompt', { payload })
+}
+
+export async function cancelGitAiAnalysis(requestId: string): Promise<boolean> {
+  return invoke<boolean>('cancel_git_ai_analysis', { payload: { requestId } })
 }
