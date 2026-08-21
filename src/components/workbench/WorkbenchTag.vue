@@ -24,15 +24,15 @@ const toneClass = computed(() => `tone-${props.tone}`)
 .workbench-tag {
   align-items: center;
   background: color-mix(in srgb, var(--lumina-surface-3) 82%, transparent);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-sm);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-xs);
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 11px;
   gap: 8px;
-  height: 28px;
+  height: 24px;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0 8px;
   white-space: nowrap;
 
   span {

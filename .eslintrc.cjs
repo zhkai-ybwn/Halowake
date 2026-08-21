@@ -5,10 +5,10 @@ module.exports = {
     'eslint:recommended',
     'plugin:vue/vue3-recommended',
     '@vue/eslint-config-typescript',
-    '@vue/eslint-config-prettier'
+    '@vue/eslint-config-prettier',
   ],
   rules: {
     'vue/multi-word-component-names': 'off',
-    'vue/no-v-html': 'off'
-  }
+    'vue/no-v-html': 'off',
+  },
 }

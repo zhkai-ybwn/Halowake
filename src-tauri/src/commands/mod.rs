@@ -1,4 +1,13 @@
 pub mod ai_settings;
+pub mod codex_report;
 pub mod git;
 pub mod project;
+pub mod project_config;
+pub mod project_discovery;
+pub mod project_executor;
+pub mod project_models;
+pub mod project_resolver;
 pub mod project_process;
+pub mod quota;
+pub mod review;
+pub mod storage;

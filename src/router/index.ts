@@ -20,6 +20,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/devdock/DevDockView.vue')
       },
       {
+        path: 'codex-report',
+        name: 'codex-report',
+        component: () => import('@/views/codex-report/CodexReportView.vue')
+      },
+      {
+        path: 'ai-quota',
+        name: 'ai-quota',
+        component: () => import('@/views/quota/AiQuotaView.vue')
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/views/settings/SettingsView.vue')

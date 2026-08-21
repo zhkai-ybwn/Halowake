@@ -15,6 +15,12 @@
     <WorkbenchTag :label="t('gitAssistant.repo.summaryRecommended')" :value="recommendedCount" tone="primary" />
 
     <template #actions>
+      <NDropdown trigger="click" :options="viewOptions" @select="handleViewAction">
+        <WorkbenchButton>
+          <Icon icon="solar:sidebar-minimalistic-linear" />
+          {{ t('gitAssistant.layout.view') }}
+        </WorkbenchButton>
+      </NDropdown>
       <span class="sync-pill" :class="syncTone">
         <span class="sync-dot"></span>
         {{ syncLabel }}
@@ -25,19 +31,12 @@
         </NDropdown>
       </div>
       <div class="action-group action-group-project">
-        <WorkbenchButton v-if="hasSnapshot" :disabled="loading || !repoPath" @click="$emit('open-branch-selector')">
-          {{ t('gitAssistant.repo.manageBranches') }}
-        </WorkbenchButton>
-        <WorkbenchButton v-if="hasSnapshot" :disabled="loading || !repoPath" @click="$emit('open-merge')">
-          {{ t('gitAssistant.repo.mergeBranch') }}
-        </WorkbenchButton>
-        <WorkbenchButton v-if="!hasSnapshot" :disabled="loading" @click="$emit('clone-repository')">
-          {{ t('gitAssistant.repo.cloneRepository') }}
-        </WorkbenchButton>
-        <WorkbenchButton v-if="!hasSnapshot" :disabled="loading" @click="$emit('init-repository')">
-          {{ t('gitAssistant.repo.initRepository') }}
-        </WorkbenchButton>
-        <WorkbenchButton @click="$emit('pick-directory')">{{ t('gitAssistant.repo.chooseDirectory') }}</WorkbenchButton>
+        <NDropdown trigger="click" :options="projectOptions" @select="handleProjectAction">
+          <WorkbenchButton>
+            <Icon icon="solar:folder-with-files-linear" />
+            {{ t('gitAssistant.repo.currentRepoShort') }}
+          </WorkbenchButton>
+        </NDropdown>
         <WorkbenchButton v-if="hasSnapshot" variant="primary" :disabled="loading || !repoPath" @click="$emit('refresh')">
           {{ t('gitAssistant.repo.refreshRepo') }}
         </WorkbenchButton>
@@ -47,8 +46,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NDropdown } from 'naive-ui'
+import { computed, onMounted, onUnmounted } from 'vue'
+import { NDropdown, type DropdownOption } from 'naive-ui'
+import { Icon } from '@iconify/vue'
 import { useLocale } from '@/hooks/useLocale'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
@@ -56,6 +56,7 @@ import WorkbenchTag from '@/components/workbench/WorkbenchTag.vue'
 import WorkbenchTopbar from '@/components/workbench/WorkbenchTopbar.vue'
 import type { GitRepositoryState } from '@/services/git/git-service'
 import type { GitAssistantSummary } from '../git-assistant.types'
+import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 
 const props = defineProps<{
   repoPath: string
@@ -69,9 +70,14 @@ const props = defineProps<{
   repositoryState: GitRepositoryState | null
   recentRepos: RecentGitRepo[]
   hasSnapshot: boolean
+  panelVisibility: {
+    changes: boolean
+    diff: boolean
+    commit: boolean
+  }
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'pick-directory'): void
   (e: 'refresh'): void
   (e: 'sync-action', value: string): void
@@ -80,6 +86,8 @@ defineEmits<{
   (e: 'open-merge'): void
   (e: 'clone-repository'): void
   (e: 'init-repository'): void
+  (e: 'toggle-panel', panel: 'changes' | 'diff' | 'commit'): void
+  (e: 'reset-layout'): void
 }>()
 
 const { t } = useLocale()
@@ -131,6 +139,66 @@ const syncOptions = computed(() => [
   { label: props.pushing ? t('gitAssistant.ai.pushing') : t('gitAssistant.ai.push'), key: 'push', disabled: pushDisabled.value },
 ])
 
+const visiblePanelCount = computed(() => Object.values(props.panelVisibility).filter(Boolean).length)
+const viewOptions = computed<DropdownOption[]>(() => [
+  {
+    label: `${props.panelVisibility.changes ? '✓  ' : ''}${t('gitAssistant.layout.changes')}`,
+    key: 'changes',
+    disabled: props.panelVisibility.changes && visiblePanelCount.value === 1,
+  },
+  {
+    label: `${props.panelVisibility.diff ? '✓  ' : ''}${t('gitAssistant.layout.diff')}`,
+    key: 'diff',
+    disabled: props.panelVisibility.diff && visiblePanelCount.value === 1,
+  },
+  {
+    label: `${props.panelVisibility.commit ? '✓  ' : ''}${t('gitAssistant.layout.commit')}`,
+    key: 'commit',
+    disabled: props.panelVisibility.commit && visiblePanelCount.value === 1,
+  },
+  { type: 'divider', key: 'layout-divider' },
+  { label: t('gitAssistant.layout.reset'), key: 'reset' },
+])
+const projectOptions = computed<DropdownOption[]>(() => props.hasSnapshot ? [
+  { label: t('gitAssistant.repo.manageBranches'), key: 'branches' },
+  { label: t('gitAssistant.repo.mergeBranch'), key: 'merge' },
+  { type: 'divider', key: 'repo-divider' },
+  { label: t('gitAssistant.repo.chooseDirectory'), key: 'choose' },
+] : [
+  { label: t('gitAssistant.repo.cloneRepository'), key: 'clone' },
+  { label: t('gitAssistant.repo.initRepository'), key: 'init' },
+  { type: 'divider', key: 'repo-divider' },
+  { label: t('gitAssistant.repo.chooseDirectory'), key: 'choose' },
+])
+
+function handleViewAction(key: string | number) {
+  if (key === 'reset') {
+    emit('reset-layout')
+    return
+  }
+  if (key === 'changes' || key === 'diff' || key === 'commit') {
+    emit('toggle-panel', key)
+  }
+}
+
+function handleProjectAction(key: string | number) {
+  if (key === 'branches') emit('open-branch-selector')
+  else if (key === 'merge') emit('open-merge')
+  else if (key === 'clone') emit('clone-repository')
+  else if (key === 'init') emit('init-repository')
+  else if (key === 'choose') emit('pick-directory')
+}
+
+function handleRefreshShortcut(event: KeyboardEvent) {
+  if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'r') return
+  if (!props.hasSnapshot || props.loading || !props.repoPath) return
+  event.preventDefault()
+  emit('refresh')
+}
+
+onMounted(() => window.addEventListener('keydown', handleRefreshShortcut))
+onUnmounted(() => window.removeEventListener('keydown', handleRefreshShortcut))
+
 export interface RecentGitRepo {
   path: string
   name: string
@@ -150,7 +218,7 @@ function normalizePath(path: string) {
 }
 
 .action-group-project {
-  border-left: 1px solid var(--lumina-card-border);
+  border-left: 0.5px solid var(--lumina-separator);
   margin-left: 2px;
   padding-left: 8px;
 }
@@ -158,7 +226,7 @@ function normalizePath(path: string) {
 .sync-pill {
   align-items: center;
   background: color-mix(in srgb, var(--lumina-surface-3) 82%, transparent);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text-secondary);
   display: inline-flex;

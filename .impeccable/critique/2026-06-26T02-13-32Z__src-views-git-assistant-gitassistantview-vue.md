@@ -6,12 +6,14 @@ p1_count: 2
 timestamp: 2026-06-26T02-13-32Z
 slug: src-views-git-assistant-gitassistantview-vue
 ---
+
 # Lumina Git Assistant UI Critique
 
 Target: src/views/git-assistant/GitAssistantView.vue
 Score: 27/40
 
 ## Summary
+
 The current Git Assistant UI has a solid desktop-tool foundation: restrained palette, consistent panels, clear repository context, and a practical table-first workflow. It feels functional and reasonably trustworthy. The main weakness is not visual decoration; it is task hierarchy. The screen exposes repository status, sync actions, commit authoring, AI generation, file selection, filters, and empty table state all at once, without a stronger primary path for first-time or distracted users.
 
 ## Priority Issues

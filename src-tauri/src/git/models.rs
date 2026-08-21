@@ -314,8 +314,17 @@ pub struct GitReviewAttention {
     pub path: String,
     pub score: i32,
     pub categories: Vec<String>,
+    pub score_breakdown: Vec<GitReviewScoreBreakdown>,
     pub eligible: bool,
     pub skipped: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitReviewScoreBreakdown {
+    pub factor: String,
+    pub delta: i32,
+    pub evidence: String,
 }
 
 #[derive(Debug, Serialize)]

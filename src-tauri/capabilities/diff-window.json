@@ -3,8 +3,5 @@
   "identifier": "diff-window-capability",
   "description": "Permissions for the standalone Git Diff window",
   "windows": ["git-diff"],
-  "permissions": [
-    "core:default",
-    "core:event:default"
-  ]
+  "permissions": ["core:default", "core:event:default"]
 }

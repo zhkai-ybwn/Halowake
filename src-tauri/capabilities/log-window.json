@@ -3,9 +3,5 @@
   "identifier": "log-window-capability",
   "description": "Permissions for the log window",
   "windows": ["git-log"],
-  "permissions": [
-    "core:default",
-    "core:event:default",
-    "core:webview:allow-create-webview-window"
-  ]
+  "permissions": ["core:default", "core:event:default", "core:webview:allow-create-webview-window"]
 }

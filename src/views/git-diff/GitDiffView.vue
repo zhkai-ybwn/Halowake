@@ -1,6 +1,6 @@
 <template>
   <main class="git-diff-page">
-    <header class="git-diff-header">
+    <header class="git-diff-header" data-tauri-drag-region>
       <div>
         <strong>{{ title }}</strong>
         <span>{{ request?.filePath || '' }}</span>
@@ -8,9 +8,9 @@
       <small>{{ comparisonLabel }}</small>
     </header>
 
-    <section v-if="loading" class="git-diff-state">Loading diff…</section>
-    <section v-else-if="error" class="git-diff-state git-diff-state--error">{{ error }}</section>
-    <section v-else-if="!diffText" class="git-diff-state">No changes to display.</section>
+    <WorkbenchEmptyState v-if="loading" icon="solar:refresh-circle-linear" :title="t('gitDiff.loading')" />
+    <WorkbenchEmptyState v-else-if="error" class="git-diff-state--error" icon="solar:danger-triangle-linear" :title="error" />
+    <WorkbenchEmptyState v-else-if="!diffText" icon="solar:check-circle-linear" :title="t('gitDiff.empty')" />
     <UnifiedDiffViewer v-else :diff="diffText" />
   </main>
 </template>
@@ -25,17 +25,24 @@ import {
 } from '@/services/git/git-service'
 import type { GitDiffRequest } from '@/services/git/git-diff-window'
 import UnifiedDiffViewer from './UnifiedDiffViewer.vue'
+import { useLocale } from '@/hooks/useLocale'
+import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 
 const request = ref<GitDiffRequest | null>(null)
 const loading = ref(false)
 const error = ref('')
 const diffText = ref('')
+const { t } = useLocale()
 
-const title = computed(() => request.value?.filePath.split(/[/\\]/).pop() || 'Git Diff')
+const title = computed(() => request.value?.filePath.split(/[/\\]/).pop() || t('gitDiff.title'))
 const comparisonLabel = computed(() => {
   if (!request.value) return ''
   if (request.value.kind === 'commit') return request.value.hash.slice(0, 12)
-  return request.value.mode === 'head' ? 'Working tree ↔ HEAD' : request.value.mode === 'staged' ? 'Index ↔ HEAD' : 'Working tree ↔ Index'
+  return request.value.mode === 'head'
+    ? t('gitDiff.comparisonHead')
+    : request.value.mode === 'staged'
+      ? t('gitDiff.comparisonStaged')
+      : t('gitDiff.comparisonUnstaged')
 })
 
 async function loadDiff(nextRequest: GitDiffRequest) {
@@ -52,7 +59,7 @@ async function loadDiff(nextRequest: GitDiffRequest) {
         : await loadGitFileDiff({ repoPath: nextRequest.repoPath, filePath: nextRequest.filePath, staged: nextRequest.mode === 'staged', fullContext: true })
     diffText.value = result.diff
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Unable to load diff.'
+    error.value = err instanceof Error ? err.message : t('gitDiff.loadFailed')
   } finally {
     loading.value = false
   }
@@ -83,12 +90,14 @@ onUnmounted(() => unlistenInit?.())
 
 .git-diff-header {
   align-items: center;
-  background: var(--lumina-surface-1);
-  border-bottom: 1px solid var(--lumina-card-border);
+  background: var(--lumina-toolbar-bg);
+  backdrop-filter: var(--lumina-vibrancy);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   justify-content: space-between;
   min-width: 0;
-  padding: 8px 14px;
+  min-height: 50px;
+  padding: 7px 14px;
 }
 
 .git-diff-header div {

@@ -8,7 +8,7 @@
         :disabled="running"
         @click="$emit('close')"
       >
-        <Icon icon="solar:close-circle-linear" />
+        <span class="close-glyph" aria-hidden="true">×</span>
       </button>
       <header class="dialog-header">
         <div>
@@ -74,8 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Icon } from '@iconify/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
 
 const { t } = useLocale()
@@ -103,7 +102,7 @@ const props = defineProps<{
   abortLabel: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'close'): void
   (e: 'next-action'): void
 }>()
@@ -180,6 +179,13 @@ watch(
 
 onBeforeUnmount(stopTicker)
 
+function handleEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape' && props.visible && !props.running) emit('close')
+}
+
+onMounted(() => window.addEventListener('keydown', handleEscape))
+onBeforeUnmount(() => window.removeEventListener('keydown', handleEscape))
+
 watch(
   () => [props.command, props.stdout, props.stderr] as const,
   () => {
@@ -213,7 +219,8 @@ const progressStyle = computed(() => {
 <style scoped lang="scss">
 .dialog-mask {
   align-items: center;
-  background: rgb(18 22 25 / 36%);
+  background: var(--lumina-overlay);
+  backdrop-filter: blur(2px);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -223,10 +230,11 @@ const progressStyle = computed(() => {
 }
 
 .command-dialog {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-md);
+  background: color-mix(in srgb, var(--lumina-surface-elevated) 94%, transparent);
+  backdrop-filter: saturate(180%) blur(24px);
+  border: 0.5px solid var(--lumina-separator-strong);
+  border-radius: 12px;
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--lumina-text) 8%, transparent), 0 2px 8px rgb(0 0 0 / 10%), 0 18px 52px rgb(0 0 0 / 18%);
   display: grid;
   gap: 14px;
   grid-template-rows: auto auto minmax(240px, 1fr) auto;
@@ -239,19 +247,19 @@ const progressStyle = computed(() => {
 
 .dialog-close {
   align-items: center;
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
+  background: transparent;
+  border: 0;
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text-secondary);
   cursor: pointer;
   display: inline-flex;
-  height: 30px;
+  height: 28px;
   justify-content: center;
   padding: 0;
   position: absolute;
   right: 12px;
   top: 12px;
-  width: 30px;
+  width: 28px;
   z-index: 3;
 
   &:hover:not(:disabled) {
@@ -269,15 +277,17 @@ const progressStyle = computed(() => {
     opacity: 0.45;
   }
 
-  svg {
-    height: 16px;
-    width: 16px;
+  .close-glyph {
+    font-size: 20px;
+    font-weight: 300;
+    line-height: 1;
+    transform: translateY(-1px);
   }
 }
 
 .dialog-header {
   align-items: flex-start;
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   gap: 14px;
   justify-content: space-between;
@@ -308,7 +318,7 @@ const progressStyle = computed(() => {
 
 .status-chip {
   align-items: center;
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: 7px;
   color: var(--lumina-text-secondary);
   display: inline-flex;
@@ -325,20 +335,20 @@ const progressStyle = computed(() => {
   }
 
   &.running {
-    background: rgb(59 130 246 / 8%);
-    border-color: rgb(59 130 246 / 22%);
+    background: color-mix(in srgb, var(--lumina-primary) 8%, transparent);
+    border-color: color-mix(in srgb, var(--lumina-primary) 28%, transparent);
     color: var(--lumina-primary);
   }
 
   &.done {
-    background: rgb(47 143 91 / 10%);
-    border-color: rgb(47 143 91 / 24%);
+    background: color-mix(in srgb, var(--lumina-success) 10%, transparent);
+    border-color: color-mix(in srgb, var(--lumina-success) 28%, transparent);
     color: var(--lumina-success);
   }
 
   &.failed {
-    background: rgb(213 77 77 / 9%);
-    border-color: rgb(213 77 77 / 24%);
+    background: color-mix(in srgb, var(--lumina-danger) 9%, transparent);
+    border-color: color-mix(in srgb, var(--lumina-danger) 28%, transparent);
     color: var(--lumina-danger);
   }
 }
@@ -374,7 +384,7 @@ const progressStyle = computed(() => {
 
 .progress-track {
   background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: 999px;
   height: 8px;
   overflow: hidden;
@@ -483,7 +493,7 @@ const progressStyle = computed(() => {
 
 .log-toolbar {
   align-items: center;
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   color: var(--lumina-text-secondary);
   display: flex;
   font-size: 11px;
@@ -507,11 +517,11 @@ const progressStyle = computed(() => {
 
 .action-btn {
   background: var(--lumina-button-secondary-bg);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text);
   cursor: pointer;
-  height: 34px;
+  height: 28px;
   padding: 0 12px;
 
   &:disabled {
@@ -529,7 +539,7 @@ const progressStyle = computed(() => {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
   box-shadow: none;
-  color: #fff;
+  color: var(--lumina-on-accent);
 }
 
 </style>

@@ -13,6 +13,7 @@
 ### Task 1: Add the merge command
 
 **Files:**
+
 - Modify: `src-tauri/src/git/models.rs`
 - Modify: `src-tauri/src/git/runner.rs`
 - Modify: `src-tauri/src/commands/git.rs`
@@ -23,6 +24,7 @@
 ### Task 2: Verify Git behavior
 
 **Files:**
+
 - Test: `src-tauri/src/git/runner.rs`
 
 **Steps:** Create a temporary repository, merge a feature branch, assert its content is present, and assert a dirty working tree is rejected before merge.
@@ -30,6 +32,7 @@
 ### Task 3: Add the merge entry point
 
 **Files:**
+
 - Modify: `src/services/git/git-service.ts`
 - Modify: `src/views/git-assistant/components/GitStatusBar.vue`
 - Modify: `src/views/git-assistant/GitAssistantView.vue`

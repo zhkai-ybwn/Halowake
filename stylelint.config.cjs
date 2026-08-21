@@ -43,10 +43,16 @@ module.exports = {
     "alpha-value-notation": null,
     "color-function-notation": null,
     "color-hex-length": null,
+    "custom-property-empty-line-before": null,
     "declaration-empty-line-before": null,
+    "declaration-block-single-line-max-declarations": null,
     "no-descending-specificity": null,
+    "no-duplicate-selectors": null,
+    "rule-empty-line-before": null,
     "selector-class-pattern": null,
-    "selector-pseudo-class-no-unknown": [true, { ignorePseudoClasses: ["deep"] }],
+    "selector-not-notation": null,
+    "selector-pseudo-class-no-unknown": [true, { ignorePseudoClasses: ["deep", "global", "slotted"] }],
+    "value-keyword-case": null,
     "value-no-vendor-prefix": null
   }
 };

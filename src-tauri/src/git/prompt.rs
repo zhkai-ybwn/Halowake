@@ -12,7 +12,7 @@ use crate::git::analyzer::build_analysis_context;
 use crate::git::config::AnalysisConfig;
 use crate::git::models::{
     GitAiPayload, GitCommitPromptFileTrace, GitCommitPromptPreview, GitCommitPromptTrace,
-    GitReviewAttention, GitReviewAttentionResult,
+    GitReviewAttention, GitReviewAttentionResult, GitReviewScoreBreakdown,
 };
 use crate::git::parser::parse_git_status_line;
 use crate::git::runner;
@@ -54,6 +54,11 @@ where
                 path: file_path.clone(),
                 score: 0,
                 categories: vec![category.to_string()],
+                score_breakdown: vec![GitReviewScoreBreakdown {
+                    factor: "skip".to_string(),
+                    delta: 0,
+                    evidence: category.to_string(),
+                }],
                 eligible: false,
                 skipped: true,
             });
@@ -91,11 +96,22 @@ where
             &categories,
             cleaned.skipped,
         );
+        let (_, score_breakdown) = score_review_attention_details(
+            &profile,
+            &classification,
+            &action,
+            evidence_count,
+            cleaned_chars,
+            changed_lines,
+            &categories,
+            cleaned.skipped,
+        );
 
         files.push(GitReviewAttention {
             path: file_path.clone(),
             score,
             categories,
+            score_breakdown,
             eligible: score >= 50 && !cleaned.skipped,
             skipped: false,
         });
@@ -186,6 +202,132 @@ fn score_review_attention(
     }
 
     score.clamp(0, 100)
+}
+
+fn score_review_attention_details(
+    profile: &PromptProfile,
+    classification: &FileClassification,
+    action: &str,
+    evidence_count: usize,
+    cleaned_chars: usize,
+    changed_lines: usize,
+    categories: &[String],
+    skipped: bool,
+) -> (i32, Vec<GitReviewScoreBreakdown>) {
+    let mut score = 8;
+    let mut breakdown = vec![GitReviewScoreBreakdown {
+        factor: "base".to_string(),
+        delta: 8,
+        evidence: "基础关注度".to_string(),
+    }];
+
+    let role_delta = match classification.role.as_str() {
+        "primary" => 18,
+        "tooling" => 12,
+        "secondary" => 4,
+        "generated" | "internal" => -18,
+        _ => 0,
+    };
+    score += role_delta;
+    breakdown.push(GitReviewScoreBreakdown {
+        factor: "file-role".to_string(),
+        delta: role_delta,
+        evidence: classification.role.clone(),
+    });
+
+    if let Some(weight) = profile.attention_weights.get(&classification.kind) {
+        score += *weight;
+        breakdown.push(GitReviewScoreBreakdown {
+            factor: "file-kind".to_string(),
+            delta: *weight,
+            evidence: classification.kind.clone(),
+        });
+    }
+
+    for category in categories {
+        let delta = match category.as_str() {
+            "security" => 18,
+            "data" => 14,
+            "api" => 10,
+            "logic" => 10,
+            "types" => 7,
+            "config" => 8,
+            "markup" => 5,
+            "style" => 3,
+            "test" => 2,
+            _ => 0,
+        };
+        score += delta;
+        if delta != 0 {
+            breakdown.push(GitReviewScoreBreakdown {
+                factor: format!("category-{category}"),
+                delta,
+                evidence: category.clone(),
+            });
+        }
+    }
+
+    let action_delta = match action {
+        "deleted" | "renamed" => 10,
+        "added" | "untracked" => 6,
+        _ => 0,
+    };
+    score += action_delta;
+    if action_delta != 0 {
+        breakdown.push(GitReviewScoreBreakdown {
+            factor: "change-action".to_string(),
+            delta: action_delta,
+            evidence: action.to_string(),
+        });
+    }
+
+    let size_delta = if changed_lines >= 180 {
+        16
+    } else if changed_lines >= 60 {
+        9
+    } else if changed_lines >= 20 {
+        4
+    } else {
+        0
+    };
+    score += size_delta;
+    if size_delta != 0 {
+        breakdown.push(GitReviewScoreBreakdown {
+            factor: "change-size".to_string(),
+            delta: size_delta,
+            evidence: format!("{changed_lines} changed lines"),
+        });
+    }
+
+    let evidence_delta = if skipped {
+        -24
+    } else if evidence_count >= 24 || cleaned_chars >= 1800 {
+        18
+    } else if evidence_count >= 8 || cleaned_chars >= 600 {
+        10
+    } else if evidence_count == 0 {
+        -10
+    } else {
+        0
+    };
+    score += evidence_delta;
+    if evidence_delta != 0 {
+        breakdown.push(GitReviewScoreBreakdown {
+            factor: "review-evidence".to_string(),
+            delta: evidence_delta,
+            evidence: format!("{evidence_count} evidence lines, {cleaned_chars} chars"),
+        });
+    }
+
+    let clamped = score.clamp(0, 100);
+    if clamped != score {
+        breakdown.push(GitReviewScoreBreakdown {
+            factor: "score-limit".to_string(),
+            delta: clamped - score,
+            evidence: "关注度分数限制在 0-100".to_string(),
+        });
+    }
+    (clamped, breakdown)
 }
 
 fn review_categories(path: &str, classification: &FileClassification, diff: &str) -> Vec<String> {
@@ -1917,7 +2059,7 @@ mod tests {
     use super::{
         apply_group_budgets, build_budget_plan, clean_diff_candidates, detect_localization_patterns,
         fallback_prompt_profile, preserve_small_source_changes, review_skip_category,
-        score_review_attention, FileClassification, PreparedPromptFile,
+        score_review_attention, score_review_attention_details, FileClassification, PreparedPromptFile,
     };
 
     #[test]
@@ -1944,6 +2086,18 @@ mod tests {
         );
 
         assert!(score >= 60);
+        let (explained_score, breakdown) = score_review_attention_details(
+            &profile,
+            &classification,
+            "modified",
+            12,
+            900,
+            80,
+            &["logic".to_string()],
+            false,
+        );
+        assert_eq!(score, explained_score);
+        assert_eq!(score, breakdown.iter().map(|item| item.delta).sum::<i32>());
     }
 
     #[test]

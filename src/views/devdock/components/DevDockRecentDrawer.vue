@@ -9,9 +9,9 @@
     @close="$emit('close')"
   >
     <section v-if="commands.length" class="recent-command-list">
-      <article v-for="command in commands" :key="`${command.projectPath}:${command.scriptName}`" class="recent-command-row">
+      <article v-for="command in commands" :key="`${command.projectPath}:${command.commandId}`" class="recent-command-row">
         <div>
-          <strong>{{ command.projectName }} · {{ command.scriptName }}</strong>
+          <strong>{{ command.projectName }} · {{ command.commandName }}</strong>
         </div>
         <button
           class="script-run-btn"

@@ -1,7 +1,7 @@
 {
   "name": "lumina",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,8 +21,8 @@
     "@vicons/ionicons5": "^0.13.0",
     "ansi_up": "^6.0.6",
     "diff2html": "^3.4.56",
+    "marked": "^18.0.10",
     "naive-ui": "^2.44.1",
-    "or": "^0.2.0",
     "pinia": "^3.0.3",
     "vue": "^3.5.22",
     "vue-i18n": "^10.0.8",

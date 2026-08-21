@@ -20,6 +20,19 @@
   z-index: 3;
 }
 
+.wb-surface {
+  background: var(--lumina-content-bg);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-md);
+  box-shadow: var(--lumina-shadow-sm);
+}
+
+.wb-toolbar-material {
+  background: var(--lumina-toolbar-bg);
+  border: 0.5px solid var(--lumina-separator);
+  backdrop-filter: var(--lumina-vibrancy);
+}
+
 .wb-table-row {
   border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 68%, transparent);
   color: var(--lumina-text);
@@ -46,8 +59,8 @@
 }
 
 .wb-log {
-  background: #101418;
-  color: #d7dde4;
+  background: var(--lumina-code-bg);
+  color: var(--lumina-code-text);
   display: grid;
   gap: 0;
   grid-auto-rows: min-content;
@@ -70,7 +83,7 @@
 }
 
 .wb-log-stream {
-  color: #7e8b98;
+  color: var(--lumina-code-muted);
   font-size: 10px;
   line-height: 1.32;
   text-transform: uppercase;
@@ -86,4 +99,15 @@
   min-height: 120px;
   padding: 16px;
   text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

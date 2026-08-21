@@ -5,7 +5,9 @@ h2,
 h3,
 h4,
 h5 {
+  font-family: var(--lumina-font-display);
   font-weight: 600;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
@@ -18,5 +20,10 @@ strong {
 }
 
 .code {
-  font-family: Menlo, Consolas, Monaco, monospace;
+  font-family: var(--lumina-font-mono);
+}
+
+body {
+  font-size: 13px;
+  line-height: 1.38;
 }

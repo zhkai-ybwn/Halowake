@@ -6,6 +6,7 @@ import naive from './plugins/naive'
 import { i18n } from './i18n'
 import { useAiSettingsStore } from './stores/ai-settings'
 import { usePreferencesStore } from './stores/preferences'
+import { useStorageStore } from './stores/storage'
 import { Icon } from '@iconify/vue';
 import "@/styles/base/index.scss";
 import "@/styles/themes/index.scss";
@@ -17,6 +18,7 @@ async function bootstrap() {
   app.use(pinia)
   usePreferencesStore(pinia).initPreferences()
   await useAiSettingsStore(pinia).initSettings()
+  void useStorageStore(pinia).initStorage()
   app.use(i18n)
   app.use(router)
   app.use(naive)

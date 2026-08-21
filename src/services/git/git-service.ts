@@ -34,8 +34,15 @@ export interface GitReviewAttention {
   path: string
   score: number
   categories: string[]
+  scoreBreakdown: GitReviewScoreBreakdown[]
   eligible: boolean
   skipped: boolean
+}
+
+export interface GitReviewScoreBreakdown {
+  factor: string
+  delta: number
+  evidence: string
 }
 
 export interface GitReviewAttentionResult {

@@ -1,6 +1,6 @@
 [package]
 name = "lumina"
-version = "0.1.0-beta.1"
+version = "1.0.0"
 description = "Lumina Developer Workbench"
 authors = ["Lumina contributors"]
 license = "MIT"
@@ -17,6 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.0", features = [] }
 
 [dependencies]
+encoding_rs = "0.8"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
@@ -24,4 +25,5 @@ tauri = { version = "2.9.0", features = ["tray-icon"] }
 tauri-plugin-log = "2.0.0"
 tauri-plugin-dialog = "2.6.0"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
+rusqlite = { version = "0.32", features = ["bundled"] }

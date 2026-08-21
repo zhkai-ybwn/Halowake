@@ -1,6 +1,6 @@
 <template>
   <div class="git-log-page">
-    <header class="git-log-dialog__header">
+    <header class="git-log-dialog__header" data-tauri-drag-region>
       <div class="git-log-title">
         <strong>{{ filePath ? t('gitAssistant.log.fileTitle') : t('gitAssistant.log.title') }}</strong>
         <span>{{ filePath || branch || '' }}</span>
@@ -40,15 +40,9 @@
       </div>
     </header>
 
-    <section v-if="logLoading" class="git-log-empty">
-      {{ t('gitAssistant.log.loading') }}
-    </section>
-    <section v-else-if="!gitLogEntries.length" class="git-log-empty">
-      {{ t('gitAssistant.log.empty') }}
-    </section>
-    <section v-else-if="!filteredGitLogEntries.length" class="git-log-empty">
-      {{ t('gitAssistant.log.noMatch') }}
-    </section>
+    <WorkbenchEmptyState v-if="logLoading" icon="solar:refresh-circle-linear" :title="t('gitAssistant.log.loading')" />
+    <WorkbenchEmptyState v-else-if="!gitLogEntries.length" icon="solar:history-linear" :title="t('gitAssistant.log.empty')" />
+    <WorkbenchEmptyState v-else-if="!filteredGitLogEntries.length" icon="solar:magnifer-linear" :title="t('gitAssistant.log.noMatch')" />
     <section v-else class="git-log-content">
       <section class="git-log-revision-table wb-table">
         <div class="git-log-table-head wb-table-head">
@@ -135,6 +129,7 @@ import {
 import { STATUS_META } from '@/views/git-assistant/git-assistant.config'
 import { emit as tauriEmit, listen } from '@tauri-apps/api/event'
 import { openGitDiffWindow } from '@/services/git/git-diff-window'
+import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 
 const { t } = useLocale()
 
@@ -286,7 +281,7 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .git-log-page {
-  background: var(--lumina-bg);
+  background: var(--lumina-content-bg);
   color: var(--lumina-text);
   display: flex;
   flex-direction: column;
@@ -296,12 +291,13 @@ onUnmounted(() => {
 
 .git-log-dialog__header {
   align-items: center;
-  background: var(--lumina-surface-2);
-  border-bottom: 1px solid var(--lumina-card-border);
+  background: var(--lumina-toolbar-bg);
+  backdrop-filter: var(--lumina-vibrancy);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  min-height: 48px;
+  min-height: 50px;
   padding: 8px 16px;
   flex-shrink: 0;
 }
@@ -381,7 +377,7 @@ onUnmounted(() => {
 
 .git-log-table-head {
   background: var(--lumina-surface-2);
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   color: var(--lumina-text-secondary);
   font-size: 11px;
   font-weight: 700;
@@ -392,7 +388,7 @@ onUnmounted(() => {
 
   span {
     align-items: center;
-    border-right: 1px solid var(--lumina-card-border);
+    border-right: 0.5px solid var(--lumina-separator);
     display: flex;
     min-width: 0;
     padding: 0 8px;
@@ -402,7 +398,7 @@ onUnmounted(() => {
 .git-log-row {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--lumina-separator) 72%, transparent);
   color: var(--lumina-text);
   cursor: pointer;
   font: inherit;
@@ -420,7 +416,7 @@ onUnmounted(() => {
   > strong,
   > code {
     align-items: center;
-    border-right: 1px solid color-mix(in srgb, var(--lumina-card-border) 64%, transparent);
+    border-right: 0.5px solid color-mix(in srgb, var(--lumina-separator) 64%, transparent);
     display: flex;
     min-width: 0;
     overflow: hidden;
@@ -458,9 +454,9 @@ onUnmounted(() => {
 }
 
 .git-log-selected {
-  background: linear-gradient(180deg, var(--lumina-surface-1), var(--lumina-surface-2));
-  border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 82%, var(--lumina-text-secondary));
-  border-top: 1px solid color-mix(in srgb, var(--lumina-card-border) 82%, var(--lumina-text-secondary));
+  background: color-mix(in srgb, var(--lumina-surface-2) 82%, transparent);
+  border-bottom: 0.5px solid var(--lumina-separator);
+  border-top: 0.5px solid var(--lumina-separator);
   display: grid;
   gap: 6px;
   min-height: 0;
@@ -554,7 +550,7 @@ onUnmounted(() => {
 
 .git-log-file-head {
   background: var(--lumina-surface-2);
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   color: var(--lumina-text-secondary);
   font-size: 11px;
   font-weight: 700;
@@ -565,7 +561,7 @@ onUnmounted(() => {
 
   span {
     align-items: center;
-    border-right: 1px solid var(--lumina-card-border);
+    border-right: 0.5px solid var(--lumina-separator);
     display: flex;
     min-width: 0;
     padding: 0 8px;
@@ -580,7 +576,7 @@ onUnmounted(() => {
   align-items: center;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 70%, transparent);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--lumina-separator) 70%, transparent);
   color: var(--lumina-text);
   cursor: pointer;
   display: grid;
@@ -590,7 +586,7 @@ onUnmounted(() => {
 
   span {
     align-items: center;
-    border-right: 1px solid color-mix(in srgb, var(--lumina-card-border) 64%, transparent);
+    border-right: 0.5px solid color-mix(in srgb, var(--lumina-separator) 64%, transparent);
     display: flex;
     font-size: 12px;
     min-width: 0;

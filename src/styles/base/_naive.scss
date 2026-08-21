@@ -18,6 +18,48 @@
   color: var(--lumina-text-secondary);
 }
 
+.n-checkbox {
+  --n-text-color: var(--lumina-text);
+  --n-text-color-disabled: var(--lumina-text-secondary);
+  --n-color: var(--lumina-input-bg);
+  --n-color-checked: var(--lumina-primary);
+  --n-color-disabled: var(--lumina-surface-2);
+  --n-color-disabled-checked: var(--lumina-primary-soft);
+  --n-border: 1px solid var(--lumina-input-border);
+  --n-border-hover: 1px solid var(--lumina-primary);
+  --n-border-focus: 1px solid var(--lumina-primary);
+  --n-border-checked: 1px solid var(--lumina-primary);
+  --n-border-disabled: 1px solid var(--lumina-separator);
+  --n-border-disabled-checked: 1px solid var(--lumina-separator);
+  --n-box-shadow-focus: 0 0 0 2px var(--lumina-accent-ring);
+  --n-check-mark-color: var(--lumina-on-accent);
+  --n-check-mark-color-disabled: var(--lumina-text-tertiary);
+  --n-check-mark-color-disabled-checked: var(--lumina-text-tertiary);
+
+  .n-checkbox-box {
+    border-radius: var(--lumina-radius-xs);
+  }
+
+  &.n-checkbox--checked .n-checkbox-box,
+  &.n-checkbox--indeterminate .n-checkbox-box {
+    background-color: var(--lumina-primary);
+    border-color: var(--lumina-primary);
+  }
+
+  .n-checkbox-box .n-checkbox-icon {
+    color: var(--lumina-on-accent);
+    fill: var(--lumina-on-accent);
+  }
+}
+
+.n-checkbox .n-checkbox__label {
+  color: var(--lumina-text);
+}
+
+.n-checkbox.n-checkbox--disabled .n-checkbox__label {
+  color: var(--lumina-text-secondary);
+}
+
 .n-input,
 .n-base-selection,
 .n-date-picker {
@@ -34,8 +76,26 @@
   --n-placeholder-color: var(--lumina-text-secondary);
 }
 
-.n-base-select-menu,
-.n-date-panel {
+.n-modal-mask,
+.n-drawer-mask {
+  background-color: var(--lumina-overlay) !important;
+  backdrop-filter: blur(3px);
+}
+
+.n-message .n-message__content,
+.n-notification {
+  font-family: var(--lumina-font-sans);
+}
+
+.n-message {
+  background: color-mix(in srgb, var(--lumina-surface-elevated) 84%, transparent) !important;
+  border: 0.5px solid var(--lumina-separator-strong);
+  border-radius: var(--lumina-radius-lg) !important;
+  box-shadow: var(--lumina-shadow-md) !important;
+  backdrop-filter: var(--lumina-vibrancy);
+}
+
+.n-base-select-menu {
   --n-border-radius: var(--lumina-radius-md);
   --n-color: var(--lumina-elevated-bg);
   --n-option-color-pending: var(--lumina-button-secondary-hover);
@@ -43,4 +103,90 @@
   --n-option-text-color-active: var(--lumina-primary);
   --n-option-check-color: var(--lumina-primary);
   --n-box-shadow: var(--lumina-shadow-md);
+}
+
+.n-date-panel {
+  --n-panel-border-radius: var(--lumina-radius-md);
+  --n-panel-color: var(--lumina-surface-elevated);
+  --n-item-color-active: var(--lumina-primary);
+  --n-item-text-color-active: #ffffff;
+  --n-item-color-included: var(--lumina-primary-soft);
+  --n-item-text-color-included: var(--lumina-text);
+  --n-item-color-hover: var(--lumina-button-secondary-hover);
+  --n-item-border-radius: var(--lumina-radius-xs);
+  --n-header-text-color: var(--lumina-text);
+  --n-calendar-title-text-color: var(--lumina-text);
+  --n-calendar-days-text-color: var(--lumina-text-secondary);
+  --n-arrow-color: var(--lumina-text-secondary);
+  --n-arrow-color-hover: var(--lumina-primary);
+  --n-panel-box-shadow: var(--lumina-shadow-md);
+
+  .n-date-panel-date {
+    /* 1. Start, End, or Selected date: text MUST be pure white, background is solid primary */
+    &.n-date-panel-date--start,
+    &.n-date-panel-date--end,
+    &.n-date-panel-date--selected {
+      color: #ffffff !important;
+
+      &::after {
+        background-color: var(--lumina-primary) !important;
+        opacity: 1 !important;
+      }
+
+      &::before {
+        background-color: var(--lumina-primary-soft) !important;
+      }
+
+      .n-date-panel-date__sup {
+        background-color: #ffffff !important;
+      }
+    }
+
+    /* 2. Covered in-between dates */
+    &.n-date-panel-date--covered:not(.n-date-panel-date--start):not(.n-date-panel-date--end):not(.n-date-panel-date--selected) {
+      color: var(--lumina-text) !important;
+
+      &::before {
+        background-color: var(--lumina-primary-soft) !important;
+      }
+    }
+
+    /* 3. Today / Current date when not selected */
+    &.n-date-panel-date--current:not(.n-date-panel-date--start):not(.n-date-panel-date--end):not(.n-date-panel-date--selected) {
+      color: var(--lumina-primary) !important;
+      font-weight: 600;
+
+      .n-date-panel-date__trigger {
+        border: 1px solid var(--lumina-primary) !important;
+        border-radius: var(--lumina-radius-xs) !important;
+      }
+
+      .n-date-panel-date__sup {
+        background-color: var(--lumina-primary) !important;
+      }
+    }
+  }
+
+  .n-date-panel-month--selected,
+  .n-date-panel-year--selected {
+    background-color: var(--lumina-primary) !important;
+    color: #ffffff !important;
+  }
+
+  .n-date-panel-actions {
+    .n-button--primary-type {
+      background-color: var(--lumina-primary) !important;
+      border-color: var(--lumina-primary) !important;
+      color: #ffffff !important;
+
+      .n-button__content {
+        color: #ffffff !important;
+      }
+
+      &:hover {
+        background-color: var(--lumina-primary-hover) !important;
+        border-color: var(--lumina-primary-hover) !important;
+      }
+    }
+  }
 }

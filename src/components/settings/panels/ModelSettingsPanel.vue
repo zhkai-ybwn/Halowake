@@ -416,7 +416,7 @@ input {
 .action-button {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
-  color: #fff;
+  color: var(--lumina-on-accent);
 }
 
 .danger {

@@ -11,6 +11,7 @@
 ### Task 1: Create the reusable Diff window
 
 **Files:**
+
 - Create: `src/services/git/git-diff-window.ts`
 - Create: `src/views/git-diff/GitDiffView.vue`
 - Modify: `src/router/index.ts`
@@ -22,6 +23,7 @@
 ### Task 2: Route both entry points through it
 
 **Files:**
+
 - Modify: `src/views/git-assistant/GitAssistantView.vue`
 - Modify: `src/views/git-log/GitLogView.vue`
 
@@ -32,6 +34,7 @@
 ### Task 3: Verify the integration
 
 **Files:**
+
 - Test: `src-tauri/src/git/runner.rs` (existing regression suite)
 
 1. Run `npm run lint` to type-check and lint all touched Vue/TypeScript files.

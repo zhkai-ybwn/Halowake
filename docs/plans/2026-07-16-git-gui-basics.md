@@ -13,6 +13,7 @@
 ### Task 1: Repository Git commands
 
 **Files:**
+
 - Modify: `src-tauri/src/git/models.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/lib.rs`
 - Modify: `src/services/git/git-service.ts`
 
@@ -24,6 +25,7 @@
 ### Task 2: Git Assistant controls
 
 **Files:**
+
 - Modify: `src/views/git-assistant/GitAssistantView.vue`, `src/views/git-assistant/components/GitStatusBar.vue`, `src/views/git-assistant/components/GitChangeExplorer.vue`
 - Modify: `src/i18n/messages/en-US.ts`, `src/i18n/messages/zh-CN.ts`
 
@@ -35,6 +37,7 @@
 ### Task 3: Branch reference management
 
 **Files:**
+
 - Modify: `src-tauri/src/git/models.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/lib.rs`
 - Modify: `src/services/git/git-service.ts`, `src/views/git-assistant/GitAssistantView.vue`
 

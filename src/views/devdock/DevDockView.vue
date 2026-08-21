@@ -5,10 +5,16 @@
       <div class="toolbar-tags" :aria-label="t('devdock.projects.summary', { count: projects.length, scanned: scannedCount })">
         <WorkbenchTag :label="t('devdock.projects.totalLabel')" :value="projects.length" />
         <WorkbenchTag v-if="scannedCount !== projects.length" :label="t('devdock.projects.scannedLabel')" :value="scannedCount" tone="primary" />
-        <WorkbenchTag v-if="processes.length" :label="t('devdock.processes.running')" :value="processes.length" tone="success" />
+        <WorkbenchTag v-if="runningProcessCount" :label="t('devdock.processes.running')" :value="runningProcessCount" tone="success" />
       </div>
 
       <template #actions>
+        <WorkbenchButton
+          :aria-pressed="processInspectorOpen"
+          @click="processInspectorOpen = !processInspectorOpen"
+        >
+          {{ processInspectorOpen ? t('devdock.actions.hideProcesses') : t('devdock.actions.showProcesses') }}
+        </WorkbenchButton>
         <WorkbenchButton :disabled="!projects.length || loadingAll" @click="scanAllProjects">
           {{ loadingAll ? t('devdock.actions.scanning') : t('devdock.actions.scanAll') }}
         </WorkbenchButton>
@@ -18,8 +24,9 @@
       </template>
     </WorkbenchTopbar>
 
-    <section class="devdock-shell">
+    <section class="devdock-shell" :class="{ 'inspector-open': processInspectorOpen }">
       <DevDockProjectList
+        class="source-list"
         v-model:pin-editing="pinEditing"
         v-model:script-search="scriptSearch"
         :displayed-scripts="displayedScripts"
@@ -38,6 +45,7 @@
         :set-alias-input-ref="setAliasInputRef"
         @add-project="handleAddProject"
         @cancel-edit-alias="cancelEditAlias"
+        @configure-commands="openCommandConfig"
         @dismiss-project-error="dismissProjectError"
         @finish-edit-alias="finishEditAlias"
         @open-recent="recentDrawerOpen = true"
@@ -52,6 +60,7 @@
       />
 
       <DevDockProcessPanel
+        v-if="processInspectorOpen"
         :is-busy="isProcessBusy"
         :process-status-label="processStatusLabel"
         :process-url="processUrl"
@@ -61,6 +70,7 @@
         @open-url="openProcessUrl"
         @restart="restartProcess"
         @stop="stopProcess"
+        @close="processInspectorOpen = false"
       />
     </section>
 
@@ -70,6 +80,15 @@
       :show="recentDrawerOpen"
       @close="recentDrawerOpen = false"
       @start-command="startRecentCommand"
+    />
+
+    <DevDockCommandConfigDrawer
+      :candidates="configProject?.manifest?.candidates ?? []"
+      :project-commands="configProject?.manifest?.commands ?? []"
+      :project-path="configProject?.path ?? ''"
+      :show="Boolean(configProject)"
+      @close="configProject = null"
+      @saved="handleConfigSaved"
     />
 
     <DevDockLogModal :logs="processLogs" :show="logModalOpen" @after-leave="stopLogPolling" @close="closeProcessLogs" />
@@ -93,26 +112,29 @@ import {
   loadProjectProcessLogs,
   openProjectUrl,
   restartProjectProcess,
-  startProjectProcess,
+  startProjectCommand as invokeStartProjectCommand,
   stopProjectProcess,
   type ProjectProcessLogs,
   type ProjectProcessSnapshot,
-  type ProjectScript,
+  type ProjectCommand,
 } from '@/services/project/project-service'
 import DevDockLogModal from './components/DevDockLogModal.vue'
+import DevDockCommandConfigDrawer from './components/DevDockCommandConfigDrawer.vue'
 import DevDockProcessPanel from './components/DevDockProcessPanel.vue'
 import DevDockProjectList from './components/DevDockProjectList.vue'
 import DevDockRecentDrawer from './components/DevDockRecentDrawer.vue'
 import type { DevDockProject, RecentCommand, ScriptSort, StoredProject } from './types'
 
-const DEVDOC_PINNED_SCRIPTS_STORAGE_KEY = 'lumina.devdock.pinnedScripts'
-const DEVDOC_RECENT_COMMANDS_STORAGE_KEY = 'lumina.devdock.recentCommands'
-const DEVDOC_SCRIPT_SORT_STORAGE_KEY = 'lumina.devdock.scriptSort'
+const DEVDOC_PINNED_SCRIPTS_STORAGE_KEY = 'lumina.devdock.pinnedCommands.v1'
+const DEVDOC_RECENT_COMMANDS_STORAGE_KEY = 'lumina.devdock.recentCommands.v1'
+const DEVDOC_SCRIPT_SORT_STORAGE_KEY = 'lumina.devdock.commandSort.v2'
+const LEGACY_PINNED_SCRIPTS_STORAGE_KEY = 'lumina.devdock.pinnedScripts'
+const LEGACY_RECENT_COMMANDS_STORAGE_KEY = 'lumina.devdock.recentCommands'
 const SCRIPT_PRIORITY = ['dev', 'serve', 'start', 'tauri:dev', 'preview', 'build', 'test', 'lint']
 
 interface ProjectScriptView {
-  displayed: ProjectScript[]
-  filtered: ProjectScript[]
+  displayed: ProjectCommand[]
+  filtered: ProjectCommand[]
   hiddenCount: number
 }
 
@@ -133,10 +155,13 @@ const aliasInputRefs = new Map<string, HTMLInputElement>()
 const scriptSearch = ref('')
 const scriptSort = ref<ScriptSort>(loadScriptSort())
 const pinEditing = ref(false)
+const processInspectorOpen = ref(false)
+const configProject = ref<DevDockProject | null>(null)
 let logPollTimer: ReturnType<typeof window.setInterval> | undefined
 let processPollTimer: ReturnType<typeof window.setInterval> | undefined
 const loadingAll = computed(() => projects.value.some(project => project.loading))
 const scannedCount = computed(() => projects.value.filter(project => project.manifest).length)
+const runningProcessCount = computed(() => processes.value.filter(process => process.status.state === 'running').length)
 const sortedProjects = computed(() => [...projects.value].sort((left, right) => right.openedAt - left.openedAt))
 const scriptViews = computed(() => {
   const views = new Map<string, ProjectScriptView>()
@@ -191,6 +216,17 @@ async function handleAddProject() {
   await scanProject(project, { touch: true })
 }
 
+function openCommandConfig(project: DevDockProject) {
+  configProject.value = project
+}
+
+async function handleConfigSaved() {
+  const project = configProject.value
+  if (!project) return
+  await scanProject(project, { touch: true })
+  configProject.value = null
+}
+
 async function scanAllProjects() {
   await runWithConcurrency(projects.value, 3, project => scanProject(project))
 }
@@ -203,6 +239,7 @@ async function scanProject(project: DevDockProject, options: { touch?: boolean }
   project.error = ''
   try {
     project.manifest = await loadProjectManifest(project.path)
+    project.error = project.manifest.configError || ''
   } catch (err) {
     project.manifest = null
     project.error = err instanceof Error ? err.message : String(err)
@@ -355,16 +392,21 @@ function getProjectScriptView(project: DevDockProject): ProjectScriptView {
 
 function getSortedProjectScripts(project: DevDockProject) {
   const search = scriptSearch.value.toLocaleLowerCase()
-  const scripts = (project.manifest?.scripts ?? []).filter(script => !search || script.name.toLocaleLowerCase().includes(search))
+  const scripts = (project.manifest?.commands ?? []).filter(command => !search || command.name.toLocaleLowerCase().includes(search))
   return [...scripts].sort((left, right) => {
-    const leftPinned = isScriptPinned(project.path, left.name)
-    const rightPinned = isScriptPinned(project.path, right.name)
-    if (leftPinned !== rightPinned) return leftPinned ? -1 : 1
-
     if (scriptSort.value === 'recent') {
-      const recentDifference = getScriptLastUsed(project.path, right.name) - getScriptLastUsed(project.path, left.name)
+      const recentDifference = getScriptLastUsed(project.path, right.id) - getScriptLastUsed(project.path, left.id)
       if (recentDifference) return recentDifference
     }
+
+    const defaultId = project.manifest?.defaultCommandId
+    const leftDefault = left.id === defaultId
+    const rightDefault = right.id === defaultId
+    if (leftDefault !== rightDefault) return leftDefault ? -1 : 1
+
+    const leftPinned = isScriptPinned(project.path, left.id)
+    const rightPinned = isScriptPinned(project.path, right.id)
+    if (leftPinned !== rightPinned) return leftPinned ? -1 : 1
 
     if (scriptSort.value === 'priority') {
       const leftPriority = getScriptPriority(left.name)
@@ -376,11 +418,11 @@ function getSortedProjectScripts(project: DevDockProject) {
   })
 }
 
-function getDisplayedProjectScripts(project: DevDockProject, scripts: ProjectScript[]) {
+function getDisplayedProjectScripts(project: DevDockProject, scripts: ProjectCommand[]) {
   if (scriptSearch.value || expandedCommandProjects.has(project.path)) return scripts
 
-  const pinned = scripts.filter(script => isScriptPinned(project.path, script.name))
-  const suggested = scripts.filter(script => !isScriptPinned(project.path, script.name)).slice(0, 4)
+  const pinned = scripts.filter(command => isScriptPinned(project.path, command.id))
+  const suggested = scripts.filter(command => !isScriptPinned(project.path, command.id)).slice(0, 4)
   return [...pinned, ...suggested]
 }
 
@@ -398,7 +440,7 @@ function isProjectCommandsExpanded(path: string) {
 
 function loadScriptSort(): ScriptSort {
   const saved = localStorage.getItem(DEVDOC_SCRIPT_SORT_STORAGE_KEY)
-  return saved === 'name' || saved === 'recent' ? saved : 'priority'
+  return saved === 'name' || saved === 'priority' ? saved : 'recent'
 }
 
 function setScriptSort(value: ScriptSort) {
@@ -410,8 +452,8 @@ function persistScriptSort() {
   localStorage.setItem(DEVDOC_SCRIPT_SORT_STORAGE_KEY, scriptSort.value)
 }
 
-function getScriptLastUsed(projectPath: string, scriptName: string) {
-  return recentCommands.value.find(command => normalizePath(command.projectPath) === normalizePath(projectPath) && command.scriptName === scriptName)?.usedAt ?? 0
+function getScriptLastUsed(projectPath: string, commandId: string) {
+  return recentCommands.value.find(command => normalizePath(command.projectPath) === normalizePath(projectPath) && command.commandId === commandId)?.usedAt ?? 0
 }
 
 function getScriptPriority(name: string) {
@@ -442,30 +484,35 @@ function togglePinnedScript(projectPath: string, scriptName: string) {
 function loadPinnedScripts() {
   try {
     const raw = localStorage.getItem(DEVDOC_PINNED_SCRIPTS_STORAGE_KEY)
-    return new Set<string>(raw ? JSON.parse(raw) : [])
+    if (raw) return new Set<string>(JSON.parse(raw))
+    const legacyRaw = localStorage.getItem(LEGACY_PINNED_SCRIPTS_STORAGE_KEY)
+    const migrated = (legacyRaw ? (JSON.parse(legacyRaw) as string[]) : []).map(key => {
+      const separator = key.lastIndexOf('::')
+      return separator < 0 ? key : `${key.slice(0, separator + 2)}package:${key.slice(separator + 2)}`
+    })
+    if (migrated.length) localStorage.setItem(DEVDOC_PINNED_SCRIPTS_STORAGE_KEY, JSON.stringify(migrated))
+    return new Set<string>(migrated)
   } catch (err) {
     reportError('devdock.load-pinned-scripts', err)
     return new Set<string>()
   }
 }
 
-async function startScript(project: DevDockProject, script: ProjectScript) {
-  recordRecentCommand(project, script)
+async function startScript(project: DevDockProject, command: ProjectCommand) {
+  recordRecentCommand(project, command)
   await startProjectCommand({
     projectPath: project.path,
-    projectName: project.manifest?.name || project.name,
-    scriptName: script.name,
-    packageManager: project.manifest?.packageManager || 'npm',
+    commandId: command.id,
   })
 }
 
-async function toggleScript(project: DevDockProject, script: ProjectScript) {
-  const process = findRunningScript(project.path, script.name)
+async function toggleScript(project: DevDockProject, command: ProjectCommand) {
+  const process = findRunningScript(project.path, command.id)
   if (process) {
     await stopProcess(process.id)
     return
   }
-  await startScript(project, script)
+  await startScript(project, command)
 }
 
 async function startRecentCommand(command: RecentCommand) {
@@ -475,18 +522,14 @@ async function startRecentCommand(command: RecentCommand) {
 
 async function startProjectCommand(command: {
   projectPath: string
-  projectName?: string
-  scriptName: string
-  packageManager: string
+  commandId: string
 }) {
-  const key = getScriptKey(command.projectPath, command.scriptName)
+  const key = getScriptKey(command.projectPath, command.commandId)
   startingScripts.add(key)
   try {
-    const process = await startProjectProcess(command)
+    const process = await invokeStartProjectCommand(command)
     updateProcess(process)
-    showProcessLogShell(process)
-    startLogPolling(process.id)
-    void refreshProcessLogs(process.id)
+    processInspectorOpen.value = true
   } catch (err) {
     message.error(reportError('devdock.start', err), { duration: 8000 })
   } finally {
@@ -550,14 +593,6 @@ async function openProcessLogs(processId: string) {
   }
 }
 
-function showProcessLogShell(process: ProjectProcessSnapshot) {
-  processLogs.value = {
-    process,
-    lines: [],
-  }
-  logModalOpen.value = true
-}
-
 function closeProcessLogs() {
   logModalOpen.value = false
   stopLogPolling()
@@ -592,27 +627,34 @@ async function refreshProcessLogs(processId: string) {
 }
 
 function updateProcess(process: ProjectProcessSnapshot) {
-  if (process.status.state !== 'running') {
-    processes.value = processes.value.filter(item => item.id !== process.id)
-    return
-  }
-  processes.value = [process, ...processes.value.filter(item => item.id !== process.id)].sort((left, right) => right.startedAt - left.startedAt)
+  const commandId = process.commandId || process.scriptName
+  processes.value = [
+    process,
+    ...processes.value.filter(item =>
+      item.id !== process.id && (
+        normalizePath(item.projectPath) !== normalizePath(process.projectPath) ||
+        (item.commandId || item.scriptName) !== commandId
+      )
+    ),
+  ].sort((left, right) => right.startedAt - left.startedAt)
 }
 
-function recordRecentCommand(project: DevDockProject, script: ProjectScript) {
+function recordRecentCommand(project: DevDockProject, projectCommand: ProjectCommand) {
   touchProject(project)
   const command: RecentCommand = {
     projectPath: project.path,
     projectName: project.manifest?.name || project.name,
-    scriptName: script.name,
-    command: script.command,
-    packageManager: project.manifest?.packageManager || 'npm',
+    commandId: projectCommand.id,
+    commandName: projectCommand.name,
+    commandPreview: projectCommand.commandPreview,
+    executor: projectCommand.executor,
+    source: projectCommand.source,
     usedAt: Date.now(),
   }
   recentCommands.value = [
     command,
     ...recentCommands.value.filter(
-      item => normalizePath(item.projectPath) !== normalizePath(command.projectPath) || item.scriptName !== command.scriptName,
+      item => normalizePath(item.projectPath) !== normalizePath(command.projectPath) || item.commandId !== command.commandId,
     ),
   ].slice(0, 12)
   localStorage.setItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(recentCommands.value))
@@ -621,13 +663,25 @@ function recordRecentCommand(project: DevDockProject, script: ProjectScript) {
 function loadRecentCommands() {
   try {
     const raw = localStorage.getItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY)
-    const parsed = raw ? (JSON.parse(raw) as RecentCommand[]) : []
+    if (raw) return (JSON.parse(raw) as RecentCommand[])
+      .filter(command => command.projectPath && command.commandId)
+      .sort((left, right) => right.usedAt - left.usedAt)
+      .slice(0, 12)
+    const legacyRaw = localStorage.getItem(LEGACY_RECENT_COMMANDS_STORAGE_KEY)
+    const legacy = legacyRaw ? (JSON.parse(legacyRaw) as Array<Record<string, unknown>>) : []
+    const parsed = legacy.map(item => ({
+      projectPath: String(item.projectPath || ''),
+      projectName: String(item.projectName || ''),
+      commandId: `package:${String(item.scriptName || '')}`,
+      commandName: String(item.scriptName || ''),
+      commandPreview: String(item.command || ''),
+      executor: 'package-script',
+      source: 'package-json',
+      usedAt: Number(item.usedAt || 0),
+    }))
+    if (parsed.length) localStorage.setItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(parsed))
     return parsed
-      .filter(command => command.projectPath && command.scriptName && command.command)
-      .map(command => ({
-        ...command,
-        packageManager: command.packageManager || 'npm',
-      }))
+      .filter(command => command.projectPath && command.commandId)
       .sort((left, right) => right.usedAt - left.usedAt)
       .slice(0, 12)
   } catch (err) {
@@ -647,18 +701,19 @@ function isScriptRunning(projectPath: string, scriptName: string) {
 function findRunningScript(projectPath: string, scriptName: string) {
   const normalized = normalizePath(projectPath)
   return processes.value.find(
-    process => normalizePath(process.projectPath) === normalized && process.scriptName === scriptName && process.status.state === 'running',
+    process => normalizePath(process.projectPath) === normalized && (process.commandId || process.scriptName) === scriptName && process.status.state === 'running',
   )
 }
 
 function isRecentCommandRunning(command: RecentCommand) {
-  return isScriptRunning(command.projectPath, command.scriptName)
+  return isScriptRunning(command.projectPath, command.commandId)
 }
 
 function scriptActionLabel(projectPath: string, scriptName: string) {
   if (isScriptStarting(projectPath, scriptName)) return t('devdock.actions.starting')
   if (isScriptRunning(projectPath, scriptName)) return t('devdock.actions.stop')
-  return t('devdock.actions.run')
+  const hasCompletedRun = processes.value.some(process => normalizePath(process.projectPath) === normalizePath(projectPath) && process.commandId === scriptName)
+  return hasCompletedRun ? t('devdock.actions.rerunTask') : t('devdock.actions.run')
 }
 
 function isProcessBusy(processId: string) {
@@ -667,6 +722,8 @@ function isProcessBusy(processId: string) {
 
 function processStatusLabel(process: ProjectProcessSnapshot) {
   if (process.status.state === 'running') return t('devdock.processes.running')
+  if (process.status.state === 'succeeded') return t('devdock.processes.succeeded')
+  if (process.status.state === 'failed') return t('devdock.processes.failed', { code: process.status.exitCode ?? '--' })
   if (process.status.state === 'stopped') return t('devdock.processes.stopped')
   if (process.status.state === 'exited') return t('devdock.processes.exited', { code: process.status.exitCode ?? '--' })
   return t('devdock.processes.unknown')
@@ -718,18 +775,16 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 
 <style scoped lang="scss">
 .devdock-page {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--lumina-bg) 82%, var(--lumina-surface-1)), var(--lumina-bg)),
-    var(--lumina-bg);
+  background: var(--lumina-content-bg);
   color: var(--lumina-text);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: 0;
 }
 
 .toolbar-tags {
@@ -744,8 +799,24 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 .devdock-shell {
   display: grid;
   flex: 1;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
+
+  &.inspector-open {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  }
+}
+
+.source-list {
+  border-block: 0;
+  border-left: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+@media (max-width: 980px) {
+  .devdock-shell.inspector-open {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  }
 }
 </style>

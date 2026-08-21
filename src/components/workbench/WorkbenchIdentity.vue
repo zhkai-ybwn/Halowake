@@ -18,7 +18,7 @@ defineProps<{
 .workbench-identity {
   align-items: center;
   background: var(--lumina-surface-3);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   display: inline-flex;
   flex: 0 0 230px;
@@ -37,7 +37,7 @@ defineProps<{
   strong {
     color: var(--lumina-text);
     flex: 1;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     min-width: 0;
   }

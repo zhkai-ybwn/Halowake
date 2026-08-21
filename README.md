@@ -1,158 +1,225 @@
 # Lumina
 
-[English](#english) · [下载与发布](https://github.com/zhkai-ybwn/Lumina/releases) · [反馈问题](https://github.com/zhkai-ybwn/Lumina/issues/new/choose)
+<p align="center">
+  <img src="src/assets/logo.png" alt="Lumina Logo" width="84" height="84" />
+</p>
 
-Lumina 是一个给多项目开发者使用的本地桌面工作台：用低成本模型生成 Git Commit Message，并在一个窗口内启动、停止和查看多个项目进程。
+<p align="center">
+  <strong>专为 AI Coding 时代多项目开发者打造的本地桌面工作台</strong>
+</p>
 
-> 不必为一次提交说明消耗紧张的编码模型 Token，也不必在 Git Bash、CMD 和 VS Code 终端之间来回找项目。
+<p align="center">
+  <a href="#english">English</a> ·
+  <a href="https://github.com/zhkai-ybwn/Lumina/releases">下载发布版本</a> ·
+  <a href="https://github.com/zhkai-ybwn/Lumina/issues/new/choose">反馈与建议</a>
+</p>
 
-## 为什么做它
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/Tauri-v2-24C8D8.svg?logo=tauri&logoColor=white" alt="Tauri v2" />
+  <img src="https://img.shields.io/badge/Vue-3.5-4FC08D.svg?logo=vue.js&logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584.svg?logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License MIT" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform" />
+</p>
 
-日常开发里有两个重复、但不值得占用大量注意力的任务：
+---
 
-1. 根据已选文件写一条可靠的 Commit Message。让通用编码模型反复处理它，成本并不划算。
-2. 同时维护多个前端项目时，开发服务散落在多个终端窗口，启动、停止、日志和端口状态都难追踪。
+## 📖 为什么做 Lumina？
 
-Lumina 把这两件事放到同一个本地桌面应用里。AI 只辅助提交信息生成；进程仍由你明确选择的 `package.json` scripts 启动和控制。
+随着 **Claude Code、Google Antigravity、Codex CLI、OpenCode、Cursor** 等 AI Coding Agent 成为现代开发者的主力工具，我们的编码方式发生了剧变：大量业务逻辑在 Agent 对话中被极速实现，但原有的本地开发工具链并没有跟上节奏，反而产生了大量碎片化痛点：
 
-## 两个核心工作流
-
-### 低成本 AI Commit
-
-选择本次要提交的文件，Lumina 会生成可编辑的 Conventional Commit 标题与正文；你仍然可以检查 Prompt、修改结果，再完成提交。
-
-![Lumina 的 Git 提交信息生成界面](src/assets/Git提交信息生成界面.png)
-
-支持 Ollama 与 OpenAI-compatible API，可配置 DeepSeek 等兼容服务。Prompt 按选中文件构建，并提供处理过程查看，避免把无关工作区内容直接发送给模型。
-
-下面是开发期间同一 API Key 的近 30 天用量样本：41 次请求共 ¥0.36，约 ¥0.0088 / 次请求。费用会随模型、输入和输出长度变化；这不是对所有使用场景的价格承诺。
-
-![DeepSeek API 用量样本](src/assets/DeepSeek消耗明细.png)
-
-### DevDock：多项目进程管理
-
-DevDock 读取项目的 `package.json` scripts，集中展示并运行多个项目。你可以查看运行状态、PID、端口、可访问地址和日志，并随时停止或重启受管进程。
-
-![DevDock 多项目启动与状态管理](src/assets/多项目启动界面截图.png)
-
-日志直接在 Lumina 内查看，不需要在一堆终端窗口中定位对应服务。
-
-![DevDock 进程日志](src/assets/进程管理单进程启动界面（日志弹窗）.png)
-
-## 功能一览
-
-| Git 工作台                           | AI Commit Assistant              | DevDock                   |
-| ------------------------------------ | -------------------------------- | ------------------------- |
-| 文件 Diff、暂存状态和提交历史        | 生成并编辑 Conventional Commit   | 解析并运行项目 scripts    |
-| Fetch、Pull、Push、Rebase 与冲突辅助 | OpenAI-compatible 与 Ollama 模型 | 启动、停止、重启受管进程  |
-| 选择部分文件提交，保留其他暂存状态   | Prompt 预览、处理过程与生成记录  | PID、端口、URL 和实时日志 |
-
-## 安装与试用
-
-### 下载桌面安装包
-
-前往 [Releases](https://github.com/zhkai-ybwn/Lumina/releases) 下载已发布的安装包。当前仍处于公开测试阶段，欢迎通过 [Issue](https://github.com/zhkai-ybwn/Lumina/issues/new/choose) 提交使用反馈。
-
-### 从源码运行
-
-环境要求：Node.js 20+、Rust 1.77.2+、Git，以及 [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/)。
-
-```bash
-git clone https://github.com/zhkai-ybwn/Lumina.git
-cd Lumina
-npm install
-npm run tauri:dev
+```mermaid
+graph LR
+  A[AI Coding Agent 时代] --> B[Git 提交割裂]
+  A --> C[本地进程与终端散落]
+  A --> D[Agent 会话分散 & 日报难写]
+  A --> E[多平台 AI 额度焦虑]
+  
+  B --> F[Lumina 一体化工作台]
+  C --> F
+  D --> F
+  E --> F
 ```
 
-构建安装包：
+1. **Git 提交的繁琐与割裂**：
+   - 过去为了生成标准的 Conventional Commit，要把 Diff 贴给昂贵的通用大模型，成本高昂。
+   - 如果用外置脚本生成了提交信息，又不得不频繁切回终端或各种 Git GUI 工具去执行 Commit，工作流严重割裂。
+   - **Lumina 的解法**：打造完整的内置 Git 工作台。支持基于 Diff 快速生成结构化 Commit Message，配合创新的**“选择性提交原子保护”**（只提交勾选文件，自动安全隔离并恢复未勾选文件的暂存区），在单一界面完成从 AI 生成到提交推送的全闭环。
+
+2. **多项目进程与僵尸进程痛点（DevDock）**：
+   - 在 Agent 辅助下我们往往同时开发、维护多个前后端项目。服务随手在 CMD、PowerShell 或编辑器终端里启动，窗口散落一地，端口经常冲突被占，后台僵尸进程甚至持续吞噬几 GB 的内存。
+   - **Lumina 的解法**：**DevDock 多项目进程看板**。统一探测项目脚本（npm/yarn/pnpm/bun/Python/Shell），提供**进程树级强力终止（Tree Kill）**、监听端口与 URL 实时嗅探、以及内置高亮日志视窗。
+
+3. **跨 Agent 会话聚合与 0 消耗日报（AI Session Hub）**：
+   - 现今的 AI 开发工作台已不仅是单一工具，开发者会混用 **Claude Code、Codex CLI、Google Antigravity、OpenCode** 等多个 Agent。各个工具在本地磁盘留下了大量多线程会话记录，下班前汇总日报时难以梳理。
+   - 如果直接让 Agent 总结，不仅受限于单会话的上下文窗口，而且 **Agent 宝贵的高级模型 Token 额度不该浪费在写日报这种重复事务上**。
+   - **Lumina 的解法**：**纯本地磁盘 IO 极速解析（0 Token 消耗）**。自动扫描本地所有受支持的 AI 工具会话与 Git 提交，一键聚合工作流，搭配内置模板**一键复制到网页端免费大模型（ChatGPT/Claude/Kimi）**秒级生成精美日报。
+
+4. **多平台 AI 额度把控不足（AI Quota）**：
+   - 开发者手头同时有 DeepSeek、Gemini、OpenRouter 等多种 API Key，查余额要分别登录多个官网后台，极其繁琐，且对 5 小时/每日调用限额缺乏预警。
+   - **Lumina 的解法**：集成配额大盘，支持本地服务与云端接口余额轮询，并通过独创的 **Pace 节奏算法** 实时计算当前消耗速率（On Pace / Over Pace）。
+
+---
+
+## 🌟 核心功能模块
+
+### 1. 🔀 Git Assistant —— 深度集成的 AI 提交工作台
+
+- **低成本 Conventional Commit 生成**：按选中文件构建 Prompt，支持 DeepSeek、Ollama 及 OpenAI 兼容模型，单次生成成本不到 1 分钱。
+- **暂存区原子隔离保护**：即使工作区有多个已暂存文件，也能单独勾选部分文件提交，提交成功后**自动恢复未勾选文件的暂存状态**，杜绝误提交。
+- **完整 Git 生命周期**：文件树对比、Head Diff、分支切换/合并/删除、上游关联、Git Log 历史追溯、Merge/Rebase 冲突标记。
+
+<!-- 截图占位：Git Assistant 主界面与 AI 提交生成 -->
+![Git Assistant 界面](src/assets/git-assistant-preview.png.png)
+
+> **实测数据**：近 30 天 41 次提交生成仅消耗 ¥0.36：
+> 
+> ![DeepSeek API 用量明细](src/assets/DeepSeek消耗明细.png)
+
+---
+
+### 2. 🚢 DevDock —— 多项目本地进程统一管控中心
+
+- **全脚本自动发现**：深度解析项目 `package.json` scripts 以及 Python、PowerShell、Cmd 脚本。
+- **进程树级终止（Tree Kill）**：彻底清除由子进程衍生的僵尸后台进程，释放占用内存。
+- **端口与 Localhost URL 智能嗅探**：从控制台实时日志中识别服务监听端口与访问链接，支持一键浏览器安全直达。
+- **内置统一日志面板**：告别凌乱终端黑框，提供 ANSI 高亮着色、日志等级过滤与关键字搜索。
+
+<!-- 截图占位：DevDock 多项目进程看板与日志弹窗 -->
+![DevDock 进程管理界面](src/assets/devdock-preview.png)
+
+---
+
+### 3. 📝 AI 工作记录与 0 消耗日报工作台
+
+支持跨多款主流 AI Coding 工具的多源数据提取与会话聚合：
+- 🟢 **Claude Code**：自动解析 `~/.claude/projects/` 会话记录。
+- 🔵 **Codex CLI**：自动解析 `~/.codex/sessions/` 本地 JSONL 记录。
+- 🟣 **Google Antigravity**：自动读取 `~/.gemini/antigravity/brain/` 轨迹与工程映射。
+- 🟠 **OpenCode**：自动读取本地 Storage 会话。
+
+**核心体验**：
+- **0 Token 消耗**：基于本地磁盘 IO 极速读取与语义清洗，不消耗任何 API 额度。
+- **多维度筛选**：按时间范围（今天/昨天/自定义）、工具来源（Claude/Codex/Antigravity/OpenCode）、项目名与关键字自由组合过滤。
+- **一键复制到 Web AI**：内置 Morning Standup、技术总结等 Prompt 模板，一键复制格式化内容至任意 Web 端大模型生成日报。
+
+<!-- 截图占位：AI 工作记录与日报生成界面 -->
+![AI 工作记录与日报生成界面](src/assets/report-preview.png)
+
+---
+
+### 4. 📊 AI Quota —— 聚合配额与消耗节奏监控看板
+
+- **多平台账户聚合**：实时汇总 DeepSeek、Gemini (Google AI Pro 语言服务 / AI Studio)、OpenRouter 等平台的额度与健康状态。
+- **Pace 速率评估算法**：根据 5 小时 / 每日限额重置窗口，动态计算当前是用量安全（On Pace）还是超速消耗（Over Pace），告别限流焦虑。
+
+<!-- 截图占位：AI Quota 多平台配额监控看板 -->
+![AI Quota 配额看板](src/assets/ai-quota-preview.png)
+
+---
+
+### 5. 🛡️ Local Code Review —— 本地代码审查引擎
+
+- **规则 + AI 双引擎审查**：结合本地确定性规则库与大模型深度语义诊断，提供 Strict / Balanced / Fast 预算模式。
+- **缺陷分级归类**：按 `Critical`（严重）、`Major`（重要）、`Minor`（次要）、`Suggestion`（建议）精确定位至源码行。
+- **本地 SQLite 持久化**：审查记录完全离线保存在本地数据库中，随时追溯复盘。
+
+<!-- 截图占位：Local Code Review 本地代码审查界面 -->
+![Local Code Review 界面](src/assets/code-review-preview.png)
+
+---
+
+## 📥 安装与运行
+
+### 方式一：下载桌面安装包
+
+前往 [GitHub Releases](https://github.com/zhkai-ybwn/Lumina/releases) 下载最新发布包：
+- **Windows**: `.exe` (NSIS 安装包) / `.msi`
+- **macOS**: `.dmg` (支持 Intel & Apple Silicon)
+- **Linux**: `.deb` / `.AppImage`
+
+### 方式二：从源码编译运行
+
+**环境要求**：
+- [Node.js](https://nodejs.org/) (>= 20.0.0)
+- [Rust & Cargo](https://www.rust-lang.org/) (>= 1.77.2)
+- Git
+- [Tauri 2 环境依赖](https://v2.tauri.app/start/prerequisites/)
 
 ```bash
+# 1. 克隆项目
+git clone https://github.com/zhkai-ybwn/Lumina.git
+cd Lumina
+
+# 2. 安装前端依赖
+npm install
+
+# 3. 启动本地开发调试
+npm run tauri:dev
+
+# 4. 构建生产发布安装包
 npm run tauri:build
 ```
 
-构建产物位于 `src-tauri/target/release/bundle/`。Windows 下如果 NSIS 或 WiX 下载失败，可运行：
+构建产物将输出至 `src-tauri/target/release/bundle/`。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File fix-tauri-tools.ps1
-```
+---
 
-## 配置 AI 模型
+## 🔒 隐私与本地优先（Local-First）原则
 
-打开 **设置 → 模型**，添加模型后先测试连接，再为 Commit Message 等任务选择模型。
+- 🛡️ **数据零泄漏**：所有配置、Git 历史、审查记录与会话解析均在本地完成，无任何隐式云端上报。
+- 🔑 **API Key 自治**：API 凭据保存在本地，仅在用户显式触发时直连对应模型服务商，绝不经过任何第三方服务器中转。
+- ⚙️ **显式执行机制**：DevDock 严格限制在用户主动添加的可信项目目录内执行脚本，安全可控。
 
-- **OpenAI-compatible**：填写服务地址、模型名和 API Key；可用于 DeepSeek 等兼容 `/chat/completions` 的服务。
-- **Ollama**：例如 `http://localhost:11434`，适合完全本地的模型工作流。
+---
 
-使用远程模型时，选中的代码变更和生成 Prompt 会发送给你配置的服务提供方。请只对你有权限发送的代码使用远程服务。
+## 🤝 反馈与共建
 
-## 数据与安全边界
+Lumina 诞生于一线开发者的真实痛点，期待您的体验与反馈：
+- 🐛 **提交 Bug / 报错**：[创建 Issue](https://github.com/zhkai-ybwn/Lumina/issues/new/choose)
+- 💡 **提出新需求 / 想法**：[提交 Feature 建议](https://github.com/zhkai-ybwn/Lumina/issues/new/choose)
+- 💻 **参与代码贡献**：欢迎阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 提交 PR。
 
-- 模型配置、最近仓库、主题和提交记录保存在本机应用数据中。
-- 项目画像与 Prompt 调试数据写入项目内的 `.lumina/`，Lumina 不会自动提交该目录。
-- DevDock 会执行你主动选择项目中的 `package.json` scripts；请只添加可信项目目录。
-- 退出时可选择最小化到系统托盘，或停止全部受管进程后退出。
+---
 
-## 反馈与贡献
+## 📄 开源协议
 
-Lumina 现在最需要的是实际工作流反馈，尤其是：
-
-- 你是否会用低成本模型替代编码模型生成 Commit Message？
-- 你通常会同时运行多少个本地项目？
-- 你最希望 DevDock 优先解决“项目组启动”“进程健康检查”还是“成本统计”？
-
-请使用 [Bug 报告](https://github.com/zhkai-ybwn/Lumina/issues/new/choose) 或 [功能建议](https://github.com/zhkai-ybwn/Lumina/issues/new/choose) 模板。欢迎提交 Pull Request，详细流程见 [贡献指南](CONTRIBUTING.md)。
-
-开发前的本地检查：
-
-```bash
-npm run lint
-cargo test --manifest-path src-tauri/Cargo.toml --lib
-```
-
-## License
-
-[MIT](LICENSE)
+本项目采用 [MIT License](LICENSE) 开源。
 
 ---
 
 <a id="english"></a>
 
-# Lumina
+# Lumina (English)
 
-[中文](#lumina) · [Releases](https://github.com/zhkai-ybwn/Lumina/releases) · [Report an issue](https://github.com/zhkai-ybwn/Lumina/issues/new/choose)
+<p align="center">
+  <strong>A modern, local-first developer workbench built for the AI Coding Agent era.</strong>
+</p>
 
-Lumina is a local desktop workbench for developers who manage multiple projects: generate Git commit messages with cost-effective AI models, then start, stop, and inspect local project processes in one place.
+<p align="center">
+  <a href="#lumina">中文说明</a> ·
+  <a href="https://github.com/zhkai-ybwn/Lumina/releases">Download Releases</a> ·
+  <a href="https://github.com/zhkai-ybwn/Lumina/issues/new/choose">Report Issues</a>
+</p>
 
-## Why Lumina
+---
 
-Two routine tasks become distracting when repeated every day:
+## 💡 Why Lumina?
 
-1. Writing a reliable commit message from selected changes should not consume a costly coding-model budget.
-2. Running several local projects should not mean hunting through Git Bash, CMD, and VS Code terminals for the right service.
+As **AI Coding Agents** (Claude Code, Google Antigravity, Codex CLI, OpenCode, Cursor, etc.) take over modern software development, developer workflows have fundamentally shifted. Lumina was crafted to bridge the critical gaps in this new landscape:
 
-Lumina keeps both workflows local and explicit. AI assists with commit messages; DevDock only runs the `package.json` scripts you choose.
+1. **Integrated Git Workbench & Low-Cost AI Commits**: Generates structured Conventional Commits with low-cost models without wasting expensive agent tokens, and eliminates screen-switching friction by executing commits and branch management directly in place. Features **atomic index protection** to commit selected files while preserving unselected staged changes.
+2. **DevDock Multi-Project Hub**: Centralizes script execution across multiple projects, prevents runaway zombie processes with tree-level termination, and sniffs listening ports / localhost URLs automatically.
+3. **Multi-Agent Session Hub & Zero-Token Standups**: Aggregates sessions from **Claude Code**, **Codex CLI**, **Google Antigravity**, and **OpenCode** using pure local disk IO (**0 Token Cost**), combining them with customizable templates for 1-click pasting into free web AI models.
+4. **Unified AI Quota Dashboard**: Aggregates balances across DeepSeek, Gemini, and OpenRouter with intelligent **Pace rate-limit evaluation**.
+5. **Local Code Review**: Combines deterministic rules and AI semantic diagnosis offline in local SQLite.
 
-## Core workflows
+---
 
-### Cost-conscious AI Commit
+## 📥 Quick Start
 
-Select the files for a commit, generate an editable Conventional Commit title and body, review the prompt, then commit.
-
-![Git commit message generation](src/assets/Git提交信息生成界面.png)
-
-Lumina supports Ollama and OpenAI-compatible APIs, including compatible DeepSeek services. Prompts are built from selected files and can be inspected before model use.
-
-### DevDock for local projects
-
-DevDock reads `package.json` scripts and brings multiple projects, their processes, ports, URLs, and logs into one view.
-
-![Multiple projects managed in DevDock](src/assets/多项目启动界面截图.png)
-
-![Process logs inside Lumina](src/assets/进程管理单进程启动界面（日志弹窗）.png)
-
-## Install
-
-Download a published installer from [Releases](https://github.com/zhkai-ybwn/Lumina/releases), or run from source with Node.js 20+, Rust 1.77.2+, Git, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/):
+Download pre-built installers from [GitHub Releases](https://github.com/zhkai-ybwn/Lumina/releases), or build from source:
 
 ```bash
 git clone https://github.com/zhkai-ybwn/Lumina.git
@@ -161,19 +228,12 @@ npm install
 npm run tauri:dev
 ```
 
-Build an installer with `npm run tauri:build`.
+Build production installer: `npm run tauri:build`.
 
-## AI and data boundary
+---
 
-- Configure OpenAI-compatible or Ollama models in **Settings → Models**.
-- When you use a remote provider, selected code changes and the generated prompt are sent to that provider.
-- AI configuration, recent repositories, themes, and commit history stay in local application data.
-- DevDock only executes scripts from project directories you explicitly choose.
+## 📄 License
 
-## Feedback and contribution
+Distributed under the [MIT License](LICENSE).
 
-Lumina is in public beta. Please report bugs and feature ideas through [GitHub Issues](https://github.com/zhkai-ybwn/Lumina/issues/new/choose), and see [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## License
-
-[MIT](LICENSE)

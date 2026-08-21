@@ -1876,12 +1876,15 @@ pub fn clone_repository(payload: &GitClonePayload) -> Result<GitCommandResult, S
     if remote_url.is_empty() || destination.is_empty() {
         return Err("仓库地址和目标目录不能为空。".to_string());
     }
+    if remote_url.starts_with('-') || destination.starts_with('-') {
+        return Err("仓库地址和目标目录不能以连字符开头。".to_string());
+    }
     let parent = Path::new(destination)
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .ok_or_else(|| "目标目录无效。".to_string())?;
     let parent_path = parent.to_string_lossy();
-    let result = run_git_capture(&parent_path, &["clone", remote_url, destination])?;
+    let result = run_git_capture(&parent_path, &["clone", "--", remote_url, destination])?;
     Ok(GitCommandResult { message: format!("已克隆仓库到: {}", destination), ..result })
 }
 

@@ -6,6 +6,7 @@ p1_count: 1
 timestamp: 2026-06-26T03-00-42Z
 slug: src-views-git-assistant-gitassistantview-vue
 ---
+
 # Lumina Git Assistant UI Critique
 
 Target: src/views/git-assistant/GitAssistantView.vue
@@ -13,19 +14,19 @@ Score: 31/40
 
 ## Design Health Score
 
-| # | Heuristic | Score | Key Issue |
-|---|-----------|-------|-----------|
-| 1 | Visibility of System Status | 3 | Repository sync, selected file count, and empty states are visible; long-running AI/Git progress still depends on dialogs/drawers. |
-| 2 | Match System / Real World | 3 | Git terminology and flow are natural for developers; DevDock switching is still not represented in the shell. |
-| 3 | User Control and Freedom | 3 | Refresh, folder switching, selection clearing, drawers, and dialogs provide exits; undo/recovery for accidental commit composition is limited to history. |
-| 4 | Consistency and Standards | 3 | Panels, buttons, and table patterns are more consistent after layout cleanup; some Naive UI and custom controls still mix interaction vocabularies. |
-| 5 | Error Prevention | 3 | Submit gating and the new two-step commit flow prevent the main premature-submit error; remote/sync edge states are still dense. |
-| 6 | Recognition Rather Than Recall | 3 | The commit precondition is now visible, and empty states explain context; right-click table actions remain discoverability-heavy. |
-| 7 | Flexibility and Efficiency | 3 | Batch selection, double-click diff, context menu, resizable columns, recent repos, and history serve power users. Keyboard accelerators are not explicit. |
-| 8 | Aesthetic and Minimalist Design | 3 | Restrained product UI and grouped top actions reduce noise; toolbar metrics and file selection presets still create a busy first scan. |
-| 9 | Error Recovery | 3 | Error banner and command dialogs appear to support recovery; quality of exact messages needs runtime review. |
-| 10 | Help and Documentation | 4 | Inline flow copy, empty-state guidance, labels, and concise hints are now strong for the primary task. |
-| **Total** | | **31/40** | **Good** |
+| #         | Heuristic                       | Score     | Key Issue                                                                                                                                                 |
+| --------- | ------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1         | Visibility of System Status     | 3         | Repository sync, selected file count, and empty states are visible; long-running AI/Git progress still depends on dialogs/drawers.                        |
+| 2         | Match System / Real World       | 3         | Git terminology and flow are natural for developers; DevDock switching is still not represented in the shell.                                             |
+| 3         | User Control and Freedom        | 3         | Refresh, folder switching, selection clearing, drawers, and dialogs provide exits; undo/recovery for accidental commit composition is limited to history. |
+| 4         | Consistency and Standards       | 3         | Panels, buttons, and table patterns are more consistent after layout cleanup; some Naive UI and custom controls still mix interaction vocabularies.       |
+| 5         | Error Prevention                | 3         | Submit gating and the new two-step commit flow prevent the main premature-submit error; remote/sync edge states are still dense.                          |
+| 6         | Recognition Rather Than Recall  | 3         | The commit precondition is now visible, and empty states explain context; right-click table actions remain discoverability-heavy.                         |
+| 7         | Flexibility and Efficiency      | 3         | Batch selection, double-click diff, context menu, resizable columns, recent repos, and history serve power users. Keyboard accelerators are not explicit. |
+| 8         | Aesthetic and Minimalist Design | 3         | Restrained product UI and grouped top actions reduce noise; toolbar metrics and file selection presets still create a busy first scan.                    |
+| 9         | Error Recovery                  | 3         | Error banner and command dialogs appear to support recovery; quality of exact messages needs runtime review.                                              |
+| 10        | Help and Documentation          | 4         | Inline flow copy, empty-state guidance, labels, and concise hints are now strong for the primary task.                                                    |
+| **Total** |                                 | **31/40** | **Good**                                                                                                                                                  |
 
 ## Anti-Patterns Verdict
 

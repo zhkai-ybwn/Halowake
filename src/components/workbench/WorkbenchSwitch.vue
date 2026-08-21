@@ -38,7 +38,7 @@ function handleSelect(key: string) {
 .workbench-switch {
   align-items: center;
   background: color-mix(in srgb, var(--lumina-surface-2) 70%, var(--lumina-surface-3));
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   display: inline-flex;
   flex: 0 0 auto;
@@ -46,6 +46,7 @@ function handleSelect(key: string) {
   gap: 2px;
   height: 28px;
   padding: 2px;
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lumina-separator) 42%, transparent);
 }
 
 .workbench-switch-item {
@@ -67,7 +68,8 @@ function handleSelect(key: string) {
 
   &.active {
     background: var(--lumina-surface-1);
-    color: var(--lumina-primary);
+    box-shadow: var(--lumina-shadow-sm);
+    color: var(--lumina-text);
     cursor: default;
   }
 }

@@ -2,12 +2,16 @@
 pub mod ai;
 pub mod commands;
 pub mod git;
+pub mod quota;
+pub mod review;
+pub mod storage;
 
 use tauri::{menu::MenuBuilder, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
         .manage(commands::project_process::ProjectProcessState::default())
+        .manage(review::ReviewTaskRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -17,6 +21,11 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            let database = storage::AppDatabase::open(app.handle())
+                .map_err(std::io::Error::other)?;
+            review::repository::mark_running_sessions_interrupted(&database)
+                .map_err(std::io::Error::other)?;
+            app.manage(database);
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(tauri::include_image!("icons/window-icon.png"))?;
             }
@@ -88,7 +97,15 @@ pub fn run() {
             commands::git::test_ai_model_connection,
             commands::ai_settings::load_ai_settings,
             commands::ai_settings::save_ai_settings,
+            commands::codex_report::load_codex_projects,
+            commands::codex_report::load_codex_report_sessions,
+            commands::codex_report::detect_installed_ai_tools,
             commands::project::load_project_manifest,
+            commands::project::load_project_config,
+            commands::project::validate_project_config,
+            commands::project::save_project_config_command,
+            commands::project::discover_project_commands,
+            commands::project_process::start_project_command,
             commands::project_process::start_project_process,
             commands::project_process::list_project_processes,
             commands::project_process::stop_project_process,
@@ -97,6 +114,23 @@ pub fn run() {
             commands::project_process::load_project_process_logs,
             commands::project_process::open_project_url,
             commands::project_process::check_pid_alive,
+            commands::storage::load_storage_settings,
+            commands::storage::save_storage_settings,
+            commands::storage::get_storage_overview,
+            commands::storage::run_storage_cleanup,
+            commands::quota::load_all_quotas,
+            commands::quota::refresh_single_quota,
+            commands::quota::load_quota_accounts,
+            commands::quota::save_quota_accounts,
+            commands::quota::discover_local_ai_accounts,
+            commands::review::start_local_code_review,
+            commands::review::get_local_code_review,
+            commands::review::list_local_code_reviews,
+            commands::review::cancel_local_code_review,
+            commands::review::update_review_finding,
+            commands::review::list_review_rules,
+            commands::review::save_review_rule,
+            commands::review::delete_review_rule,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

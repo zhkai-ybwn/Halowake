@@ -173,7 +173,7 @@ async function saveProfile() {
 
 .primary-btn {
   background: var(--lumina-primary);
-  color: #fff;
+  color: var(--lumina-on-accent);
 }
 
 .secondary-btn {

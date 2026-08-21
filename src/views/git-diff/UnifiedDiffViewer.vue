@@ -187,7 +187,7 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
 
 .locator-bar {
   background: color-mix(in srgb, var(--lumina-surface-2) 92%, var(--lumina-text-secondary));
-  border-right: 1px solid var(--lumina-card-border);
+  border-right: 0.5px solid var(--lumina-separator);
   cursor: pointer;
   padding: 0;
   user-select: none;
@@ -195,8 +195,8 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
 
 .locator-bar__track {
   background: color-mix(in srgb, var(--lumina-text-secondary) 6%, var(--lumina-surface-1));
-  border-left: 1px solid color-mix(in srgb, var(--lumina-text-secondary) 24%, transparent);
-  border-right: 1px solid color-mix(in srgb, var(--lumina-text-secondary) 24%, transparent);
+  border-left: 0.5px solid color-mix(in srgb, var(--lumina-text-secondary) 24%, transparent);
+  border-right: 0.5px solid color-mix(in srgb, var(--lumina-text-secondary) 24%, transparent);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   height: 100%;
@@ -205,7 +205,7 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
 }
 
 .locator-bar__lane {
-  border-right: 1px solid color-mix(in srgb, var(--lumina-text-secondary) 18%, transparent);
+  border-right: 0.5px solid color-mix(in srgb, var(--lumina-text-secondary) 18%, transparent);
   position: relative;
 }
 
@@ -237,7 +237,7 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
 
 .locator-bar__viewport {
   background: color-mix(in srgb, var(--lumina-text-secondary) 26%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lumina-text-secondary) 44%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--lumina-text-secondary) 44%, transparent);
   min-height: 8px;
   z-index: 2;
 }
@@ -296,7 +296,7 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
 
 .diff-line__number {
   background: color-mix(in srgb, var(--lumina-surface-2) 90%, var(--lumina-text-secondary));
-  border-right: 1px solid var(--lumina-card-border);
+  border-right: 0.5px solid var(--lumina-separator);
   color: var(--lumina-text-secondary);
   font-variant-numeric: tabular-nums;
   padding-right: 8px;

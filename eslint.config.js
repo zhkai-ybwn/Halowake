@@ -13,5 +13,5 @@ export default defineConfigWithVueTs(
       'vue/no-v-html': 'off',
       'vue/require-default-prop': 'off',
     },
-  },
+  }
 )

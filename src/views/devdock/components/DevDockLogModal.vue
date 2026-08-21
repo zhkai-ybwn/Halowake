@@ -12,7 +12,7 @@
       <section class="process-log-dialog">
         <header class="process-log-dialog__header">
           <div>
-            <h3>{{ logs?.process.projectName ?? '' }} · {{ logs?.process.scriptName ?? '' }}</h3>
+            <h3>{{ logs?.process.projectName ?? '' }} · {{ logs?.process.commandName || logs?.process.scriptName || '' }}</h3>
             <p>{{ description }}</p>
           </div>
           <div class="process-log-controls">
@@ -62,7 +62,7 @@
           <pre
             v-if="!visibleLines.length"
             class="wb-log-line log-pending"
-          ><span class="wb-log-level">WAIT</span><span class="wb-log-stream"></span><span>{{ search || levelFilter !== 'all' ? t('devdock.processes.noLogMatches') : t('devdock.processes.waitingLogs') }}</span></pre>
+          ><span class="wb-log-level">INFO</span><span class="wb-log-stream"></span><span>{{ emptyLogMessage }}</span></pre>
         </section>
         <section v-else class="process-empty">
           <strong>{{ t('devdock.processes.emptyLogsTitle') }}</strong>
@@ -105,8 +105,8 @@ const description = computed(() => {
   if (!props.logs) return ''
   const ports = props.logs.process.ports
   return ports.length
-    ? `${props.logs.process.command} · ${t('devdock.processes.ports', { ports: ports.join(', ') })}`
-    : props.logs.process.command
+    ? `${props.logs.process.commandPreview || props.logs.process.command} · ${t('devdock.processes.ports', { ports: ports.join(', ') })}`
+    : props.logs.process.commandPreview || props.logs.process.command
 })
 
 const classifiedLines = computed(() =>
@@ -151,6 +151,15 @@ const visibleLines = computed(() => {
   }))
 })
 
+const emptyLogMessage = computed(() => {
+  if (search.value || levelFilter.value !== 'all') return t('devdock.processes.noLogMatches')
+  const state = props.logs?.process.status.state
+  if (state === 'succeeded' || state === 'exited') return t('devdock.processes.completedWithoutLogs')
+  if (state === 'failed') return t('devdock.processes.failedWithoutLogs')
+  if (state === 'stopped') return t('devdock.processes.stoppedWithoutLogs')
+  return t('devdock.processes.runningWithoutLogs')
+})
+
 watch(
   () => props.show,
   show => {
@@ -193,11 +202,21 @@ function renderLogLine(text: string) {
   return ansiUp.ansi_to_html(text)
 }
 
-function classifyLogLevel(stream: 'stdout' | 'stderr', text: string): LogLevel {
+function classifyLogLevel(stream: 'stdout' | 'stderr' | 'system', text: string): LogLevel {
   const content = text.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '').toLowerCase()
-  if (/\b(error|err|failed|failure|fatal|exception|panic)\b/.test(content)) return 'error'
-  if (/\b(warn|warning|deprecated)\b/.test(content)) return 'warning'
-  return stream === 'stderr' ? 'error' : 'info'
+  const nonZeroExit = stream === 'system' && (
+    /退出码\s+(?!0\b)\d+/.test(content) ||
+    /exit code\s+(?!0\b)\d+/.test(content)
+  )
+  if (nonZeroExit || /\b(error|err|failed|failure|fatal|exception|panic|traceback)\b|错误|失败|异常/.test(content)) {
+    return 'error'
+  }
+  if (/\b(warn|warning|deprecated|outdated)\b|browsers data.+\bold\b|ignored browsers|警告|已弃用/.test(content)) {
+    return 'warning'
+  }
+  // Many development servers use stderr for progress, banners and diagnostics.
+  // The stream identifies transport, not severity, so neutral stderr stays INFO.
+  return 'info'
 }
 
 function scrollToBottom() {
@@ -347,9 +366,9 @@ function scrollToTop() {
   }
 
   &.warning.active {
-    background: color-mix(in srgb, #e5a100 14%, var(--lumina-surface-1));
-    border-color: color-mix(in srgb, #e5a100 52%, var(--lumina-card-border));
-    color: #d99500;
+    background: color-mix(in srgb, var(--lumina-warning) 14%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-warning) 52%, var(--lumina-card-border));
+    color: var(--lumina-warning);
   }
 
   &.error.active {
@@ -383,11 +402,11 @@ function scrollToTop() {
   }
 
   .warning .wb-log-level {
-    color: #d99500;
+    color: var(--lumina-warning);
   }
 
   .error {
-    color: #ffb4a8;
+    color: var(--lumina-danger);
 
     .wb-log-level {
       color: var(--lumina-danger);

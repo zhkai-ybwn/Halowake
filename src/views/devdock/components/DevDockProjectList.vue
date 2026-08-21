@@ -8,7 +8,7 @@
       <div class="command-toolbar">
         <label class="command-search">
           <Icon icon="solar:magnifer-linear" />
-          <input :value="scriptSearch" type="search" :placeholder="t('devdock.scripts.searchPlaceholder')" @input="$emit('update:scriptSearch', ($event.target as HTMLInputElement).value.trim())" />
+          <input ref="searchInput" :value="scriptSearch" type="search" :placeholder="t('devdock.scripts.searchPlaceholder')" @input="$emit('update:scriptSearch', ($event.target as HTMLInputElement).value.trim())" />
         </label>
         <select :value="scriptSort" class="command-sort" :aria-label="t('devdock.scripts.sortLabel')" @change="handleSortChange">
           <option value="priority">{{ t('devdock.scripts.sortPriority') }}</option>
@@ -71,6 +71,9 @@
           </div>
 
           <div class="project-row-actions" @click.stop>
+            <button class="row-action" type="button" :title="t('devdock.actions.configureCommands')" :aria-label="t('devdock.actions.configureCommands')" @click="$emit('configureCommands', project)">
+              <Icon icon="solar:tuning-2-linear" />
+            </button>
             <button class="row-action" type="button" :title="t('devdock.actions.rename')" :aria-label="t('devdock.actions.rename')" @click="$emit('startEditAlias', project.path)">
               <Icon icon="solar:pen-2-linear" />
             </button>
@@ -86,7 +89,7 @@
         <section v-if="project.error" class="project-error">
           <span>{{ project.error }}</span>
           <button type="button" :aria-label="t('common.dismiss')" @click="$emit('dismissProjectError', project)">
-            <Icon icon="solar:close-circle-linear" />
+            <span class="close-glyph" aria-hidden="true">×</span>
           </button>
         </section>
 
@@ -100,32 +103,32 @@
           <div v-else-if="filteredScripts(project).length" class="script-list">
             <article
               v-for="script in displayedScripts(project)"
-              :key="script.name"
+              :key="script.id"
               class="script-row"
-              :class="{ running: isScriptRunning(project.path, script.name), starting: isScriptStarting(project.path, script.name), 'pin-editing': pinEditing }"
+              :class="{ running: isScriptRunning(project.path, script.id), starting: isScriptStarting(project.path, script.id), 'pin-editing': pinEditing }"
             >
               <span class="script-status-dot" aria-hidden="true"></span>
-              <strong :title="script.name">{{ script.name }}</strong>
+              <strong :title="`${script.name} · ${script.sourceLabel}`">{{ script.name }}</strong>
               <button
                 v-if="pinEditing"
                 class="pin-btn"
                 type="button"
-                :class="{ active: isScriptPinned(project.path, script.name) }"
-                :aria-label="isScriptPinned(project.path, script.name) ? t('devdock.actions.unpinScript') : t('devdock.actions.pinScript')"
-                @click="$emit('togglePinnedScript', project.path, script.name)"
+                :class="{ active: isScriptPinned(project.path, script.id) }"
+                :aria-label="isScriptPinned(project.path, script.id) ? t('devdock.actions.unpinScript') : t('devdock.actions.pinScript')"
+                @click="$emit('togglePinnedScript', project.path, script.id)"
               >
-                <Icon :icon="isScriptPinned(project.path, script.name) ? 'solar:pin-bold' : 'solar:pin-linear'" />
+                <Icon :icon="isScriptPinned(project.path, script.id) ? 'solar:pin-bold' : 'solar:pin-linear'" />
               </button>
               <button
                 class="script-run-btn"
                 type="button"
-                :class="{ stop: isScriptRunning(project.path, script.name) }"
-                :title="scriptActionLabel(project.path, script.name)"
-                :aria-label="scriptActionLabel(project.path, script.name)"
-                :disabled="isScriptStarting(project.path, script.name)"
+                :class="{ stop: isScriptRunning(project.path, script.id) }"
+                :title="scriptActionLabel(project.path, script.id)"
+                :aria-label="scriptActionLabel(project.path, script.id)"
+                :disabled="isScriptStarting(project.path, script.id)"
                 @click="$emit('toggleScript', project, script)"
               >
-                <Icon :icon="isScriptRunning(project.path, script.name) ? 'solar:stop-bold' : 'solar:play-bold'" />
+                <Icon :icon="isScriptRunning(project.path, script.id) ? 'solar:stop-bold' : 'solar:play-bold'" />
               </button>
             </article>
             <button
@@ -148,14 +151,16 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
-import type { ProjectScript } from '@/services/project/project-service'
+import type { ProjectCommand } from '@/services/project/project-service'
 import type { DevDockProject, ScriptSort } from '../types'
+import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 
 defineProps<{
-  displayedScripts: (project: DevDockProject) => ProjectScript[]
+  displayedScripts: (project: DevDockProject) => ProjectCommand[]
   editingAliasPath: string | null
-  filteredScripts: (project: DevDockProject) => ProjectScript[]
+  filteredScripts: (project: DevDockProject) => ProjectCommand[]
   hasProjects: boolean
   hiddenScriptCount: (project: DevDockProject) => number
   isProjectCommandsExpanded: (path: string) => boolean
@@ -174,6 +179,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'addProject'): void
   (e: 'cancelEditAlias'): void
+  (e: 'configureCommands', project: DevDockProject): void
   (e: 'dismissProjectError', project: DevDockProject): void
   (e: 'finishEditAlias', project: DevDockProject): void
   (e: 'openRecent'): void
@@ -183,13 +189,25 @@ const emit = defineEmits<{
   (e: 'startEditAlias', path: string): void
   (e: 'togglePinnedScript', projectPath: string, scriptName: string): void
   (e: 'toggleProjectCommands', path: string): void
-  (e: 'toggleScript', project: DevDockProject, script: ProjectScript): void
+  (e: 'toggleScript', project: DevDockProject, script: ProjectCommand): void
   (e: 'update:pinEditing', value: boolean): void
   (e: 'update:scriptSearch', value: string): void
   (e: 'update:scriptSort', value: ScriptSort): void
 }>()
 
 const { t } = useLocale()
+const searchInput = ref<HTMLInputElement | null>(null)
+
+function handleFindShortcut(event: KeyboardEvent) {
+  if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'f') return
+  if (!searchInput.value?.offsetParent) return
+  event.preventDefault()
+  searchInput.value.focus()
+  searchInput.value.select()
+}
+
+onMounted(() => window.addEventListener('keydown', handleFindShortcut))
+onUnmounted(() => window.removeEventListener('keydown', handleFindShortcut))
 
 function handleSortChange(event: Event) {
   emit('update:scriptSort', (event.target as HTMLSelectElement).value as ScriptSort)
@@ -389,7 +407,7 @@ function handleSortChange(event: Event) {
 .primary {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
-  color: #fff;
+  color: var(--lumina-on-accent);
   justify-self: center;
 }
 
@@ -542,9 +560,11 @@ function handleSortChange(event: Event) {
       color: var(--lumina-text);
     }
 
-    svg {
-      height: 16px;
-      width: 16px;
+    .close-glyph {
+      font-size: 19px;
+      font-weight: 300;
+      line-height: 1;
+      transform: translateY(-1px);
     }
   }
 }
@@ -568,21 +588,27 @@ function handleSortChange(event: Event) {
 
 .script-list {
   display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 5px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
 }
 
 .script-row {
   align-items: center;
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
+  background: color-mix(in srgb, var(--lumina-surface-2) 76%, transparent);
+  border: 0.5px solid var(--lumina-card-border);
   border-radius: var(--lumina-radius-sm);
   display: grid;
-  gap: 7px;
+  gap: 6px;
   grid-template-columns: 7px minmax(0, 1fr) 26px;
-  min-height: 38px;
-  padding: 5px 6px 5px 8px;
-  transition: background 160ms ease, border-color 160ms ease;
+  min-height: 36px;
+  padding: 4px 5px 4px 8px;
+  transition: background var(--lumina-duration-fast) var(--lumina-ease-out), border-color var(--lumina-duration-fast) var(--lumina-ease-out), box-shadow var(--lumina-duration-fast) var(--lumina-ease-out);
+
+  &:hover,
+  &:focus-within {
+    background: var(--lumina-control-hover);
+    border-color: var(--lumina-separator-strong);
+  }
 
   &.pin-editing {
     grid-template-columns: 7px minmax(0, 1fr) 26px 26px;
@@ -590,6 +616,7 @@ function handleSortChange(event: Event) {
 
   strong {
     font-size: 12px;
+    font-weight: 550;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -597,8 +624,8 @@ function handleSortChange(event: Event) {
   }
 
   &.running {
-    background: color-mix(in srgb, var(--lumina-success) 13%, var(--lumina-surface-1));
-    border-color: color-mix(in srgb, var(--lumina-success) 58%, var(--lumina-card-border));
+    background: color-mix(in srgb, var(--lumina-success) 9%, var(--lumina-surface-1));
+    border-color: color-mix(in srgb, var(--lumina-success) 42%, var(--lumina-card-border));
 
     strong {
       color: color-mix(in srgb, var(--lumina-success) 78%, var(--lumina-text));
@@ -687,7 +714,7 @@ function handleSortChange(event: Event) {
   font-size: 11px;
   gap: 6px;
   justify-content: center;
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 10px;
 
   &:hover,

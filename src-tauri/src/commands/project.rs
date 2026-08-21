@@ -2,15 +2,23 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{fs, path::Path};
 
+use super::{project_config::{read_project_config, save_project_config, validate_config}, project_discovery::discover_commands, project_models::{LuminaProjectConfig, ProjectCommand, ProjectCommandCandidate}, project_resolver::{resolve_package_project_commands, resolve_project_commands}};
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectManifest {
     pub project_path: String,
-    pub package_json_path: String,
+    pub package_json_path: Option<String>,
     pub name: Option<String>,
     pub version: Option<String>,
     pub package_manager: String,
     pub scripts: Vec<ProjectScript>,
+    pub commands: Vec<ProjectCommand>,
+    pub candidates: Vec<ProjectCommandCandidate>,
+    pub detected_types: Vec<String>,
+    pub config_state: String,
+    pub config_error: Option<String>,
+    pub default_command_id: Option<String>,
     pub dependencies_count: usize,
     pub dev_dependencies_count: usize,
     pub detected_stack: Vec<String>,
@@ -30,6 +38,32 @@ pub async fn load_project_manifest(project_path: String) -> Result<ProjectManife
         .map_err(|e| format!("加载项目配置任务异常: {}", e))?
 }
 
+#[tauri::command]
+pub async fn load_project_config(project_path: String) -> Result<LuminaProjectConfig, String> {
+    tokio::task::spawn_blocking(move || read_project_config(&project_path))
+        .await
+        .map_err(|error| format!("加载项目配置任务异常: {error}"))?
+}
+
+#[tauri::command]
+pub async fn validate_project_config(config: LuminaProjectConfig) -> Result<(), String> {
+    validate_config(&config)
+}
+
+#[tauri::command]
+pub async fn save_project_config_command(project_path: String, config: LuminaProjectConfig) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || save_project_config(&project_path, &config))
+        .await
+        .map_err(|error| format!("保存项目配置任务异常: {error}"))?
+}
+
+#[tauri::command]
+pub async fn discover_project_commands(project_path: String) -> Result<Vec<ProjectCommandCandidate>, String> {
+    tokio::task::spawn_blocking(move || discover_commands(&project_path))
+        .await
+        .map_err(|error| format!("发现项目命令任务异常: {error}"))?
+}
+
 pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifest, String> {
     let project_dir = Path::new(project_path);
     if !project_dir.is_dir() {
@@ -37,16 +71,19 @@ pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifes
     }
 
     let package_json_path = project_dir.join("package.json");
-    if !package_json_path.is_file() {
-        return Err("当前目录未找到 package.json。".to_string());
-    }
+    let package_json = if package_json_path.is_file() {
+        let content = fs::read_to_string(&package_json_path)
+            .map_err(|e| format!("读取 package.json 失败: {}", e))?;
+        Some(serde_json::from_str::<Value>(&content)
+            .map_err(|e| format!("package.json 不是合法 JSON: {}", e))?)
+    } else { None };
+    let (config, config_error) = match read_project_config(project_path) {
+        Ok(config) => (config, None),
+        Err(error) => (LuminaProjectConfig::default(), Some(error)),
+    };
+    let commands = if config_error.is_some() { resolve_package_project_commands(project_path)? } else { resolve_project_commands(project_path)? };
 
-    let content = fs::read_to_string(&package_json_path)
-        .map_err(|e| format!("读取 package.json 失败: {}", e))?;
-    let package_json: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("package.json 不是合法 JSON: {}", e))?;
-
-    let scripts = package_json
+    let scripts = package_json.as_ref().map(|package| package
         .get("scripts")
         .and_then(Value::as_object)
         .map(|script_map| {
@@ -62,21 +99,37 @@ pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifes
             scripts.sort_by(|left, right| left.name.cmp(&right.name));
             scripts
         })
-        .unwrap_or_default();
+        .unwrap_or_default()).unwrap_or_default();
 
-    let dependencies_count = object_len(package_json.get("dependencies"));
-    let dev_dependencies_count = object_len(package_json.get("devDependencies"));
+    let dependencies_count = package_json.as_ref().map(|package| object_len(package.get("dependencies"))).unwrap_or(0);
+    let dev_dependencies_count = package_json.as_ref().map(|package| object_len(package.get("devDependencies"))).unwrap_or(0);
+    let name = package_json.as_ref().and_then(|package| string_field(package, "name")).or(config.name.clone());
+    let version = package_json.as_ref().and_then(|package| string_field(package, "version"));
+    let package_manager = package_json.as_ref().map(|package| detect_package_manager(project_dir, package)).unwrap_or_else(|| "none".to_string());
+    let candidates = discover_commands(project_path)?;
+    let mut detected_types = config.types.clone();
+    if package_json.is_some() && !detected_types.iter().any(|item| item == "frontend") { detected_types.push("frontend".to_string()); }
+    if config.runtimes.python.is_some() && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
+    if candidates.iter().any(|candidate| candidate.executor == "python") && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
 
     Ok(ProjectManifest {
         project_path: project_path.to_string(),
-        package_json_path: package_json_path.to_string_lossy().to_string(),
-        name: string_field(&package_json, "name"),
-        version: string_field(&package_json, "version"),
-        package_manager: detect_package_manager(project_dir, &package_json),
+        package_json_path: package_json_path.is_file().then(|| package_json_path.to_string_lossy().to_string()),
+        name,
+        version,
         scripts,
+        commands,
+        candidates,
+        detected_types,
+        config_state: if config_error.is_some() { "invalid".to_string() } else if config.commands.is_empty() { "default".to_string() } else { "configured".to_string() },
+        config_error,
+        default_command_id: config.defaults.command_id.as_ref().map(|id| {
+            if id.starts_with("package:") { id.clone() } else { format!("config:{id}") }
+        }),
+        package_manager,
         dependencies_count,
         dev_dependencies_count,
-        detected_stack: detect_stack(&package_json),
+        detected_stack: package_json.as_ref().map(detect_stack).unwrap_or_default(),
     })
 }
 

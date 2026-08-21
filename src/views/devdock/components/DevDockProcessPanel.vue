@@ -5,6 +5,9 @@
         <span>{{ t('devdock.processes.title') }}</span>
         <strong>{{ t('devdock.processes.subtitle') }}</strong>
       </div>
+      <button class="inspector-close" type="button" :aria-label="t('common.close')" @click="$emit('close')">
+        <span class="close-glyph" aria-hidden="true">×</span>
+      </button>
     </header>
 
     <section v-if="!processes.length" class="process-empty">
@@ -12,10 +15,12 @@
       <p>{{ t('devdock.processes.emptyDescription') }}</p>
     </section>
     <section v-else class="process-list">
-      <article v-for="process in processes" :key="process.id" class="process-row">
+      <section v-for="group in runGroups" :key="group.state" class="run-group">
+        <h4>{{ group.state === 'active' ? t('devdock.processes.activeRuns') : t('devdock.processes.recentRuns') }}</h4>
+      <article v-for="process in group.runs" :key="process.id" class="process-row" :class="process.status.state">
         <div class="process-row-head">
           <div class="process-row-main">
-            <strong>{{ process.projectName }} · {{ process.scriptName }}</strong>
+            <strong>{{ process.projectName }} · {{ process.commandName || process.scriptName }}</strong>
             <span>
               {{ processStatusLabel(process) }} · {{ t('devdock.processes.pid', { pid: process.pid }) }}
               <template v-if="process.ports.length"> · {{ t('devdock.processes.ports', { ports: process.ports.join(', ') }) }}</template>
@@ -26,26 +31,30 @@
           </button>
         </div>
         <div class="process-link-row">
-          <code>{{ processUrl(process) || process.command }}</code>
+          <code>{{ processUrl(process) || process.commandPreview || process.command }}</code>
           <button type="button" :disabled="!processUrl(process)" @click="$emit('copyUrl', process)">{{ t('devdock.actions.copy') }}</button>
         </div>
+        <p v-if="process.warning" class="process-warning">{{ process.warning }}</p>
+        <p v-else-if="process.status.state === 'failed' && process.lastLogLine" class="process-failure">{{ process.lastLogLine }}</p>
         <div class="process-actions">
           <button type="button" @click="$emit('openLogs', process.id)">{{ t('devdock.actions.logs') }}</button>
-          <button type="button" :disabled="isBusy(process.id)" @click="$emit('restart', process.id)">{{ t('devdock.actions.restart') }}</button>
+          <button type="button" :disabled="isBusy(process.id)" @click="$emit('restart', process.id)">{{ process.status.state === 'running' || process.status.state === 'starting' ? t('devdock.actions.restart') : t('devdock.actions.rerunTask') }}</button>
           <button class="danger" type="button" :disabled="process.status.state !== 'running' || isBusy(process.id)" @click="$emit('stop', process.id)">
             {{ t('devdock.actions.stop') }}
           </button>
         </div>
       </article>
+      </section>
     </section>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
 import type { ProjectProcessSnapshot } from '@/services/project/project-service'
 
-defineProps<{
+const props = defineProps<{
   isBusy: (processId: string) => boolean
   processStatusLabel: (process: ProjectProcessSnapshot) => string
   processUrl: (process: ProjectProcessSnapshot) => string
@@ -58,21 +67,54 @@ defineEmits<{
   (e: 'openUrl', process: ProjectProcessSnapshot): void
   (e: 'restart', processId: string): void
   (e: 'stop', processId: string): void
+  (e: 'close'): void
 }>()
 
 const { t } = useLocale()
+const runGroups = computed(() => [
+  { state: 'active', runs: props.processes.filter(process => process.status.state === 'running' || process.status.state === 'starting') },
+  { state: 'recent', runs: props.processes.filter(process => process.status.state !== 'running' && process.status.state !== 'starting') },
+].filter(group => group.runs.length))
 </script>
 
 <style scoped lang="scss">
 .process-panel {
   background: var(--lumina-surface-1);
   border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-sm);
+  border-block: 0;
+  border-radius: 0;
+  border-right: 0;
+  box-shadow: none;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+}
+
+.inspector-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--lumina-radius-sm);
+  color: var(--lumina-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+
+  &:hover {
+    background: var(--lumina-control-hover);
+    color: var(--lumina-text);
+  }
+
+  .close-glyph {
+    font-size: 20px;
+    font-weight: 300;
+    line-height: 1;
+    transform: translateY(-1px);
+  }
 }
 
 .panel-header {
@@ -130,6 +172,18 @@ const { t } = useLocale()
   padding: 6px;
 }
 
+.run-group {
+  display: grid;
+  gap: 6px;
+}
+
+.run-group > h4 {
+  color: var(--lumina-text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  margin: 3px 2px 0;
+}
+
 .process-row {
   border: 1px solid var(--lumina-card-border);
   border-radius: var(--lumina-radius-sm);
@@ -149,6 +203,10 @@ const { t } = useLocale()
     width: 6px;
   }
 }
+
+.process-row.succeeded::before { background: var(--lumina-success); }
+.process-row.failed::before { background: var(--lumina-danger); }
+.process-row.stopped::before { background: var(--lumina-text-secondary); }
 
 .process-row-head {
   align-items: start;
@@ -279,5 +337,22 @@ const { t } = useLocale()
       color: var(--lumina-danger);
     }
   }
+}
+
+.process-warning {
+  color: var(--lumina-warning);
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.process-failure {
+  color: var(--lumina-danger);
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

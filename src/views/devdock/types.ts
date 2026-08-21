@@ -18,9 +18,11 @@ export interface StoredProject {
 export interface RecentCommand {
   projectPath: string
   projectName: string
-  scriptName: string
-  command: string
-  packageManager: string
+  commandId: string
+  commandName: string
+  commandPreview: string
+  executor: string
+  source: string
   usedAt: number
 }
 

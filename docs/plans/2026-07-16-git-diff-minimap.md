@@ -11,6 +11,7 @@
 ### Task 1: Collect rendered change positions
 
 **Files:**
+
 - Modify: `src/views/git-diff/GitDiffView.vue`
 
 1. Attach a ref to the code scroll container after `diff2html` has rendered.
@@ -20,6 +21,7 @@
 ### Task 2: Render and synchronize the minimap
 
 **Files:**
+
 - Modify: `src/views/git-diff/GitDiffView.vue`
 
 1. Add a non-scrolling left minimap with normal, added, deleted, and modified colors.
@@ -29,6 +31,7 @@
 ### Task 3: Verify
 
 **Files:**
+
 - Test: `src/views/git-diff/GitDiffView.vue`
 
 1. Run `vue-tsc --noEmit` and targeted ESLint/Stylelint.

@@ -45,10 +45,10 @@
       </div>
     </header>
 
-    <div v-if="!hasSnapshot" class="panel-empty">{{ t('gitAssistant.detail.emptyNoRepo') }}</div>
-    <div v-else-if="!activeFile" class="panel-empty">{{ t('gitAssistant.detail.emptySelect') }}</div>
-    <div v-else-if="loading" class="panel-empty">{{ t('gitAssistant.detail.diffLoading') }}</div>
-    <div v-else-if="!diffText" class="panel-empty">{{ t('gitAssistant.detail.diffEmpty') }}</div>
+    <WorkbenchEmptyState v-if="!hasSnapshot" icon="solar:folder-open-linear" :title="t('gitAssistant.detail.emptyNoRepo')" />
+    <WorkbenchEmptyState v-else-if="!activeFile" icon="solar:document-text-linear" :title="t('gitAssistant.detail.emptySelect')" />
+    <WorkbenchEmptyState v-else-if="loading" icon="solar:refresh-circle-linear" :title="t('gitAssistant.detail.diffLoading')" />
+    <WorkbenchEmptyState v-else-if="!diffText" icon="solar:check-circle-linear" :title="t('gitAssistant.detail.diffEmpty')" />
 
     <div v-else class="diff-body">
       <div class="diff2html-host" v-html="diffHtml"></div>
@@ -61,6 +61,7 @@ import { ref, watch } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
 import { STATUS_META } from '../git-assistant.config'
 import type { GitAssistantFileView } from '../git-assistant.types'
+import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 import 'diff2html/bundles/css/diff2html.min.css'
 
 const props = defineProps<{
@@ -111,9 +112,9 @@ watch(
 <style scoped lang="scss">
 .panel-shell {
   background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-sm);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--lumina-text) 4%, transparent), 0 1px 2px rgb(0 0 0 / 5%);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
@@ -122,7 +123,7 @@ watch(
 
 .diff-header {
   align-items: flex-start;
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   gap: 12px;
   justify-content: space-between;

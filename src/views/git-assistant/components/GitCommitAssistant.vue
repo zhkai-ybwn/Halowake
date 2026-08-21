@@ -46,9 +46,11 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import { useLocale } from '@/hooks/useLocale'
+import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 
-defineProps<{
+const props = defineProps<{
   committing: boolean
   pushing: boolean
   pulling: boolean
@@ -58,13 +60,24 @@ defineProps<{
   body: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'submit'): void
   (e: 'update:title', value: string): void
   (e: 'update:body', value: string): void
 }>()
 
 const { t } = useLocale()
+
+function handleSubmitShortcut(event: KeyboardEvent) {
+  if (!hasPrimaryModifier(event) || event.key !== 'Enter') return
+  if (event.defaultPrevented || document.querySelector('[aria-modal="true"]')) return
+  if (props.submitDisabled || props.committing || props.pulling || props.pushing) return
+  event.preventDefault()
+  emit('submit')
+}
+
+onMounted(() => window.addEventListener('keydown', handleSubmitShortcut))
+onUnmounted(() => window.removeEventListener('keydown', handleSubmitShortcut))
 </script>
 
 <style scoped lang="scss">
@@ -96,7 +109,7 @@ const { t } = useLocale()
 .commit-flow {
   align-items: center;
   background: color-mix(in srgb, var(--lumina-surface-2) 78%, transparent);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text-secondary);
   display: flex;
@@ -120,7 +133,7 @@ const { t } = useLocale()
 .commit-flow__step {
   align-items: center;
   background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: 999px;
   display: inline-flex;
   font-size: 11px;
@@ -175,7 +188,7 @@ h3 {
 .field-input,
 .field-textarea {
   background: var(--lumina-input-bg);
-  border: 1px solid var(--lumina-input-border);
+  border: 0.5px solid var(--lumina-input-border);
   border-radius: var(--lumina-radius-sm);
   box-sizing: border-box;
   color: var(--lumina-text);
@@ -189,14 +202,19 @@ h3 {
   }
 }
 
+.field-input {
+  min-height: 46px;
+}
+
 .field-textarea {
-  min-height: 82px;
+  line-height: 1.55;
+  min-height: clamp(160px, 22vh, 260px);
   resize: vertical;
 }
 
 .action-btn {
   background: var(--lumina-button-secondary-bg);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text);
   cursor: pointer;
@@ -223,7 +241,7 @@ h3 {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
   box-shadow: none;
-  color: #fff;
+  color: var(--lumina-on-accent);
   min-width: 108px;
 }
 

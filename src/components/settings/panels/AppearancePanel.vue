@@ -93,7 +93,7 @@ const applyBackground = () => {
       `url(${customBg.value})`
     )
   } else if (bgMode.value === "soft") {
-    document.documentElement.style.setProperty("--lumina-bg", "#f5f5f5")
+    document.documentElement.style.setProperty("--lumina-bg", "var(--lumina-surface-secondary)")
   } else {
     document.documentElement.style.removeProperty("--lumina-bg")
   }

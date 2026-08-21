@@ -3,7 +3,7 @@
     <div v-if="error" class="error-banner" role="alert">
       <span>{{ error }}</span>
       <button type="button" :aria-label="t('common.dismiss')" @click="error = ''">
-        <Icon icon="solar:close-circle-linear" />
+        <span class="close-glyph" aria-hidden="true">×</span>
       </button>
     </div>
 
@@ -19,6 +19,7 @@
       :repository-state="snapshot?.repositoryState ?? null"
       :recent-repos="recentRepos"
       :has-snapshot="Boolean(snapshot)"
+      :panel-visibility="panelLayout.visible"
       @pick-directory="handleSelectDirectory"
       @refresh="handleRefresh"
       @sync-action="handleSyncAction"
@@ -27,10 +28,13 @@
       @open-merge="openMergeDialog"
       @clone-repository="openRepositorySetup('clone')"
       @init-repository="openRepositorySetup('init')"
+      @toggle-panel="togglePanel"
+      @reset-layout="resetPanelLayout"
     />
 
-    <section class="workspace-body">
+    <section ref="workspaceBody" class="workspace-body" :style="workspaceGridStyle">
       <GitChangeExplorer
+        v-if="panelLayout.visible.changes"
         class="change-table"
         :has-snapshot="Boolean(snapshot)"
         :loading="loading"
@@ -58,7 +62,38 @@
         @request-review-score="loadReviewScores"
       />
 
-      <section class="commit-area">
+      <WorkbenchSplitHandle
+        v-if="panelLayout.visible.changes && (panelLayout.visible.diff || panelLayout.visible.commit)"
+        :label="leadingHandleLabel"
+        :value="leadingHandleValue"
+        :min="leadingHandleMin"
+        :max="leadingHandleMax"
+        @resize="resizeLeadingPanel"
+        @reset="resetLeadingPanelWidth"
+      />
+
+      <GitDiffViewer
+        v-if="panelLayout.visible.diff"
+        class="inline-diff"
+        :has-snapshot="Boolean(snapshot)"
+        :active-file="selectedFile"
+        :diff-text="currentDiff"
+        :loading="diffLoading"
+        :current-mode="diffMode"
+        @update:mode="diffMode = $event"
+      />
+
+      <WorkbenchSplitHandle
+        v-if="panelLayout.visible.diff && panelLayout.visible.commit"
+        :label="t('gitAssistant.layout.resizeCommit')"
+        :value="effectiveCommitWidth"
+        :min="PANEL_LIMITS.commit.min"
+        :max="commitMaxWidth"
+        @resize="resizeCommitPanel"
+        @reset="resetPanelWidth('commit')"
+      />
+
+      <aside v-if="panelLayout.visible.commit" class="commit-inspector">
         <GitCommitAssistant
           class="commit-workbench"
           :committing="commitLoading"
@@ -73,7 +108,7 @@
           @update:body="commitBody = $event"
         />
 
-        <aside class="commit-side">
+        <section class="commit-side">
           <div class="ai-panel-title">
             <span>{{ t('gitAssistant.ai.actionsTitle') }}</span>
             <strong>{{ reviewSelectedRaws.length }}</strong>
@@ -200,7 +235,7 @@
               <button class="ai-action" type="button" :disabled="!snapshot" @click="handleOpenLog()">
                 {{ t('gitAssistant.log.open') }}
               </button>
-              <button class="ai-action" type="button" disabled>
+              <button class="ai-action" type="button" :disabled="!snapshot" @click="openReviewPanel">
                 {{ t('gitAssistant.ai.reviewCode') }}
               </button>
             </div>
@@ -209,8 +244,8 @@
             <span class="ai-progress__dot"></span>
             <span>{{ promptGenerationStep }}</span>
           </div>
-        </aside>
-      </section>
+        </section>
+      </aside>
 
       <NModal v-model:show="showDiff" class="diff-modal" :mask-closable="true">
         <WorkbenchModalPanel size="diff" :close-label="t('gitAssistant.prompt.close')" @close="showDiff = false">
@@ -233,17 +268,14 @@
         :mask-closable="true"
         :trap-focus="false"
       >
-        <section class="recent-repo-dialog">
-          <button class="modal-close-button" type="button" :aria-label="t('gitAssistant.prompt.close')" @click="recentRepoManagerOpen = false">
-            <Icon icon="solar:close-circle-linear" />
-          </button>
-          <header class="recent-repo-dialog__header">
-            <div>
-              <h3>{{ t('gitAssistant.repo.recentRepoManage') }}</h3>
-              <p>{{ t('gitAssistant.repo.recentRepoManageHint') }}</p>
-            </div>
-          </header>
-
+        <WorkbenchSheet
+          size="wide"
+          icon="solar:folder-with-files-linear"
+          :title="t('gitAssistant.repo.recentRepoManage')"
+          :description="t('gitAssistant.repo.recentRepoManageHint')"
+          :close-label="t('gitAssistant.prompt.close')"
+          @close="recentRepoManagerOpen = false"
+        >
           <section v-if="recentRepos.length" class="recent-repo-list">
             <article v-for="repo in recentRepos" :key="repo.path" class="recent-repo-item">
               <div class="recent-repo-item__main">
@@ -286,40 +318,86 @@
           <div v-else class="recent-repo-empty">
             {{ t('gitAssistant.repo.recentRepoEmpty') }}
           </div>
-        </section>
+        </WorkbenchSheet>
       </NModal>
 
       <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
-        <section class="repository-action-dialog branch-selector-dialog">
-          <header>
-            <div>
-              <h3>{{ t('gitAssistant.repo.manageBranches') }}</h3>
+        <WorkbenchSheet
+          icon="solar:branching-paths-down-linear"
+          :title="t('gitAssistant.repo.manageBranches')"
+          :description="snapshot?.branch ? `${t('gitAssistant.repo.branch')}：${snapshot.branch}` : ''"
+          :close-label="t('gitAssistant.prompt.close')"
+          :busy="branchLoading"
+          @close="branchSelectorOpen = false"
+        >
+          <label class="repository-action-field">
+            <span>{{ t('gitAssistant.repo.selectBranch') }}</span>
+            <NSelect
+              v-model:value="branchSelectionValue"
+              :options="branchOptions"
+              :loading="branchLoading"
+              filterable
+              to="body"
+              :placeholder="branchLoading ? t('gitAssistant.repo.loadingBranches') : t('gitAssistant.repo.selectBranch')"
+              @update:value="value => handleBranchSelection(String(value ?? ''))"
+            />
+          </label>
+          <label class="repository-action-field">
+            <span>{{ t('gitAssistant.repo.createBranch') }}</span>
+            <div class="repository-action-create">
+              <NInput
+                v-model:value="newBranchDraft"
+                :placeholder="t('gitAssistant.repo.branchNamePlaceholder')"
+                @keydown.enter="handleCreateBranch"
+              />
+              <NButton
+                type="primary"
+                :disabled="!newBranchDraft.trim() || branchLoading"
+                :loading="branchLoading"
+                @click="handleCreateBranch"
+              >
+                {{ t('gitAssistant.repo.createBranch') }}
+              </NButton>
             </div>
-            <button class="modal-close-button" type="button" :aria-label="t('gitAssistant.prompt.close')" @click="branchSelectorOpen = false"><Icon icon="solar:close-circle-linear" /></button>
-          </header>
-          <NSelect
-            v-model:value="branchSelectionValue"
-            :options="branchOptions"
-            :loading="branchLoading"
-            filterable
-            :placeholder="branchLoading ? t('gitAssistant.repo.loadingBranches') : t('gitAssistant.repo.selectBranch')"
-            @update:value="value => handleBranchSelection(String(value ?? ''))"
-          />
-        </section>
+          </label>
+          <template #footer>
+            <NButton @click="branchSelectorOpen = false">{{ t('common.dismiss') }}</NButton>
+          </template>
+        </WorkbenchSheet>
+      </NModal>
+
+      <NModal v-model:show="reviewPanelOpen" class="review-modal" :mask-closable="false" :auto-focus="false">
+        <GitReviewPanel
+          :key="reviewPanelRevision"
+          :session="reviewStore.activeSession"
+          :history="reviewStore.history"
+          :rules="reviewStore.rules"
+          :selected-count="selectedFileViews.length"
+          :has-model="Boolean(reviewModel)"
+          :running="reviewStore.running"
+          :loading="reviewStore.loading"
+          :error="reviewStore.error"
+          @close="reviewPanelOpen = false"
+          @start="startCodeReview"
+          @cancel="reviewStore.cancel()"
+          @open-session="reviewStore.open"
+          @open-file="openReviewFindingFile"
+          @finding-status="reviewStore.setFindingStatus"
+          @save-rule="reviewStore.saveRule"
+          @delete-rule="reviewStore.deleteRule"
+        />
       </NModal>
 
       <NModal v-model:show="conflictDialogOpen" class="conflict-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
-        <section class="conflict-dialog">
-          <header class="conflict-dialog__header">
-            <div>
-              <h3>{{ t('gitAssistant.conflict.title') }}</h3>
-              <p>{{ t('gitAssistant.conflict.dialogHint') }}</p>
-            </div>
-            <button class="modal-close-button" type="button" :aria-label="t('gitAssistant.prompt.close')" @click="conflictDialogOpen = false">
-              <Icon icon="solar:close-circle-linear" />
-            </button>
-          </header>
-
+        <WorkbenchSheet
+          size="wide"
+          icon="solar:danger-triangle-linear"
+          :title="t('gitAssistant.conflict.title')"
+          :description="t('gitAssistant.conflict.dialogHint')"
+          :close-label="t('gitAssistant.prompt.close')"
+          :busy="conflictLoading"
+          @close="conflictDialogOpen = false"
+        >
           <div v-if="conflictedFiles.length" class="conflict-file-list">
             <div
               v-for="file in conflictedFiles"
@@ -338,8 +416,9 @@
           </div>
           <div v-else class="conflict-dialog__empty">{{ t('gitAssistant.conflict.noFiles') }}</div>
 
-          <footer class="conflict-dialog__footer">
-            <div>
+          <template #footer>
+            <div class="sheet-footer-split">
+              <div>
               <NButton
                 v-if="conflictedFiles.length"
                 type="primary"
@@ -362,72 +441,74 @@
               >
                 {{ t('gitAssistant.conflict.continueRebase') }}
               </NButton>
+              </div>
+              <NButton
+                type="error"
+                tertiary
+                :disabled="conflictLoading"
+                @click="repositoryState?.rebaseInProgress ? handleAbortRebase() : handleAbortMerge()"
+              >
+                {{ repositoryState?.rebaseInProgress ? t('gitAssistant.conflict.abortRebase') : t('gitAssistant.conflict.abortMerge') }}
+              </NButton>
             </div>
-            <NButton
-              type="error"
-              tertiary
-              :disabled="conflictLoading"
-              @click="repositoryState?.rebaseInProgress ? handleAbortRebase() : handleAbortMerge()"
-            >
-              {{ repositoryState?.rebaseInProgress ? t('gitAssistant.conflict.abortRebase') : t('gitAssistant.conflict.abortMerge') }}
-            </NButton>
-          </footer>
-        </section>
+          </template>
+        </WorkbenchSheet>
       </NModal>
 
       <NModal v-model:show="mergeDialogOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
-        <section class="repository-action-dialog merge-dialog">
-          <header>
-            <div>
-              <h3>{{ t('gitAssistant.repo.mergeBranch') }}</h3>
-              <p>{{ t('gitAssistant.repo.mergeInto', { branch: snapshot?.branch ?? '--' }) }}</p>
-            </div>
-            <button class="modal-close-button" type="button" :aria-label="t('gitAssistant.prompt.close')" @click="mergeDialogOpen = false"><Icon icon="solar:close-circle-linear" /></button>
-          </header>
+        <WorkbenchSheet
+          icon="solar:branching-paths-up-linear"
+          :title="t('gitAssistant.repo.mergeBranch')"
+          :description="t('gitAssistant.repo.mergeInto', { branch: snapshot?.branch ?? '--' })"
+          :close-label="t('gitAssistant.prompt.close')"
+          :busy="mergeLoading"
+          @close="mergeDialogOpen = false"
+        >
           <label class="repository-action-field">
             <span>{{ t('gitAssistant.repo.mergeSource') }}</span>
             <NSelect
               v-model:value="mergeSourceValue"
               :options="mergeSourceOptions"
               filterable
+              to="body"
               :placeholder="t('gitAssistant.repo.mergeSourcePlaceholder')"
             />
           </label>
           <label class="repository-action-field">
             <span>{{ t('gitAssistant.repo.mergeMode') }}</span>
-            <NSelect v-model:value="mergeMode" :options="mergeModeOptions" />
+            <NSelect v-model:value="mergeMode" :options="mergeModeOptions" to="body" />
           </label>
           <p class="repository-action-hint">{{ t('gitAssistant.repo.mergeCleanWorktreeHint') }}</p>
-          <footer class="repository-action-footer">
+          <template #footer>
             <NButton @click="mergeDialogOpen = false">{{ t('common.dismiss') }}</NButton>
             <NButton type="primary" :loading="mergeLoading" :disabled="!mergeSourceValue" @click="handleMergeBranch">
               {{ t('gitAssistant.repo.mergeStart') }}
             </NButton>
-          </footer>
-        </section>
+          </template>
+        </WorkbenchSheet>
       </NModal>
 
       <NModal v-model:show="repositorySetupOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
-        <section class="repository-action-dialog">
-          <header>
-            <div>
-              <h3>{{ repositorySetupMode === 'clone' ? t('gitAssistant.repo.cloneRepository') : t('gitAssistant.repo.initRepository') }}</h3>
-              <p>{{ t('gitAssistant.repo.repositorySetupHint') }}</p>
-            </div>
-            <button class="modal-close-button" type="button" :aria-label="t('gitAssistant.prompt.close')" @click="repositorySetupOpen = false"><Icon icon="solar:close-circle-linear" /></button>
-          </header>
+        <WorkbenchSheet
+          :icon="repositorySetupMode === 'clone' ? 'solar:download-square-linear' : 'solar:folder-add-linear'"
+          :title="repositorySetupMode === 'clone' ? t('gitAssistant.repo.cloneRepository') : t('gitAssistant.repo.initRepository')"
+          :description="t('gitAssistant.repo.repositorySetupHint')"
+          :close-label="t('gitAssistant.prompt.close')"
+          :busy="repositoryLoading"
+          @close="repositorySetupOpen = false"
+        >
           <NInput v-if="repositorySetupMode === 'clone'" v-model:value="cloneUrlDraft" :placeholder="t('gitAssistant.repo.cloneUrlPlaceholder')" />
           <div class="repository-path-picker">
             <NInput :value="repositoryPathDraft" readonly :placeholder="t('gitAssistant.repo.repositoryPathPlaceholder')" />
             <NButton @click="pickRepositoryTarget">{{ t('gitAssistant.repo.chooseDirectory') }}</NButton>
           </div>
-          <div class="repository-action-footer">
+          <template #footer>
             <NButton @click="repositorySetupOpen = false">{{ t('common.dismiss') }}</NButton>
             <NButton type="primary" :disabled="repositoryLoading || !repositoryPathDraft || (repositorySetupMode === 'clone' && !cloneUrlDraft.trim())" @click="handleRepositorySetup">
               {{ repositorySetupMode === 'clone' ? t('gitAssistant.repo.cloneRepository') : t('gitAssistant.repo.initRepository') }}
             </NButton>
-          </div>
-        </section>
+          </template>
+        </WorkbenchSheet>
       </NModal>
     </section>
 
@@ -523,10 +604,10 @@
       <section class="history-list">
         <article v-for="entry in filteredCommitMessageHistory" :key="entry.id" class="history-item">
           <div class="history-item__main">
-            <span>{{ formatHistoryTime(entry.createdAt) }} 路 {{ historySourceLabel(entry.source) }}</span>
+            <span>{{ formatHistoryTime(entry.createdAt) }} · {{ historySourceLabel(entry.source) }}</span>
             <strong>{{ entry.title }}</strong>
             <p v-if="entry.body">{{ entry.body }}</p>
-            <small>{{ entry.repoName }} 路 {{ t('gitAssistant.history.fileCount', { count: entry.selectedFileCount }) }}</small>
+            <small>{{ entry.repoName }} · {{ t('gitAssistant.history.fileCount', { count: entry.selectedFileCount }) }}</small>
           </div>
           <button type="button" @click="restoreCommitMessage(entry)">{{ t('gitAssistant.history.restore') }}</button>
         </article>
@@ -535,6 +616,7 @@
         </div>
       </section>
     </WorkbenchDrawer>
+
 
     <GitCommandDialog
       :visible="gitCommandDialog.visible"
@@ -563,14 +645,15 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSelect, type SelectOption } from 'naive-ui'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NButton, NCheckbox, NInput, NModal, NSelect, type SelectGroupOption, type SelectOption } from 'naive-ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocale } from '@/hooks/useLocale'
 import {
   cloneGitRepository,
   checkoutGitRemoteBranch,
+  createGitBranch,
   initGitRepository,
   mergeGitBranch,
   openGitFileExternal,
@@ -588,14 +671,12 @@ import GitChangeExplorer from './components/GitChangeExplorer.vue'
 import GitCommandDialog from './components/GitCommandDialog.vue'
 import GitCommitAssistant from './components/GitCommitAssistant.vue'
 import GitStatusBar from './components/GitStatusBar.vue'
+import GitReviewPanel from './components/GitReviewPanel.vue'
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
 import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
+import WorkbenchSplitHandle from '@/components/workbench/WorkbenchSplitHandle.vue'
+import WorkbenchSheet from '@/components/workbench/WorkbenchSheet.vue'
 import { GIT_REPO_STORAGE_KEY } from './git-assistant.config'
-import type {
-  GitAssistantFileGroup,
-  GitAssistantFileView,
-  GitAssistantStatusFilter,
-} from './git-assistant.types'
 import { useGitSnapshot, useGitDiff, useGitRemote, useGitCommit } from '@/composables/git-assistant'
 import {
   normalizePath,
@@ -604,11 +685,15 @@ import {
   formatHistoryTime,
 } from '@/composables/git-assistant/utils'
 import type { GitFileStatus } from '@/types/git'
+import { useReviewStore } from '@/stores/review'
+import { listenLocalCodeReview } from '@/services/review-service'
+import type { ReviewBudgetMode } from '@/types/review'
 
 const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffViewer.vue'))
 
 const { t } = useLocale()
 const aiSettings = useAiSettingsStore()
+const reviewStore = useReviewStore()
 
 // ── Composables ──
 const {
@@ -651,6 +736,33 @@ const {
 )
 
 // ── UI-only state ──
+type GitWorkspacePanel = 'changes' | 'diff' | 'commit'
+
+interface GitWorkspaceLayout {
+  visible: Record<GitWorkspacePanel, boolean>
+  widths: {
+    changes: number
+    commit: number
+  }
+}
+
+const GIT_WORKSPACE_LAYOUT_STORAGE_KEY = 'lumina.gitAssistant.workspaceLayout.v1'
+const SPLIT_HANDLE_WIDTH = 7
+const DIFF_MIN_WIDTH = 220
+const PANEL_LIMITS = {
+  changes: { min: 280, default: 340 },
+  commit: { min: 300, default: 320 },
+} as const
+const DEFAULT_PANEL_LAYOUT: GitWorkspaceLayout = {
+  visible: { changes: true, diff: true, commit: true },
+  widths: { changes: PANEL_LIMITS.changes.default, commit: PANEL_LIMITS.commit.default },
+}
+
+const workspaceBody = ref<HTMLElement | null>(null)
+const workspaceWidth = ref(0)
+const panelLayout = ref<GitWorkspaceLayout>(loadPanelLayout())
+let workspaceResizeObserver: ResizeObserver | null = null
+
 const keyword = ref('')
 const statusFilter = ref<GitAssistantStatusFilter>('all')
 const recommendedOnly = ref(false)
@@ -658,6 +770,7 @@ const recentRepoManagerOpen = ref(false)
 const branchLoading = ref(false)
 const branchSelectorOpen = ref(false)
 const branchSelectionValue = ref<string | null>(null)
+const newBranchDraft = ref('')
 const mergeDialogOpen = ref(false)
 const mergeLoading = ref(false)
 const mergeSourceValue = ref<string | null>(null)
@@ -669,14 +782,100 @@ const repositorySetupMode = ref<'init' | 'clone'>('init')
 const repositoryLoading = ref(false)
 const repositoryPathDraft = ref('')
 const cloneUrlDraft = ref('')
-const reviewScores = ref(new Map<string, { score: number; categories: string[]; eligible: boolean; skipped: boolean }>())
+const reviewScores = ref(new Map<string, { score: number; categories: string[]; scoreBreakdown: Array<{ factor: string; delta: number; evidence: string }>; eligible: boolean; skipped: boolean }>())
 const reviewScoring = ref(false)
+const reviewPanelOpen = ref(false)
+const reviewPanelRevision = ref(0)
 const reviewScoreProgress = ref({ completed: 0, total: 0, phase: '', filePath: '' })
 let reviewScoreRequestId = 0
 let unlistenReviewScoreProgress: UnlistenFn | null = null
-let refreshOnNextActivation = false
+let unlistenLocalReview: UnlistenFn | null = null
 
 // ── Computed ──
+const visiblePanelCount = computed(() => Object.values(panelLayout.value.visible).filter(Boolean).length)
+const storedCommitWidth = computed(() => Math.max(panelLayout.value.widths.commit, PANEL_LIMITS.commit.min))
+const changesMaxWidth = computed(() => {
+  const visible = panelLayout.value.visible
+  const reservedDiff = visible.diff ? DIFF_MIN_WIDTH : 0
+  const reservedCommit = visible.commit
+    ? (visible.diff ? storedCommitWidth.value : PANEL_LIMITS.commit.min)
+    : 0
+  const handles = Math.max(0, visiblePanelCount.value - 1) * SPLIT_HANDLE_WIDTH
+  return Math.max(
+    PANEL_LIMITS.changes.min,
+    (workspaceWidth.value || 1280) - reservedDiff - reservedCommit - handles,
+  )
+})
+const effectiveChangesWidth = computed(() => clamp(
+  panelLayout.value.widths.changes,
+  PANEL_LIMITS.changes.min,
+  changesMaxWidth.value,
+))
+const commitMaxWidth = computed(() => {
+  const visible = panelLayout.value.visible
+  const reservedDiff = visible.diff ? DIFF_MIN_WIDTH : 0
+  const reservedChanges = visible.changes
+    ? (visible.diff ? effectiveChangesWidth.value : PANEL_LIMITS.changes.min)
+    : 0
+  const handles = Math.max(0, visiblePanelCount.value - 1) * SPLIT_HANDLE_WIDTH
+  return Math.max(
+    PANEL_LIMITS.commit.min,
+    (workspaceWidth.value || 1280) - reservedDiff - reservedChanges - handles,
+  )
+})
+const effectiveCommitWidth = computed(() => clamp(
+  panelLayout.value.widths.commit,
+  PANEL_LIMITS.commit.min,
+  commitMaxWidth.value,
+))
+const leadingHandleControlsCommit = computed(() => (
+  panelLayout.value.visible.changes
+  && !panelLayout.value.visible.diff
+  && panelLayout.value.visible.commit
+))
+const leadingHandleLabel = computed(() => t(
+  leadingHandleControlsCommit.value
+    ? 'gitAssistant.layout.resizeCommit'
+    : 'gitAssistant.layout.resizeChanges',
+))
+const leadingHandleValue = computed(() => (
+  leadingHandleControlsCommit.value ? effectiveCommitWidth.value : effectiveChangesWidth.value
+))
+const leadingHandleMin = computed(() => (
+  leadingHandleControlsCommit.value ? PANEL_LIMITS.commit.min : PANEL_LIMITS.changes.min
+))
+const leadingHandleMax = computed(() => (
+  leadingHandleControlsCommit.value ? commitMaxWidth.value : changesMaxWidth.value
+))
+const workspaceGridStyle = computed(() => {
+  const visible = panelLayout.value.visible
+  const columns: string[] = []
+
+  if (visible.changes) {
+    columns.push(
+      visiblePanelCount.value === 1
+        ? 'minmax(0, 1fr)'
+        : !visible.diff && visible.commit
+          ? `minmax(${PANEL_LIMITS.changes.min}px, 1fr)`
+          : `${effectiveChangesWidth.value}px`,
+    )
+    if (visible.diff || visible.commit) columns.push(`${SPLIT_HANDLE_WIDTH}px`)
+  }
+  if (visible.diff) {
+    columns.push(visiblePanelCount.value === 1 ? 'minmax(0, 1fr)' : `minmax(${DIFF_MIN_WIDTH}px, 1fr)`)
+    if (visible.commit) columns.push(`${SPLIT_HANDLE_WIDTH}px`)
+  }
+  if (visible.commit) {
+    columns.push(
+      visiblePanelCount.value === 1
+        ? 'minmax(0, 1fr)'
+        : `${effectiveCommitWidth.value}px`,
+    )
+  }
+
+  return { gridTemplateColumns: columns.join(' ') }
+})
+
 const parsedFiles = computed<GitFileStatus[]>(() => parseGitStatusList(snapshot.value?.status ?? []))
 
 const allFiles = computed<GitAssistantFileView[]>(() => {
@@ -693,6 +892,7 @@ const allFiles = computed<GitAssistantFileView[]>(() => {
       removedLines: stats?.removed ?? null,
       score: reviewScore && !reviewScore.skipped ? reviewScore.score : null,
       scoreCategories: reviewScore?.categories ?? [],
+      scoreBreakdown: reviewScore?.scoreBreakdown ?? [],
       recommended: reviewScore?.eligible ?? false,
     }
   })
@@ -719,22 +919,69 @@ const recommendedFiles = computed(() =>
 )
 const conflictedFiles = computed(() => allFiles.value.filter(f => f.type === 'updated-but-unmerged'))
 const selectedFileViews = computed(() => allFiles.value.filter(f => reviewSelectedRaws.value.includes(f.raw)))
-const branchOptions = computed<SelectOption[]>(() => (snapshot.value?.branches ?? []).map(branch => ({
-  label: branch.current ? `${branch.name} (${t('gitAssistant.repo.currentBranch')})` : branch.name,
-  value: `${branch.kind}:${branch.name}`,
-})))
+const reviewModel = computed(() => aiSettings.getModelForTask('light-review'))
+const branchOptions = computed<(SelectOption | SelectGroupOption)[]>(() => {
+  const branches = snapshot.value?.branches ?? []
+  const localList = branches.filter(b => b.kind === 'local')
+  const remoteList = branches.filter(b => b.kind === 'remote' && !b.name.endsWith('/HEAD'))
+
+  const options: (SelectOption | SelectGroupOption)[] = []
+  if (localList.length > 0) {
+    options.push({
+      type: 'group',
+      key: 'local-group',
+      label: t('gitAssistant.repo.localBranches'),
+      children: localList.map(branch => ({
+        label: branch.current ? `${branch.name} (${t('gitAssistant.repo.currentBranch')})` : branch.name,
+        value: `${branch.kind}:${branch.name}`,
+      })),
+    })
+  }
+  if (remoteList.length > 0) {
+    options.push({
+      type: 'group',
+      key: 'remote-group',
+      label: t('gitAssistant.repo.remoteBranches'),
+      children: remoteList.map(branch => ({
+        label: branch.name,
+        value: `${branch.kind}:${branch.name}`,
+      })),
+    })
+  }
+  return options
+})
 const currentBranchValue = computed(() => {
   const branch = snapshot.value?.branches.find(item => item.current)
   return branch ? `${branch.kind}:${branch.name}` : null
 })
-const mergeSourceOptions = computed<SelectOption[]>(() => (snapshot.value?.branches ?? [])
-  .filter(branch => !branch.current && !branch.name.endsWith('/HEAD'))
-  .map(branch => ({ label: branch.name, value: branch.name })))
+const mergeSourceOptions = computed<(SelectOption | SelectGroupOption)[]>(() => {
+  const branches = (snapshot.value?.branches ?? []).filter(branch => !branch.current && !branch.name.endsWith('/HEAD'))
+  const localList = branches.filter(b => b.kind === 'local')
+  const remoteList = branches.filter(b => b.kind === 'remote')
+
+  const options: (SelectOption | SelectGroupOption)[] = []
+  if (localList.length > 0) {
+    options.push({
+      type: 'group',
+      key: 'local-merge-group',
+      label: t('gitAssistant.repo.localBranches'),
+      children: localList.map(branch => ({ label: branch.name, value: branch.name })),
+    })
+  }
+  if (remoteList.length > 0) {
+    options.push({
+      type: 'group',
+      key: 'remote-merge-group',
+      label: t('gitAssistant.repo.remoteBranches'),
+      children: remoteList.map(branch => ({ label: branch.name, value: branch.name })),
+    })
+  }
+  return options
+})
 const mergeModeOptions = computed<SelectOption[]>(() => [
   { label: t('gitAssistant.repo.mergeModeDefault'), value: 'default' },
   { label: t('gitAssistant.repo.mergeModeNoFastForward'), value: 'no-ff' },
 ])
-console.log(branchOptions.value)
 const promptFileGroups = computed(() => {
   if (!promptPreview.value) return []
   const groups = new Map<string, { path: string; role: string; scope: string; kind: string; strategy: string; evidenceCount: number; rawChars: number; cleanedChars: number; skipped: boolean; reason?: string | null }[]>()
@@ -827,6 +1074,106 @@ function historySourceLabel(source: 'ai' | 'manual') {
   return source === 'manual' ? t('gitAssistant.history.manual') : t('gitAssistant.history.ai')
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function cloneDefaultPanelLayout(): GitWorkspaceLayout {
+  return {
+    visible: { ...DEFAULT_PANEL_LAYOUT.visible },
+    widths: { ...DEFAULT_PANEL_LAYOUT.widths },
+  }
+}
+
+function normalizePanelWidth(value: unknown, fallback: number, min: number) {
+  const width = Number(value)
+  return Number.isFinite(width) ? Math.max(width, min) : fallback
+}
+
+function loadPanelLayout(): GitWorkspaceLayout {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GIT_WORKSPACE_LAYOUT_STORAGE_KEY) || 'null') as Partial<GitWorkspaceLayout> | null
+    if (!stored?.visible || !stored.widths) return cloneDefaultPanelLayout()
+    const visible = {
+      changes: stored.visible.changes !== false,
+      diff: stored.visible.diff !== false,
+      commit: stored.visible.commit !== false,
+    }
+    if (!Object.values(visible).some(Boolean)) visible.diff = true
+    return {
+      visible,
+      widths: {
+        changes: normalizePanelWidth(stored.widths.changes, PANEL_LIMITS.changes.default, PANEL_LIMITS.changes.min),
+        commit: normalizePanelWidth(stored.widths.commit, PANEL_LIMITS.commit.default, PANEL_LIMITS.commit.min),
+      },
+    }
+  } catch {
+    return cloneDefaultPanelLayout()
+  }
+}
+
+function persistPanelLayout() {
+  try {
+    localStorage.setItem(GIT_WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(panelLayout.value))
+  } catch {
+    // Layout persistence is optional; the workbench remains usable without storage.
+  }
+}
+
+function togglePanel(panel: GitWorkspacePanel) {
+  const visible = panelLayout.value.visible
+  if (visible[panel] && visiblePanelCount.value === 1) return
+  panelLayout.value = {
+    ...panelLayout.value,
+    visible: { ...visible, [panel]: !visible[panel] },
+  }
+}
+
+function resetPanelLayout() {
+  panelLayout.value = cloneDefaultPanelLayout()
+}
+
+function resetPanelWidth(panel: 'changes' | 'commit') {
+  panelLayout.value = {
+    ...panelLayout.value,
+    widths: { ...panelLayout.value.widths, [panel]: PANEL_LIMITS[panel].default },
+  }
+}
+
+function resizeChangesPanel(delta: number) {
+  panelLayout.value = {
+    ...panelLayout.value,
+    widths: {
+      ...panelLayout.value.widths,
+      changes: clamp(effectiveChangesWidth.value + delta, PANEL_LIMITS.changes.min, changesMaxWidth.value),
+    },
+  }
+}
+
+function resizeCommitPanel(delta: number) {
+  panelLayout.value = {
+    ...panelLayout.value,
+    widths: {
+      ...panelLayout.value.widths,
+      commit: clamp(effectiveCommitWidth.value - delta, PANEL_LIMITS.commit.min, commitMaxWidth.value),
+    },
+  }
+}
+
+function resizeLeadingPanel(delta: number) {
+  if (leadingHandleControlsCommit.value) {
+    resizeCommitPanel(delta)
+  } else {
+    resizeChangesPanel(delta)
+  }
+}
+
+function resetLeadingPanelWidth() {
+  resetPanelWidth(leadingHandleControlsCommit.value ? 'commit' : 'changes')
+}
+
+watch(panelLayout, persistPanelLayout, { deep: true })
+
 function handleStatusFilterChange(value: string) {
   statusFilter.value = value as GitAssistantStatusFilter
 }
@@ -886,7 +1233,16 @@ async function handleStageFiles(raws: string[], stage: boolean) {
 
 function openBranchSelector() {
   branchSelectionValue.value = currentBranchValue.value
+  newBranchDraft.value = ''
   branchSelectorOpen.value = true
+}
+
+async function handleCreateBranch() {
+  const branch = newBranchDraft.value.trim()
+  if (!displayRepoPath.value || !branch) return
+  branchSelectorOpen.value = false
+  await runBranchAction(t('gitAssistant.repo.createBranch'), branch, () => createGitBranch(displayRepoPath.value, branch))
+  newBranchDraft.value = ''
 }
 
 function openMergeDialog() {
@@ -1067,6 +1423,40 @@ async function loadReviewScores() {
   }
 }
 
+async function openReviewPanel() {
+  const preferNewReview = selectedFileViews.value.length > 0
+  const root = snapshot.value?.repoRoot || displayRepoPath.value
+  await Promise.allSettled([reviewStore.loadHistory(root), reviewStore.loadRules()])
+  if (!preferNewReview) {
+    const latest = reviewStore.history[0]
+    if (latest) await reviewStore.open(latest.id).catch(error => console.error(error))
+    else reviewStore.clearActive()
+  }
+  reviewPanelRevision.value += 1
+  reviewPanelOpen.value = true
+}
+
+async function startCodeReview(budgetMode: ReviewBudgetMode) {
+  const model = reviewModel.value
+  if (!model || !displayRepoPath.value || !selectedFileViews.value.length) return
+  try {
+    await reviewStore.start({
+      repoPath: displayRepoPath.value,
+      selectedFiles: selectedFileViews.value.map(file => file.path),
+      model: { ...model },
+      budgetMode,
+      language: 'zh-CN',
+    })
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function openReviewFindingFile(path: string) {
+  const file = allFiles.value.find(item => normalizePath(item.path) === normalizePath(path))
+  if (file) await handleOpenDiff(file.raw)
+}
+
 function handleSwitchRecentRepoFromManager(path: string) {
   recentRepoManagerOpen.value = false
   void handleSwitchRecentRepo(path)
@@ -1101,8 +1491,8 @@ watch(selectedFile, file => {
   diffMode.value = file.unstaged ? 'unstaged' : 'staged'
 }, { immediate: true })
 
-watch([selectedFile, diffMode, showDiff], async ([file, mode, visible]) => {
-  if (!visible || !file || !displayRepoPath.value) { currentDiff.value = ''; return }
+watch([selectedFile, diffMode], async ([file, mode]) => {
+  if (!file || !displayRepoPath.value) { currentDiff.value = ''; return }
   if (mode === 'head') {
     diffLoading.value = true
     try { const r = await (await import('@/services/git/git-service')).loadGitFileHeadDiff(displayRepoPath.value, file.path); currentDiff.value = r.diff }
@@ -1118,18 +1508,22 @@ watch([selectedFile, diffMode, showDiff], async ([file, mode, visible]) => {
   finally { diffLoading.value = false }
 }, { immediate: true })
 
-// ── Lifecycle ──
-onActivated(() => {
-  if (!refreshOnNextActivation || !displayRepoPath.value) return
-  refreshOnNextActivation = false
-  void handleRefresh()
-})
-
-onDeactivated(() => {
-  refreshOnNextActivation = true
-})
-
+// MainLayout keeps this view alive. Route deactivation must not refresh the snapshot:
+// doing so invalidates in-flight scoring/AI requests and discards their results.
 onMounted(async () => {
+  unlistenLocalReview = await listenLocalCodeReview(async event => {
+    if (event.sessionId !== reviewStore.activeSessionId) return
+    if (event.revision <= reviewStore.lastRevision) return
+    reviewStore.lastRevision = event.revision
+    try {
+      await reviewStore.refreshActive()
+      if (!['running'].includes(event.status)) {
+        await reviewStore.loadHistory(snapshot.value?.repoRoot || displayRepoPath.value)
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  })
   unlistenReviewScoreProgress = await listen<{
     repoPath: string
     completed: number
@@ -1148,6 +1542,13 @@ onMounted(async () => {
   })
   loadRecentRepos()
   loadCommitMessageHistory()
+  if (workspaceBody.value) {
+    workspaceWidth.value = workspaceBody.value.clientWidth
+    workspaceResizeObserver = new ResizeObserver(entries => {
+      workspaceWidth.value = entries[0]?.contentRect.width ?? workspaceBody.value?.clientWidth ?? 0
+    })
+    workspaceResizeObserver.observe(workspaceBody.value)
+  }
   const saved = localStorage.getItem(GIT_REPO_STORAGE_KEY)
   if (!saved) return
   repoPath.value = saved
@@ -1155,14 +1556,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unlistenLocalReview?.()
   unlistenReviewScoreProgress?.()
+  workspaceResizeObserver?.disconnect()
 })
 </script>
 <style scoped lang="scss">
 .git-assistant-page {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--lumina-bg) 82%, var(--lumina-surface-1)), var(--lumina-bg)),
-    var(--lumina-bg);
+  background: var(--lumina-content-bg);
   box-sizing: border-box;
   color: var(--lumina-text);
   display: flex;
@@ -1180,13 +1581,14 @@ onUnmounted(() => {
   align-items: center;
   background: color-mix(in srgb, var(--lumina-danger) 12%, var(--lumina-surface-2));
   border: 1px solid color-mix(in srgb, var(--lumina-danger) 28%, transparent);
-  border-radius: 10px;
+  border-radius: var(--lumina-radius-md);
   color: var(--lumina-danger);
   display: flex;
   flex: 0 0 auto;
   font-size: 12px;
   gap: 10px;
   justify-content: space-between;
+  margin: 8px 10px 0;
   padding: 8px 10px;
 
   span {
@@ -1211,9 +1613,11 @@ onUnmounted(() => {
       background: color-mix(in srgb, var(--lumina-danger) 10%, transparent);
     }
 
-    svg {
-      height: 16px;
-      width: 16px;
+    .close-glyph {
+      font-size: 19px;
+      font-weight: 300;
+      line-height: 1;
+      transform: translateY(-1px);
     }
   }
 }
@@ -1221,35 +1625,54 @@ onUnmounted(() => {
 .workspace-body {
   display: grid;
   flex: 1 1 auto;
-  gap: 8px;
-  grid-template-rows: minmax(260px, 1fr) auto;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
-.commit-area {
-  display: grid;
+.sheet-footer-split {
+  align-items: center;
+  display: flex;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 370px);
+  justify-content: space-between;
+  width: 100%;
+
+  > div {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.inline-diff {
+  border-block: 0;
+  border-radius: 0;
+  min-width: 0;
+}
+
+.commit-inspector {
+  background: var(--lumina-sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 10px;
 }
 
 .commit-workbench {
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-sm);
+  border: 1px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-md);
+  box-shadow: none;
+  flex: 0 0 auto;
 }
 
 .commit-side {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-sm);
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px;
+  padding: 0;
 }
 
 .ai-panel-title {
@@ -1500,13 +1923,17 @@ onUnmounted(() => {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
   box-shadow: none;
-  color: #fff;
+  color: var(--lumina-on-accent);
   font-size: 13px;
   min-height: 34px;
 }
 
 .change-table {
+  border-block: 0;
+  border-left: 0;
+  border-radius: 0;
   min-height: 0;
+  min-width: 0;
 }
 
 .diff-window {
@@ -1823,7 +2250,7 @@ onUnmounted(() => {
 
 .conflict-dialog__footer {
   align-items: center;
-  border-top: 1px solid var(--lumina-card-border);
+  border-top: 0.5px solid var(--lumina-separator);
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -1864,7 +2291,7 @@ onUnmounted(() => {
 .history-item {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   border-radius: 0;
   display: grid;
   gap: 10px;
@@ -1878,9 +2305,9 @@ onUnmounted(() => {
   button {
     align-self: start;
     background: var(--lumina-primary);
-    border: 1px solid var(--lumina-primary);
+    border: 0.5px solid var(--lumina-primary);
     border-radius: var(--lumina-radius-sm);
-    color: #fff;
+    color: var(--lumina-on-accent);
     cursor: pointer;
     font-size: 12px;
     height: 28px;
@@ -1922,7 +2349,7 @@ onUnmounted(() => {
 
 .history-empty {
   align-items: center;
-  border: 1px dashed var(--lumina-card-border);
+  border: 0.5px dashed var(--lumina-separator);
   border-radius: 9px;
   color: var(--lumina-text-secondary);
   display: flex;
@@ -1943,20 +2370,20 @@ onUnmounted(() => {
 }
 
 .prompt-section {
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-  background: var(--lumina-surface-2);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--lumina-surface-2) 88%, transparent);
   overflow: hidden;
 
   summary {
     align-items: center;
     background: color-mix(in srgb, var(--lumina-surface-2) 70%, var(--lumina-surface-1));
-    border-bottom: 1px solid var(--lumina-card-border);
+    border-bottom: 0.5px solid var(--lumina-separator);
     cursor: pointer;
     display: flex;
     font-size: 13px;
-    font-weight: 700;
-    min-height: 32px;
+    font-weight: 600;
+    min-height: 34px;
     padding: 0 10px;
   }
 }
@@ -1968,8 +2395,8 @@ onUnmounted(() => {
 
   div {
     background: var(--lumina-surface-1);
-    border: 1px solid var(--lumina-card-border);
-    border-radius: var(--lumina-radius-sm);
+    border: 0.5px solid var(--lumina-separator);
+    border-radius: 7px;
     padding: 8px;
   }
 
@@ -2098,9 +2525,4 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 980px) {
-  .commit-area {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

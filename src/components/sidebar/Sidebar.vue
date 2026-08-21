@@ -79,7 +79,7 @@ const openSettings = () => {
     width: 42px;
     height: 42px;
     border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    border: 2px solid var(--lumina-separator-strong);
     object-fit: cover;
   }
 }

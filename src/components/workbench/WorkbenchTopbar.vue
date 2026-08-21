@@ -13,17 +13,16 @@
 .workbench-topbar {
   align-items: center;
   background: var(--lumina-workbench-top-bg);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-lg);
   box-shadow: var(--lumina-shadow-sm);
+  backdrop-filter: var(--lumina-vibrancy);
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
-  height: 42px;
-  max-height: 42px;
   min-height: 42px;
   overflow: hidden;
-  padding: 6px 10px;
+  padding: 6px 8px;
 }
 
 .workbench-topbar-main,

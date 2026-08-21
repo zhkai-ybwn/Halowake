@@ -8,6 +8,36 @@
       <strong>{{ t('gitAssistant.files.selectedTotal', { selected: reviewSelectedRaws.length, total: totalCount }) }}</strong>
     </header>
 
+    <div class="filter-toolbar">
+      <label class="file-search">
+        <Icon icon="solar:magnifer-linear" />
+        <input
+          ref="searchInput"
+          :value="keyword"
+          type="search"
+          :placeholder="t('gitAssistant.files.searchPlaceholder')"
+          @input="$emit('update:keyword', ($event.target as HTMLInputElement).value.trim())"
+        />
+      </label>
+      <select
+        :value="statusFilter"
+        :aria-label="t('gitAssistant.files.tableStatus')"
+        @change="$emit('update:status-filter', ($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="option in statusFilterOptions" :key="option.value" :value="option.value">
+          {{ t(option.labelKey) }}
+        </option>
+      </select>
+      <label class="recommended-filter">
+        <input
+          :checked="recommendedOnly"
+          type="checkbox"
+          @change="$emit('update:recommended-only', ($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t('gitAssistant.files.recommendedOnly') }}</span>
+      </label>
+    </div>
+
     <div class="check-toolbar">
       <span>{{ t('gitAssistant.files.check') }}:</span>
       <button type="button" @click="$emit('set-review-selection', visibleRaws)">
@@ -67,19 +97,11 @@
       </div>
     </div>
 
-    <div v-if="!hasSnapshot && !loading" class="panel-empty">
-      <strong>{{ t('gitAssistant.files.emptyNoRepoTitle') }}</strong>
-      <span>{{ t('gitAssistant.files.emptyNoRepo') }}</span>
-    </div>
-    <div v-else-if="loading" class="panel-empty">
-      <strong>{{ t('gitAssistant.files.emptyLoadingTitle') }}</strong>
-      <span>{{ t('gitAssistant.files.emptyLoading') }}</span>
-    </div>
-    <div v-else-if="!groups.length" class="panel-empty">
-      <strong>{{ totalCount ? t('gitAssistant.files.emptyNoMatchTitle') : t('gitAssistant.files.emptyCleanTitle') }}</strong>
-      <span>{{ totalCount ? t('gitAssistant.files.emptyNoMatch') : t('gitAssistant.files.emptyClean') }}</span>
-      <button type="button" @click="$emit('request-refresh')">{{ t('gitAssistant.repo.refreshRepo') }}</button>
-    </div>
+    <WorkbenchEmptyState v-if="!hasSnapshot && !loading" icon="solar:folder-open-linear" :title="t('gitAssistant.files.emptyNoRepoTitle')" :description="t('gitAssistant.files.emptyNoRepo')" />
+    <WorkbenchEmptyState v-else-if="loading" icon="solar:refresh-circle-linear" :title="t('gitAssistant.files.emptyLoadingTitle')" :description="t('gitAssistant.files.emptyLoading')" />
+    <WorkbenchEmptyState v-else-if="!groups.length" icon="solar:check-circle-linear" :title="totalCount ? t('gitAssistant.files.emptyNoMatchTitle') : t('gitAssistant.files.emptyCleanTitle')" :description="totalCount ? t('gitAssistant.files.emptyNoMatch') : t('gitAssistant.files.emptyClean')">
+      <template #actions><WorkbenchButton @click="$emit('request-refresh')">{{ t('gitAssistant.repo.refreshRepo') }}</WorkbenchButton></template>
+    </WorkbenchEmptyState>
 
     <div v-else class="file-table">
       <div class="table-header" :style="gridStyle">
@@ -135,7 +157,7 @@
         </div>
         <div class="line-cell added-lines">{{ formatLineCount(file.addedLines) }}</div>
         <div class="line-cell removed-lines">{{ formatLineCount(file.removedLines) }}</div>
-        <div class="score-cell">{{ file.score ?? '-' }}</div>
+        <div class="score-cell" :title="attentionBreakdownTitle(file)">{{ file.score ?? '-' }}</div>
         <div class="review-reason-cell">
           <span
             v-for="category in file.scoreCategories.slice(0, 2)"
@@ -164,12 +186,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watchEffect } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
 import { NDropdown } from 'naive-ui'
+import { Icon } from '@iconify/vue'
 import { useLocale } from '@/hooks/useLocale'
-import { STATUS_META } from '../git-assistant.config'
+import { STATUS_FILTER_OPTIONS, STATUS_META } from '../git-assistant.config'
+import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
+import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
+import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 import type {
   GitAssistantFileGroup,
+  GitAssistantFileView,
   GitAssistantStatusFilter,
   GitAssistantSummary,
 } from '../git-assistant.types'
@@ -210,7 +237,9 @@ const emit = defineEmits<{
 }>()
 
 const statusMeta = STATUS_META
+const statusFilterOptions = STATUS_FILTER_OPTIONS
 const { t } = useLocale()
+const searchInput = ref<HTMLInputElement | null>(null)
 const reviewCategoryTones: Record<string, string> = {
   security: 'danger',
   data: 'warning',
@@ -291,7 +320,7 @@ const resizableColumns = [
 type ResizableColumnKey = keyof typeof columnWidths
 
 const gridStyle = computed(() => ({
-  gridTemplateColumns: `34px minmax(160px, ${columnWidths.path}px) ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px minmax(220px, ${columnWidths.reason}px)`,
+  gridTemplateColumns: `34px ${columnWidths.path}px ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px ${columnWidths.reason}px`,
 }))
 const contextFile = computed(() => visibleFiles.value.find(file => file.raw === contextFileRaw.value) ?? null)
 const contextMenuOptions = computed(() => [
@@ -375,7 +404,7 @@ function startColumnResize(column: ResizableColumnKey, event: MouseEvent) {
 function handleColumnResize(event: MouseEvent) {
   if (!resizingColumn) return
   const nextWidth = resizeStartWidth + event.clientX - resizeStartX
-  columnWidths[resizingColumn] = Math.max(getColumnMinWidth(resizingColumn), nextWidth)
+  columnWidths[resizingColumn] = Math.max(0, nextWidth)
 }
 
 function stopColumnResize() {
@@ -388,11 +417,12 @@ function formatLineCount(value: number | null) {
   return value === null ? '-' : String(value)
 }
 
-function getColumnMinWidth(column: ResizableColumnKey) {
-  if (column === 'path') return 220
-  if (column === 'added' || column === 'removed') return 104
-  if (column === 'extension' || column === 'status') return 92
-  return 64
+function attentionBreakdownTitle(file: GitAssistantFileView) {
+  if (file.score === null) return ''
+  const details = file.scoreBreakdown
+    .filter(item => item.delta !== 0)
+    .map(item => `${item.factor}: ${item.delta > 0 ? '+' : ''}${item.delta} (${item.evidence})`)
+  return [`关注度 ${file.score}`, ...details].join('\n')
 }
 
 function handleFileContextMenu(raw: string, event: MouseEvent) {
@@ -418,23 +448,35 @@ function handleContextMenuSelect(key: string | number) {
   }
 }
 
-onUnmounted(stopColumnResize)
+function handleFindShortcut(event: KeyboardEvent) {
+  if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'f') return
+  if (!searchInput.value?.offsetParent) return
+  event.preventDefault()
+  searchInput.value.focus()
+  searchInput.value.select()
+}
+
+onMounted(() => window.addEventListener('keydown', handleFindShortcut))
+onUnmounted(() => {
+  stopColumnResize()
+  window.removeEventListener('keydown', handleFindShortcut)
+})
 </script>
 
 <style scoped lang="scss">
 .change-explorer {
   background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
+  border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-sm);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--lumina-text) 4%, transparent), 0 1px 2px rgb(0 0 0 / 5%);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
 }
 
 .change-header {
   align-items: center;
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   justify-content: space-between;
   min-height: 38px;
@@ -460,10 +502,73 @@ onUnmounted(stopColumnResize)
   }
 }
 
+.filter-toolbar {
+  align-items: center;
+  border-bottom: 0.5px solid var(--lumina-separator);
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(120px, 1fr) 104px auto;
+  min-height: 38px;
+  padding: 5px 8px;
+
+  select {
+    background: var(--lumina-input-bg);
+    border: 0.5px solid var(--lumina-input-border);
+    border-radius: var(--lumina-radius-sm);
+    color: var(--lumina-text);
+    height: 28px;
+    min-width: 0;
+    padding: 0 6px;
+  }
+}
+
+.file-search {
+  align-items: center;
+  background: var(--lumina-input-bg);
+  border: 0.5px solid var(--lumina-input-border);
+  border-radius: var(--lumina-radius-sm);
+  display: flex;
+  gap: 6px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 7px;
+
+  &:focus-within {
+    border-color: var(--lumina-primary);
+    box-shadow: 0 0 0 2px var(--lumina-accent-ring);
+  }
+
+  svg {
+    color: var(--lumina-text-tertiary);
+    flex: 0 0 auto;
+    height: 14px;
+    width: 14px;
+  }
+
+  input {
+    background: transparent;
+    border: 0;
+    color: var(--lumina-text);
+    font: inherit;
+    min-width: 0;
+    outline: 0;
+    width: 100%;
+  }
+}
+
+.recommended-filter {
+  align-items: center;
+  color: var(--lumina-text-secondary);
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+  white-space: nowrap;
+}
+
 .check-toolbar {
   align-items: center;
   background: var(--lumina-surface-2);
-  border-bottom: 1px solid var(--lumina-card-border);
+  border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -609,20 +714,20 @@ onUnmounted(stopColumnResize)
 .check-toolbar .review-score-button {
   background: var(--lumina-primary);
   border-color: var(--lumina-primary);
-  color: var(--lumina-primary-contrast, #fff);
+  color: var(--lumina-on-accent);
   flex: 0 0 auto;
   padding: 0 11px;
 
   &:hover:not(:disabled) {
     background: var(--lumina-primary-hover, var(--lumina-primary));
     border-color: var(--lumina-primary-hover, var(--lumina-primary));
-    color: var(--lumina-primary-contrast, #fff);
+    color: var(--lumina-on-accent);
   }
 
   &.is-running:disabled {
     background: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
     border-color: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
-    color: var(--lumina-primary-contrast, #fff);
+    color: var(--lumina-on-accent);
     cursor: wait;
     opacity: 1;
   }

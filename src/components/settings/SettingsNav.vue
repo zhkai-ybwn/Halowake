@@ -34,13 +34,14 @@ defineEmits<{
 
 <style scoped lang="scss">
 .settings-nav {
-  background: color-mix(in srgb, var(--lumina-surface-2) 78%, var(--lumina-bg));
-  border-right: 1px solid var(--lumina-card-border);
+  background: var(--lumina-sidebar-bg);
+  backdrop-filter: var(--lumina-vibrancy);
+  border-right: 1px solid var(--lumina-separator);
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 18px 10px;
-  width: 188px;
+  padding: 16px 8px;
+  width: 214px;
 }
 
 .settings-nav__section {
@@ -60,34 +61,34 @@ defineEmits<{
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text-secondary);
   cursor: pointer;
   display: flex;
   gap: 10px;
-  min-height: 38px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
   text-align: left;
-  transition: all 0.2s ease;
+  transition: background var(--lumina-motion-fast), color var(--lumina-motion-fast);
 
   &:hover {
     background: var(--lumina-button-secondary-hover);
-    color: var(--lumina-primary);
+    color: var(--lumina-text);
   }
 
   &.active {
-    background: var(--lumina-primary-soft);
-    color: var(--lumina-primary);
+    background: var(--lumina-control-active);
+    color: var(--lumina-text);
   }
 
   svg {
     flex: 0 0 auto;
-    height: 18px;
-    width: 18px;
+    height: 16px;
+    width: 16px;
   }
 
   span {
-    font-size: 14px;
+    font-size: 13px;
   }
 }
 </style>

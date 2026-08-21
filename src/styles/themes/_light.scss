@@ -1,34 +1,56 @@
 /* Lumina Light Theme */
 
 :root[data-theme="light"] {
-  /* 背景 */
-  --lumina-bg: #eef1f5;
-  --lumina-bg-soft: rgb(36 42 48 / 4%);
+  color-scheme: light;
 
-  /* 文本 */
-  --lumina-text: #202326;
-  --lumina-text-secondary: #626970;
+  /* Semantic surfaces */
+  --lumina-window-bg: #f5f5f7;
+  --lumina-sidebar-bg: rgb(242 242 247 / 78%);
+  --lumina-toolbar-bg: rgb(250 250 252 / 82%);
+  --lumina-content-bg: #ffffff;
+  --lumina-surface-elevated: #ffffff;
+  --lumina-surface-secondary: #f5f5f7;
+  --lumina-surface-tertiary: #e9e9ee;
+  --lumina-control-bg: rgb(118 118 128 / 10%);
+  --lumina-control-hover: rgb(118 118 128 / 16%);
+  --lumina-control-active: rgb(118 118 128 / 22%);
+  --lumina-overlay: rgb(20 20 24 / 22%);
+
+  /* Semantic text and separators */
+  --lumina-text: #1d1d1f;
+  --lumina-text-secondary: #6e6e73;
+  --lumina-text-tertiary: #8e8e93;
+  --lumina-separator: rgb(60 60 67 / 14%);
+  --lumina-separator-strong: rgb(60 60 67 / 22%);
 
   /* 主色 */
-  --lumina-primary: var(--lumina-primary-500);
-  --lumina-primary-soft: rgb(63 111 104 / 12%);
+  --lumina-primary: #39786f;
+  --lumina-primary-hover: #2e655d;
+  --lumina-primary-soft: rgb(57 120 111 / 12%);
+  --lumina-on-accent: #ffffff;
+  --lumina-on-danger: #ffffff;
+  --lumina-success: #27853f;
+  --lumina-warning: #b76500;
+  --lumina-danger: #d9363e;
 
   /* 卡片 */
-  --lumina-card-bg: #fbfcfd;
-  --lumina-card-hover-bg: #edf1f4;
-  --lumina-card-border: rgb(35 42 48 / 14%);
-  --lumina-elevated-bg: #ffffff;
-  --lumina-panel-muted-bg: #edf1f5;
-  --lumina-surface-1: #fbfcfd;
-  --lumina-surface-2: #f3f5f8;
-  --lumina-surface-3: #e8edf2;
-  --lumina-input-bg: #fbfcfc;
-  --lumina-input-border: rgb(35 42 48 / 18%);
-  --lumina-input-focus: rgb(63 111 104 / 36%);
-  --lumina-empty-bg: #eef1f3;
-  --lumina-empty-border: rgb(35 42 48 / 18%);
-  --lumina-button-secondary-bg: #f8f9fa;
-  --lumina-button-secondary-hover: #e7ebee;
+  --lumina-bg: var(--lumina-window-bg);
+  --lumina-bg-soft: rgb(60 60 67 / 4%);
+  --lumina-card-bg: var(--lumina-content-bg);
+  --lumina-card-hover-bg: var(--lumina-control-hover);
+  --lumina-card-border: var(--lumina-separator);
+  --lumina-elevated-bg: var(--lumina-surface-elevated);
+  --lumina-panel-muted-bg: var(--lumina-surface-secondary);
+  --lumina-surface-1: var(--lumina-content-bg);
+  --lumina-surface-2: var(--lumina-surface-secondary);
+  --lumina-surface-3: var(--lumina-surface-tertiary);
+  --lumina-input-bg: rgb(255 255 255 / 84%);
+  --lumina-input-border: var(--lumina-separator-strong);
+  --lumina-input-focus: rgb(57 120 111 / 36%);
+  --lumina-empty-bg: var(--lumina-surface-secondary);
+  --lumina-empty-border: var(--lumina-separator);
+  --lumina-button-secondary-bg: var(--lumina-control-bg);
+  --lumina-button-secondary-hover: var(--lumina-control-hover);
   --lumina-diff-bg: #fbfcfc;
   --lumina-diff-file-bg: rgb(59 130 246 / 8%);
   --lumina-diff-file-text: #1d4ed8;
@@ -38,11 +60,15 @@
   --lumina-diff-add-text: #27613a;
   --lumina-diff-remove-bg: rgb(200 72 67 / 10%);
   --lumina-diff-remove-text: #9d302c;
-  --lumina-workbench-top-bg: linear-gradient(180deg, #ffffff, #f2f5f8);
-  --lumina-workbench-drawer-shadow: -14px 0 34px rgb(46 62 78 / 14%);
-  --lumina-accent-ring: rgb(63 111 104 / 20%);
+  --lumina-code-bg: #f4f5f7;
+  --lumina-code-text: #24292f;
+  --lumina-code-muted: #6e7781;
+  --lumina-workbench-top-bg: var(--lumina-toolbar-bg);
+  --lumina-workbench-drawer-shadow: -14px 0 34px rgb(30 30 40 / 12%);
+  --lumina-accent-ring: rgb(57 120 111 / 22%);
 
   /* 阴影 */
-  --lumina-shadow-sm: 0 1px 2px rgb(16 24 32 / 8%);
-  --lumina-shadow-md: 0 10px 24px rgb(16 24 32 / 12%);
+  --lumina-shadow-sm: 0 0 0 0.5px rgb(0 0 0 / 5%), 0 1px 2px rgb(0 0 0 / 6%);
+  --lumina-shadow-md: 0 0 0 0.5px rgb(0 0 0 / 6%), 0 4px 16px rgb(0 0 0 / 10%);
+  --lumina-shadow-lg: 0 0 0 0.5px rgb(0 0 0 / 10%), 0 2px 8px rgb(0 0 0 / 8%), 0 8px 30px rgb(0 0 0 / 14%);
 }
