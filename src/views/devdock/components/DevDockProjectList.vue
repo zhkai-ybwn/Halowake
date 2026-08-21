@@ -94,11 +94,12 @@
         </section>
 
         <section class="project-row-details">
-          <div v-if="project.loading" class="project-empty">
-            {{ t('devdock.actions.scanning') }}
-          </div>
-          <div v-else-if="!project.manifest" class="project-empty">
-            <span>{{ t('devdock.empty.noManifest') }}</span>
+          <div v-if="project.loading" class="project-loading-state">
+            <Icon icon="solar:refresh-circle-bold" class="loading-spinner" />
+            <div class="loading-content">
+              <strong>{{ t('devdock.actions.scanning') }}</strong>
+              <span>{{ t('devdock.loadingHint') }}</span>
+            </div>
           </div>
           <div v-else-if="filteredScripts(project).length" class="script-list">
             <article
@@ -141,8 +142,41 @@
               {{ isProjectCommandsExpanded(project.path) ? t('devdock.scripts.collapse') : t('devdock.scripts.more', { count: hiddenScriptCount(project) }) }}
             </button>
           </div>
-          <div v-else class="project-empty">
-            {{ t('devdock.scripts.empty') }}
+          <div v-else-if="project.manifest?.candidates?.length" class="project-candidates-guide">
+            <div class="candidates-guide-info">
+              <div class="guide-icon-badge">
+                <Icon icon="solar:lightbulb-bolt-bold" />
+              </div>
+              <div class="guide-text">
+                <strong>{{ t('devdock.candidates.foundTitle', { count: project.manifest.candidates.length }) }}</strong>
+                <p>{{ t('devdock.candidates.foundDescription') }}</p>
+              </div>
+            </div>
+            <div class="candidates-preview-tags">
+              <span v-for="cand in project.manifest.candidates.slice(0, 4)" :key="cand.suggestedId" class="candidate-tag" :title="cand.reason">
+                {{ cand.name }}
+              </span>
+              <span v-if="project.manifest.candidates.length > 4" class="candidate-tag more">
+                +{{ project.manifest.candidates.length - 4 }}
+              </span>
+            </div>
+            <button class="tool-btn primary candidate-action-btn" type="button" @click="$emit('configureCommands', project)">
+              <Icon icon="solar:tuning-2-linear" />
+              <span>{{ t('devdock.candidates.configureNow') }}</span>
+            </button>
+          </div>
+          <div v-else-if="scriptSearch" class="project-empty compact">
+            {{ t('devdock.scripts.noSearchResults') }}
+          </div>
+          <div v-else class="project-empty-guide">
+            <div class="empty-guide-info">
+              <Icon icon="solar:folder-open-linear" class="empty-icon" />
+              <p>{{ t('devdock.empty.noManifest') }}</p>
+            </div>
+            <button class="tool-btn secondary empty-action-btn" type="button" @click="$emit('configureCommands', project)">
+              <Icon icon="solar:tuning-2-linear" />
+              <span>{{ t('devdock.overview.configureCommands') }}</span>
+            </button>
           </div>
         </section>
       </article>
@@ -572,6 +606,179 @@ function handleSortChange(event: Event) {
 .project-row-details {
   border-top: 1px solid var(--lumina-card-border);
   padding: 8px 10px;
+}
+
+.project-loading-state {
+  align-items: center;
+  background: var(--lumina-surface-2);
+  border: 1px dashed var(--lumina-card-border);
+  border-radius: var(--lumina-radius-md);
+  display: flex;
+  gap: 12px;
+  min-height: 80px;
+  padding: 16px 20px;
+
+  .loading-spinner {
+    animation: spin 1.4s linear infinite;
+    color: var(--lumina-primary);
+    flex: 0 0 auto;
+    font-size: 24px;
+    height: 24px;
+    width: 24px;
+  }
+
+  .loading-content {
+    display: grid;
+    gap: 3px;
+
+    strong {
+      color: var(--lumina-text);
+      font-size: 13px;
+    }
+
+    span {
+      color: var(--lumina-text-secondary);
+      font-size: 11px;
+    }
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.project-candidates-guide {
+  background: color-mix(in srgb, var(--lumina-primary) 6%, var(--lumina-surface-2));
+  border: 1px solid color-mix(in srgb, var(--lumina-primary) 22%, var(--lumina-card-border));
+  border-radius: var(--lumina-radius-md);
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+
+  .candidates-guide-info {
+    align-items: flex-start;
+    display: flex;
+    gap: 10px;
+
+    .guide-icon-badge {
+      align-items: center;
+      background: color-mix(in srgb, var(--lumina-primary) 16%, transparent);
+      border-radius: var(--lumina-radius-sm);
+      color: var(--lumina-primary);
+      display: inline-flex;
+      flex: 0 0 auto;
+      height: 28px;
+      justify-content: center;
+      width: 28px;
+
+      svg {
+        height: 16px;
+        width: 16px;
+      }
+    }
+
+    .guide-text {
+      display: grid;
+      gap: 2px;
+
+      strong {
+        color: var(--lumina-text);
+        font-size: 13px;
+      }
+
+      p {
+        color: var(--lumina-text-secondary);
+        font-size: 11px;
+        line-height: 1.4;
+        margin: 0;
+      }
+    }
+  }
+
+  .candidates-preview-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    .candidate-tag {
+      background: var(--lumina-surface-1);
+      border: 1px solid var(--lumina-card-border);
+      border-radius: var(--lumina-radius-sm);
+      color: var(--lumina-text);
+      font-family: monospace;
+      font-size: 11px;
+      padding: 2px 8px;
+
+      &.more {
+        color: var(--lumina-primary);
+        font-weight: bold;
+      }
+    }
+  }
+
+  .candidate-action-btn {
+    align-self: start;
+    gap: 6px;
+    height: 30px;
+    justify-self: start;
+    padding: 0 12px;
+
+    svg {
+      height: 14px;
+      width: 14px;
+    }
+  }
+}
+
+.project-empty-guide {
+  align-items: center;
+  background: var(--lumina-empty-bg);
+  border: 1px dashed var(--lumina-empty-border);
+  border-radius: var(--lumina-radius-md);
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  min-height: 100px;
+  padding: 16px;
+  text-align: center;
+
+  .empty-guide-info {
+    align-items: center;
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+
+    .empty-icon {
+      color: var(--lumina-text-secondary);
+      height: 22px;
+      opacity: 0.6;
+      width: 22px;
+    }
+
+    p {
+      color: var(--lumina-text-secondary);
+      font-size: 12px;
+      line-height: 1.4;
+      margin: 0;
+      max-width: 440px;
+    }
+  }
+
+  .empty-action-btn {
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+
+    svg {
+      height: 13px;
+      width: 13px;
+    }
+  }
 }
 
 .project-empty {

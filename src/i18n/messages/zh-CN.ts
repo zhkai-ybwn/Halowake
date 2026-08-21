@@ -172,8 +172,15 @@ export default {
       description:
         '下一步会读取 package.json、识别 scripts、运行状态和端口。当前先共享项目目录，并预留项目运行控制台布局。',
       noManifest:
-        '当前目录没有可展示的 package.json 信息。请选择 Node 项目目录，或稍后接入更多项目类型扫描。',
+        '当前目录未检测到 package.json 或项目配置文件。若为多模块或子工程，可点击右上角配置手动添加命令。',
     },
+    candidates: {
+      foundTitle: '检测到 {count} 个候选命令',
+      foundDescription: '检测到 Python 或脚本入口，点击下方按钮可快速添加为运行命令。',
+      configureNow: '快速配置候选命令',
+    },
+    loadingHint: '正在检索项目目录结构与脚本文件...',
+    loadingLongHint: '项目较大或涉及较多文件，正在努力分析中...',
     actions: {
       addProject: '添加项目',
       removeProject: '移除项目',
@@ -181,6 +188,7 @@ export default {
       scanAll: '扫描全部',
       scan: '扫描项目',
       scanning: '扫描中...',
+      scanningWithProgress: '扫描中 ({scanned}/{total})...',
       pinScript: '置顶命令',
       unpinScript: '取消置顶',
       run: '启动',

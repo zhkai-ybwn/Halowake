@@ -16,7 +16,7 @@
           {{ processInspectorOpen ? t('devdock.actions.hideProcesses') : t('devdock.actions.showProcesses') }}
         </WorkbenchButton>
         <WorkbenchButton :disabled="!projects.length || loadingAll" @click="scanAllProjects">
-          {{ loadingAll ? t('devdock.actions.scanning') : t('devdock.actions.scanAll') }}
+          {{ scanProgressLabel }}
         </WorkbenchButton>
         <WorkbenchButton variant="primary" @click="handleAddProject">
           {{ t('devdock.actions.addProject') }}
@@ -161,6 +161,10 @@ let logPollTimer: ReturnType<typeof window.setInterval> | undefined
 let processPollTimer: ReturnType<typeof window.setInterval> | undefined
 const loadingAll = computed(() => projects.value.some(project => project.loading))
 const scannedCount = computed(() => projects.value.filter(project => project.manifest).length)
+const scanProgressLabel = computed(() => {
+  if (!loadingAll.value) return t('devdock.actions.scanAll')
+  return t('devdock.actions.scanningWithProgress', { scanned: scannedCount.value, total: projects.value.length })
+})
 const runningProcessCount = computed(() => processes.value.filter(process => process.status.state === 'running').length)
 const sortedProjects = computed(() => [...projects.value].sort((left, right) => right.openedAt - left.openedAt))
 const scriptViews = computed(() => {

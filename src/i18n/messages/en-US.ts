@@ -174,8 +174,15 @@ export default {
       description:
         'Next, DevDock will read package.json, detect scripts, running services, and ports. For now it shares the selected project directory and reserves the project control console layout.',
       noManifest:
-        'This directory has no package.json information to show. Choose a Node project folder, or connect more project scanners later.',
+        'No package.json or project config detected in this directory. If this is a monorepo or subproject, click configure in the top right to add commands manually.',
     },
+    candidates: {
+      foundTitle: '{count} candidate commands detected',
+      foundDescription: 'Python or script entry points were detected. Click below to quickly configure and add them as runnable commands.',
+      configureNow: 'Configure Candidate Commands',
+    },
+    loadingHint: 'Analyzing project structure and script files...',
+    loadingLongHint: 'Project is large or has many files, analyzing...',
     actions: {
       addProject: 'Add Project',
       removeProject: 'Remove project',
@@ -183,6 +190,7 @@ export default {
       scanAll: 'Scan All',
       scan: 'Scan Project',
       scanning: 'Scanning...',
+      scanningWithProgress: 'Scanning ({scanned}/{total})...',
       pinScript: 'Pin script',
       unpinScript: 'Unpin script',
       run: 'Start',
