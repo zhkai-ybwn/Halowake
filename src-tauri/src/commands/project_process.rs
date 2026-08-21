@@ -884,6 +884,17 @@ fn kill_process_tree(pid: u32) {
             .stderr(Stdio::null())
             .status();
     }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("pkill")
+            .args(["-P", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
 }
 
 fn open_url(url: &str) -> Result<(), String> {

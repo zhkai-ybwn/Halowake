@@ -27,3 +27,4 @@ tauri-plugin-dialog = "2.6.0"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+libc = "0.2"

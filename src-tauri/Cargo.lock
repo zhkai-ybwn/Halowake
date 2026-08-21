@@ -1948,6 +1948,7 @@ name = "lumina"
 version = "1.0.0"
 dependencies = [
  "encoding_rs",
+ "libc",
  "log",
  "reqwest",
  "rusqlite",
