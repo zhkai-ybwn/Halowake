@@ -60,4 +60,5 @@ jobs:
           releaseBody: 'See the assets below to download Lumina for your platform.'
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
