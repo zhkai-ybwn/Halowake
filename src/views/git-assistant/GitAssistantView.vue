@@ -28,6 +28,7 @@
       @open-merge="openMergeDialog"
       @clone-repository="openRepositorySetup('clone')"
       @init-repository="openRepositorySetup('init')"
+      @open-repository-rules="repositoryRulesOpen = true"
       @toggle-panel="togglePanel"
       @reset-layout="resetPanelLayout"
     />
@@ -264,9 +265,7 @@
       <NModal
         v-model:show="recentRepoManagerOpen"
         class="recent-repo-modal"
-        :auto-focus="false"
         :mask-closable="true"
-        :trap-focus="false"
       >
         <WorkbenchSheet
           size="wide"
@@ -321,7 +320,7 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
+      <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :mask-closable="true">
         <WorkbenchSheet
           icon="solar:branching-paths-down-linear"
           :title="t('gitAssistant.repo.manageBranches')"
@@ -388,9 +387,8 @@
         />
       </NModal>
 
-      <NModal v-model:show="conflictDialogOpen" class="conflict-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
+      <NModal v-model:show="conflictDialogOpen" class="conflict-modal" :mask-closable="true">
         <WorkbenchSheet
-          size="wide"
           icon="solar:danger-triangle-linear"
           :title="t('gitAssistant.conflict.title')"
           :description="t('gitAssistant.conflict.dialogHint')"
@@ -419,28 +417,28 @@
           <template #footer>
             <div class="sheet-footer-split">
               <div>
-              <NButton
-                v-if="conflictedFiles.length"
-                type="primary"
-                :disabled="!conflictSelectedPaths.length || conflictLoading"
-                @click="handleMarkConflictPathsResolved"
-              >
-                {{ t('gitAssistant.conflict.markSelectedResolved') }}
-              </NButton>
-              <NButton
-                v-if="repositoryState?.mergeInProgress"
-                :disabled="conflictedFiles.length > 0 || conflictLoading"
-                @click="handleContinueMerge"
-              >
-                {{ t('gitAssistant.conflict.continueMerge') }}
-              </NButton>
-              <NButton
-                v-if="repositoryState?.rebaseInProgress"
-                :disabled="conflictedFiles.length > 0 || conflictLoading"
-                @click="handleContinueRebase"
-              >
-                {{ t('gitAssistant.conflict.continueRebase') }}
-              </NButton>
+                <NButton
+                  v-if="conflictedFiles.length"
+                  type="primary"
+                  :disabled="!conflictSelectedPaths.length || conflictLoading"
+                  @click="handleMarkConflictPathsResolved"
+                >
+                  {{ t('gitAssistant.conflict.markSelectedResolved') }}
+                </NButton>
+                <NButton
+                  v-if="repositoryState?.mergeInProgress"
+                  :disabled="conflictedFiles.length > 0 || conflictLoading"
+                  @click="handleContinueMerge"
+                >
+                  {{ t('gitAssistant.conflict.continueMerge') }}
+                </NButton>
+                <NButton
+                  v-if="repositoryState?.rebaseInProgress"
+                  :disabled="conflictedFiles.length > 0 || conflictLoading"
+                  @click="handleContinueRebase"
+                >
+                  {{ t('gitAssistant.conflict.continueRebase') }}
+                </NButton>
               </div>
               <NButton
                 type="error"
@@ -455,7 +453,7 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="mergeDialogOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
+      <NModal v-model:show="mergeDialogOpen" class="repository-action-modal" :mask-closable="true">
         <WorkbenchSheet
           icon="solar:branching-paths-up-linear"
           :title="t('gitAssistant.repo.mergeBranch')"
@@ -488,7 +486,7 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="repositorySetupOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
+      <NModal v-model:show="repositorySetupOpen" class="repository-action-modal" :mask-closable="true">
         <WorkbenchSheet
           :icon="repositorySetupMode === 'clone' ? 'solar:download-square-linear' : 'solar:folder-add-linear'"
           :title="repositorySetupMode === 'clone' ? t('gitAssistant.repo.cloneRepository') : t('gitAssistant.repo.initRepository')"
@@ -617,6 +615,17 @@
       </section>
     </WorkbenchDrawer>
 
+    <WorkbenchDrawer
+      v-if="repositoryRulesOpen"
+      size="wide"
+      :title="t('gitAssistant.repositoryRules.title')"
+      :description="t('gitAssistant.repositoryRules.description')"
+      :close-label="t('gitAssistant.prompt.close')"
+      @close="repositoryRulesOpen = false"
+    >
+      <RepositoryRulesEditor :repo-path="displayRepoPath" />
+    </WorkbenchDrawer>
+
 
     <GitCommandDialog
       :visible="gitCommandDialog.visible"
@@ -672,6 +681,7 @@ import GitCommandDialog from './components/GitCommandDialog.vue'
 import GitCommitAssistant from './components/GitCommitAssistant.vue'
 import GitStatusBar from './components/GitStatusBar.vue'
 import GitReviewPanel from './components/GitReviewPanel.vue'
+import RepositoryRulesEditor from './components/RepositoryRulesEditor.vue'
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
 import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
 import WorkbenchSplitHandle from '@/components/workbench/WorkbenchSplitHandle.vue'
@@ -767,6 +777,7 @@ const keyword = ref('')
 const statusFilter = ref<GitAssistantStatusFilter>('all')
 const recommendedOnly = ref(false)
 const recentRepoManagerOpen = ref(false)
+const repositoryRulesOpen = ref(false)
 const branchLoading = ref(false)
 const branchSelectorOpen = ref(false)
 const branchSelectionValue = ref<string | null>(null)

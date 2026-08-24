@@ -44,4 +44,9 @@ impl AppDatabase {
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_path(path: PathBuf) -> Self {
+        Self { path }
+    }
 }

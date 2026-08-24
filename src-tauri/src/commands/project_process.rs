@@ -15,10 +15,14 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::State;
-
 #[cfg(windows)]
 use encoding_rs::GBK;
+
+use tauri::{Manager, State};
+use crate::storage::{
+    history_repository::{save_devdock_run_history_record, DevDockRunHistoryRecord},
+    AppDatabase,
+};
 
 use super::project::read_project_manifest;
 use super::project_executor::{build_process_command, resolve_executable, ResolvedCommand};
@@ -143,18 +147,22 @@ pub struct StartProjectCommandPayload {
 
 #[tauri::command]
 pub async fn start_project_process(
+    app: tauri::AppHandle,
     payload: StartProjectProcessPayload,
-    state: State<'_, ProjectProcessState>,
+    state: tauri::State<'_, ProjectProcessState>,
 ) -> Result<ProjectProcessSnapshot, String> {
-    start_process(payload, &state)
+    let database = app.try_state::<AppDatabase>().map(|db| db.inner().clone());
+    start_process(payload, &state, database)
 }
 
 #[tauri::command]
 pub async fn start_project_command(
+    app: tauri::AppHandle,
     payload: StartProjectCommandPayload,
-    state: State<'_, ProjectProcessState>,
+    state: tauri::State<'_, ProjectProcessState>,
 ) -> Result<ProjectProcessSnapshot, String> {
-    start_resolved_command(payload, &state)
+    let database = app.try_state::<AppDatabase>().map(|db| db.inner().clone());
+    start_resolved_command(payload, &state, database)
 }
 
 #[tauri::command]
@@ -231,14 +239,16 @@ pub fn stop_all_processes(
 
 #[tauri::command]
 pub async fn restart_project_process(
+    app: tauri::AppHandle,
     process_id: String,
-    state: State<'_, ProjectProcessState>,
+    state: tauri::State<'_, ProjectProcessState>,
 ) -> Result<ProjectProcessSnapshot, String> {
+    let database = app.try_state::<AppDatabase>().map(|db| db.inner().clone());
     let process = find_process(&state, &process_id)?;
     let meta = process.meta.clone();
     stop_process(&process)?;
     if let Some(command_id) = meta.command_id {
-        start_resolved_command(StartProjectCommandPayload { project_path: meta.project_path, command_id }, &state)
+        start_resolved_command(StartProjectCommandPayload { project_path: meta.project_path, command_id }, &state, database)
     } else {
         let payload = StartProjectProcessPayload {
             project_path: meta.project_path,
@@ -246,7 +256,7 @@ pub async fn restart_project_process(
             script_name: meta.script_name,
             package_manager: meta.package_manager,
         };
-        start_process(payload, &state)
+        start_process(payload, &state, database)
     }
 }
 
@@ -282,6 +292,7 @@ pub async fn open_project_url(url: String) -> Result<(), String> {
 fn start_process(
     payload: StartProjectProcessPayload,
     state: &ProjectProcessState,
+    database: Option<AppDatabase>,
 ) -> Result<ProjectProcessSnapshot, String> {
     if !is_safe_script_name(&payload.script_name) {
         return Err("脚本名称包含不支持的字符。".to_string());
@@ -368,6 +379,8 @@ fn start_process(
         Arc::clone(&detected_ports),
         Arc::clone(&detected_urls),
         false,
+        meta.clone(),
+        database,
     );
 
     let managed = ManagedProcess {
@@ -391,6 +404,7 @@ fn start_process(
 fn start_resolved_command(
     payload: StartProjectCommandPayload,
     state: &ProjectProcessState,
+    database: Option<AppDatabase>,
 ) -> Result<ProjectProcessSnapshot, String> {
     if let Some(existing) = find_active_script(state, &payload.project_path, &payload.command_id)? {
         return Ok(snapshot_process(&existing));
@@ -400,7 +414,7 @@ fn start_resolved_command(
     let project_name = manifest.name.unwrap_or_else(|| display_name_from_path(&payload.project_path));
     let mut command = build_process_command(&resolved);
     configure_managed_command(&mut command, resolved.working_directory.to_string_lossy().as_ref());
-    spawn_resolved_process(state, payload.project_path, project_name, resolved, command)
+    spawn_resolved_process(state, payload.project_path, project_name, resolved, command, database)
 }
 
 fn spawn_resolved_process(
@@ -409,6 +423,7 @@ fn spawn_resolved_process(
     project_name: String,
     resolved: ResolvedCommand,
     mut command: Command,
+    database: Option<AppDatabase>,
 ) -> Result<ProjectProcessSnapshot, String> {
     let mut child = command.spawn().map_err(|error| format!("SPAWN_FAILED: {error}"))?;
     let pid = child.id();
@@ -449,6 +464,8 @@ fn spawn_resolved_process(
         Arc::clone(&detected_ports),
         Arc::clone(&detected_urls),
         true,
+        meta.clone(),
+        database,
     );
     let managed = ManagedProcess { child, logs, detected_ports, detected_urls, status, meta };
     let snapshot = snapshot_process(&managed);
@@ -783,11 +800,13 @@ fn spawn_waiter(
     detected_ports: Arc<Mutex<Vec<u16>>>,
     detected_urls: Arc<Mutex<Vec<String>>>,
     classify_exit: bool,
+    meta: ProjectProcessMeta,
+    database: Option<AppDatabase>,
 ) {
     thread::spawn(move || loop {
         let result = child.lock().ok().and_then(|mut child| child.try_wait().ok()).flatten();
         if let Some(exit_status) = result {
-            if let Ok(mut status) = status.lock() {
+            let final_status = if let Ok(mut status) = status.lock() {
                 let exit_code = exit_status.code();
                 if status.state == "running" {
                     status.state = if classify_exit {
@@ -798,12 +817,40 @@ fn spawn_waiter(
                 }
                 status.exit_code = exit_code;
                 status.exited_at = Some(now_millis());
-            }
+                status.clone()
+            } else {
+                ProjectProcessStatus {
+                    state: "exited".to_string(),
+                    exit_code: exit_status.code(),
+                    exited_at: Some(now_millis()),
+                }
+            };
             let exit_description = exit_status.code().map_or_else(
                 || "进程已退出，未返回退出码".to_string(),
                 |code| format!("进程已退出，退出码 {code}"),
             );
             push_system_log(&logs, &detected_ports, &detected_urls, exit_description);
+
+            if let Some(db) = database {
+                let last_line = logs.lock().ok().and_then(|lines| lines.back().map(|l| l.text.clone()));
+                let duration_ms = (now_millis().saturating_sub(meta.started_at as u128)) as i64;
+                let record = DevDockRunHistoryRecord {
+                    id: meta.id.clone(),
+                    project_path: meta.project_path.clone(),
+                    project_name: meta.project_name.clone(),
+                    command_id: meta.command_id.clone().unwrap_or_else(|| meta.script_name.clone()),
+                    command_name: meta.command_name.clone().unwrap_or_else(|| meta.script_name.clone()),
+                    executor: meta.executor.clone().unwrap_or_else(|| meta.package_manager.clone()),
+                    command_preview: Some(meta.command.clone()),
+                    exit_code: final_status.exit_code,
+                    status: final_status.state,
+                    started_at: meta.started_at as i64,
+                    duration_ms,
+                    last_log_line: last_line,
+                    expires_at: None,
+                };
+                let _ = save_devdock_run_history_record(&db, &record);
+            }
             break;
         }
         if status.lock().map(|status| status.state != "running").unwrap_or(true) {

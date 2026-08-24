@@ -25,19 +25,13 @@ import LocalizationSettingsPanel from './panels/LocalizationSettingsPanel.vue'
 import CloseBehaviorSettingsPanel from './panels/CloseBehaviorSettingsPanel.vue'
 import ModelSettingsPanel from './panels/ModelSettingsPanel.vue'
 import StorageSettingsPanel from './panels/StorageSettingsPanel.vue'
-import ProjectProfileSettingsPanel from './panels/ProjectProfileSettingsPanel.vue'
 import TaskRoutingSettingsPanel from './panels/TaskRoutingSettingsPanel.vue'
 import ThemeSettingsPanel from './panels/ThemeSettingsPanel.vue'
 
 const { t } = useI18n({ useScope: 'global' })
-const active = ref('profile')
+const active = ref('language')
 
 const navSections = computed(() => [
-  {
-    key: 'project',
-    label: t('settings.navSections.project'),
-    items: [{ key: 'profile', label: t('settings.nav.profile'), icon: 'solar:code-square-linear' }],
-  },
   {
     key: 'app',
     label: t('settings.navSections.app'),
@@ -56,8 +50,6 @@ const navSections = computed(() => [
 
 const activeComponent = computed(() => {
   switch (active.value) {
-    case 'profile':
-      return ProjectProfileSettingsPanel
     case 'theme':
       return ThemeSettingsPanel
     case 'closeBehavior':

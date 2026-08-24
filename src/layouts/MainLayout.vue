@@ -7,19 +7,19 @@
           <button class="traffic-light traffic-light--minimize" type="button" :aria-label="t('topbar.minimize')" @click="minimizeWindow"><span>−</span></button>
           <button class="traffic-light traffic-light--maximize" type="button" :aria-label="maximizeTitle" @click="toggleMaximize"><span>+</span></button>
         </div>
-        <WorkbenchIconButton icon="solar:sidebar-minimalistic-linear" :label="t('topbar.toggleSidebar')" :active="!sidebarCollapsed" @click.stop="toggleSidebar" />
+        <WorkbenchIconButton icon="solar:sidebar-minimalistic-linear" :label="t('topbar.toggleSidebar')" :active="!sidebarCollapsed" @click.stop="toggleSidebar" @dblclick.stop />
         <div class="titlebar-identity" data-tauri-drag-region>
-          <img src="@/assets/logo.png" alt="" />
+          <img src="@/assets/logo.png" alt="" data-tauri-drag-region />
           <div data-tauri-drag-region><strong data-tauri-drag-region>Lumina</strong><span data-tauri-drag-region>{{ currentModuleLabel }}</span></div>
         </div>
       </div>
 
-      <button class="command-trigger" type="button" @click.stop="openCommandPalette">
+      <button class="command-trigger" type="button" @click.stop="openCommandPalette" @dblclick.stop>
         <Icon icon="solar:magnifer-linear" /><span>{{ t('topbar.commandPalette') }}</span>
       </button>
 
-      <div class="titlebar-actions" @mousedown.stop @dblclick.stop>
-        <div v-if="!isMac" class="windows-window-controls">
+      <div class="titlebar-actions" data-tauri-drag-region>
+        <div v-if="!isMac" class="windows-window-controls" @mousedown.stop @dblclick.stop>
           <button class="window-button" type="button" :title="t('topbar.minimize')" @click="minimizeWindow"><span class="caption-icon caption-icon--minimize" aria-hidden="true"></span></button>
           <button class="window-button" type="button" :title="maximizeTitle" @click="toggleMaximize"><span class="caption-icon" :class="isMaximized ? 'caption-icon--restore' : 'caption-icon--maximize'" aria-hidden="true"></span></button>
           <button class="window-button window-button--close" type="button" :title="t('topbar.close')" @click="closeWindow"><span class="caption-icon caption-icon--close" aria-hidden="true"></span></button>
@@ -42,7 +42,7 @@
 
       <main class="view-host">
         <router-view v-slot="{ Component }">
-          <transition name="route-fade" mode="out-in"><keep-alive><component :is="Component" /></keep-alive></transition>
+          <transition name="route-fade"><keep-alive><component :is="Component" /></keep-alive></transition>
         </router-view>
       </main>
     </div>
@@ -203,9 +203,9 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 .sidebar { background: var(--lumina-sidebar-bg); border-right: 0.5px solid var(--lumina-separator); display: flex; flex: 0 0 var(--lumina-sidebar-width); flex-direction: column; min-width: 0; overflow: hidden; padding: 14px 10px 10px; transition: flex-basis var(--lumina-duration-normal) var(--lumina-ease-out); user-select: none; backdrop-filter: var(--lumina-vibrancy); }
 .sidebar-section-label { color: var(--lumina-text-tertiary); font-size: 10px; font-weight: 600; letter-spacing: 0.05em; padding: 0 9px 7px; text-transform: uppercase; }.sidebar-nav { display: flex; flex: 1; flex-direction: column; gap: 3px; }.sidebar-footer { border-top: 0.5px solid var(--lumina-separator); display: flex; flex-direction: column; gap: 3px; padding-top: 8px; }
 .sidebar-item { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-sm); color: var(--lumina-text-secondary); cursor: pointer; display: flex; gap: 9px; height: 32px; padding: 0 9px; text-align: left; transition: background var(--lumina-duration-fast) var(--lumina-ease-out), color var(--lumina-duration-fast) var(--lumina-ease-out); width: 100%; }
-.sidebar-item:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }.sidebar-item.active { background: var(--lumina-control-active); color: var(--lumina-text); font-weight: 500; }.sidebar-item svg { flex: 0 0 auto; height: 17px; width: 17px; }.sidebar-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-item:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }.sidebar-item:active { transform: scale(0.98); }.sidebar-item.active { background: var(--lumina-control-active); color: var(--lumina-text); font-weight: 500; }.sidebar-item svg { flex: 0 0 auto; height: 17px; width: 17px; }.sidebar-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-is-collapsed .sidebar { flex-basis: var(--lumina-sidebar-collapsed-width); padding-inline: 10px; }.sidebar-is-collapsed .sidebar-section-label, .sidebar-is-collapsed .sidebar-item span { display: none; }.sidebar-is-collapsed .sidebar-item { justify-content: center; padding: 0; }
-.view-host { background: var(--lumina-content-bg); flex: 1; min-height: 0; min-width: 0; overflow: hidden; position: relative; }.route-fade-enter-active, .route-fade-leave-active { transition: opacity var(--lumina-duration-fast) var(--lumina-ease-out), transform var(--lumina-duration-fast) var(--lumina-ease-out); }.route-fade-enter-from { opacity: 0; transform: translateY(3px); }.route-fade-leave-to { opacity: 0; }
+.view-host { background: var(--lumina-content-bg); flex: 1; min-height: 0; min-width: 0; overflow: hidden; position: relative; }.route-fade-enter-active { transition: opacity 0.1s ease-out; }.route-fade-enter-from { opacity: 0.85; }
 .command-palette { background: color-mix(in srgb, var(--lumina-surface-elevated) 92%, transparent); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); overflow: hidden; width: min(620px, calc(100vw - 48px)); backdrop-filter: var(--lumina-vibrancy); }.command-palette > header { align-items: center; border-bottom: 0.5px solid var(--lumina-separator); display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 54px; padding: 8px 12px; }.command-palette > header > svg { color: var(--lumina-text-secondary); height: 19px; width: 19px; }.command-palette :deep(.n-input) { --n-border: 0; --n-border-hover: 0; --n-border-focus: 0; --n-box-shadow-focus: none; --n-color: transparent; --n-color-focus: transparent; font-size: 15px; }
 .command-results { max-height: 360px; overflow: auto; padding: 8px; }.command-group-label { color: var(--lumina-text-tertiary); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; margin: 4px 8px 6px; text-transform: uppercase; }.command-results button { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-md); color: var(--lumina-text); cursor: pointer; display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 48px; padding: 6px 9px; text-align: left; width: 100%; }.command-results button.selected { background: var(--lumina-primary-soft); }.command-results button > svg { color: var(--lumina-text-tertiary); height: 15px; width: 15px; }.command-icon { align-items: center; background: var(--lumina-control-bg); border-radius: var(--lumina-radius-sm); display: flex; height: 30px; justify-content: center; width: 30px; }.command-icon svg { height: 17px; width: 17px; }.command-results button > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }.command-results strong { font-size: 13px; font-weight: 550; }.command-results small { color: var(--lumina-text-secondary); font-size: 11px; }.command-empty { color: var(--lumina-text-secondary); padding: 32px; text-align: center; }
 .exit-dialog { background: var(--lumina-surface-elevated); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); color: var(--lumina-text); padding: 22px; position: relative; width: min(430px, calc(100vw - 32px)); }.exit-dialog-close { align-items: center; background: var(--lumina-control-bg); border: 0; border-radius: var(--lumina-radius-sm); color: var(--lumina-text-secondary); cursor: pointer; display: flex; font-size: 20px; height: 28px; justify-content: center; position: absolute; right: 12px; top: 12px; width: 28px; }.exit-dialog-close:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }

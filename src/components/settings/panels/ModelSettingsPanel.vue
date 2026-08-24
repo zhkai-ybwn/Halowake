@@ -16,7 +16,12 @@
       </div>
 
       <article v-for="model in aiSettings.models" :key="model.id" class="model-item">
-        <div class="model-summary" @click="toggleExpanded(model.id)">
+        <button
+          type="button"
+          class="model-summary"
+          :aria-expanded="expandedId === model.id"
+          @click="toggleExpanded(model.id)"
+        >
           <div class="model-summary__main">
             <Icon :icon="expandedId === model.id ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-right-linear'" />
             <div class="model-summary__text">
@@ -33,7 +38,7 @@
               {{ model.enabled ? t('settings.aiModels.enabled') : t('settings.aiModels.disabled') }}
             </span>
           </div>
-        </div>
+        </button>
 
           <div v-if="expandedId === model.id" class="model-editor">
           <div class="model-editor__toolbar">
@@ -256,16 +261,24 @@ p {
 
 .model-summary {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
   cursor: pointer;
   display: grid;
+  font: inherit;
   gap: 16px;
   grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 0.8fr) auto;
   min-height: 58px;
   padding: 0 14px;
+  text-align: left;
   transition: background 0.18s ease;
+  width: 100%;
 
-  &:hover {
+  &:hover,
+  &:focus-visible {
     background: var(--lumina-button-secondary-hover);
+    outline: none;
   }
 }
 

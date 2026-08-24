@@ -2,9 +2,7 @@
   <NModal
     :show="show"
     class="process-log-modal"
-    :auto-focus="false"
     :mask-closable="true"
-    :trap-focus="false"
     @update:show="handleShowUpdate"
     @after-leave="$emit('afterLeave')"
   >

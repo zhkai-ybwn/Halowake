@@ -2,7 +2,12 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{fs, path::Path};
 
-use super::{project_config::{read_project_config, save_project_config, validate_config}, project_discovery::discover_commands, project_models::{LuminaProjectConfig, ProjectCommand, ProjectCommandCandidate}, project_resolver::{resolve_package_project_commands, resolve_project_commands}};
+use super::{
+    project_config::{read_project_config, save_project_config, validate_config},
+    project_discovery::{discover_commands, has_python_project_markers, validate_project_directory},
+    project_models::{LuminaProjectConfig, ProjectCommand, ProjectCommandCandidate},
+    project_resolver::{resolve_package_project_commands, resolve_project_commands},
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,11 +69,52 @@ pub async fn discover_project_commands(project_path: String) -> Result<Vec<Proje
         .map_err(|error| format!("发现项目命令任务异常: {error}"))?
 }
 
+#[tauri::command]
+pub async fn load_devdock_projects(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+) -> Result<Vec<crate::storage::history_repository::DevDockProjectRecord>, String> {
+    crate::storage::history_repository::list_devdock_projects(&database)
+}
+
+#[tauri::command]
+pub async fn save_devdock_project(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    project: crate::storage::history_repository::DevDockProjectRecord,
+) -> Result<(), String> {
+    crate::storage::history_repository::save_devdock_project_record(&database, &project)
+}
+
+#[tauri::command]
+pub async fn remove_devdock_project(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    path: String,
+) -> Result<(), String> {
+    crate::storage::history_repository::remove_devdock_project_record(&database, &path)
+}
+
+#[tauri::command]
+pub async fn load_devdock_run_history(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    project_path: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<crate::storage::history_repository::DevDockRunHistoryRecord>, String> {
+    let project_path = project_path.filter(|p| !p.trim().is_empty());
+    let limit = limit.unwrap_or(50);
+    crate::storage::history_repository::list_devdock_run_history_records(&database, project_path.as_deref(), limit)
+}
+
+#[tauri::command]
+pub async fn clear_devdock_run_history(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    project_path: Option<String>,
+) -> Result<(), String> {
+    let project_path = project_path.filter(|p| !p.trim().is_empty());
+    crate::storage::history_repository::clear_devdock_run_history_records(&database, project_path.as_deref())
+}
+
 pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifest, String> {
     let project_dir = Path::new(project_path);
-    if !project_dir.is_dir() {
-        return Err("请选择有效的项目目录。".to_string());
-    }
+    validate_project_directory(project_dir)?;
 
     let package_json_path = project_dir.join("package.json");
     let package_json = if package_json_path.is_file() {
@@ -77,6 +123,7 @@ pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifes
         Some(serde_json::from_str::<Value>(&content)
             .map_err(|e| format!("package.json 不是合法 JSON: {}", e))?)
     } else { None };
+    let has_lumina_config = project_dir.join(".lumina").join("project.json").is_file();
     let (config, config_error) = match read_project_config(project_path) {
         Ok(config) => (config, None),
         Err(error) => (LuminaProjectConfig::default(), Some(error)),
@@ -107,10 +154,17 @@ pub(crate) fn read_project_manifest(project_path: &str) -> Result<ProjectManifes
     let version = package_json.as_ref().and_then(|package| string_field(package, "version"));
     let package_manager = package_json.as_ref().map(|package| detect_package_manager(project_dir, package)).unwrap_or_else(|| "none".to_string());
     let candidates = discover_commands(project_path)?;
+    let has_py_markers = has_python_project_markers(project_dir);
+
+    // 有效项目判定：必须具备 package.json、已配置命令、候选命令、或 Python 项目特征之一
+    if package_json.is_none() && !has_lumina_config && candidates.is_empty() && !has_py_markers && commands.is_empty() {
+        return Err("NO_PROJECT_MANIFEST: 所选目录未检测到有效项目（需包含 package.json、Python 入口或启动脚本）。".to_string());
+    }
+
     let mut detected_types = config.types.clone();
     if package_json.is_some() && !detected_types.iter().any(|item| item == "frontend") { detected_types.push("frontend".to_string()); }
-    if config.runtimes.python.is_some() && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
-    if candidates.iter().any(|candidate| candidate.executor == "python") && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
+    if (config.runtimes.python.is_some() || has_py_markers) && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
+    if candidates.iter().any(|candidate| candidate.executor == "python" || candidate.executor == "python-module") && !detected_types.iter().any(|item| item == "python") { detected_types.push("python".to_string()); }
 
     Ok(ProjectManifest {
         project_path: project_path.to_string(),

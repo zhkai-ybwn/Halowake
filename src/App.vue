@@ -4,6 +4,7 @@
       <n-dialog-provider>
         <n-notification-provider>
           <router-view />
+          <UpdateModal />
         </n-notification-provider>
       </n-dialog-provider>
     </n-message-provider>
@@ -11,11 +12,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { darkTheme, type GlobalThemeOverrides, NConfigProvider } from 'naive-ui'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useUpdaterStore } from '@/stores/updater'
+import UpdateModal from '@/components/updater/UpdateModal.vue'
 
 const preferencesStore = usePreferencesStore()
+const updaterStore = useUpdaterStore()
+
+onMounted(() => {
+  // Silent lightweight check on app startup (3s delay)
+  setTimeout(() => {
+    updaterStore.checkForUpdates({ silent: true, openModalIfAvailable: true }).catch(() => {
+      // Intentionally ignored in silent mode
+    })
+  }, 3000)
+})
 const naiveTheme = computed(() => preferencesStore.resolvedTheme === 'dark' ? darkTheme : null)
 
 const themeOverrides = computed<GlobalThemeOverrides>(() => {

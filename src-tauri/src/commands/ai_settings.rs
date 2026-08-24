@@ -42,8 +42,19 @@ fn ai_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(AI_SETTINGS_FILE))
 }
 
+use crate::storage::{
+    history_repository::{load_ai_settings_from_db, save_ai_settings_to_db},
+    AppDatabase,
+};
+
 #[tauri::command]
 pub fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        if let Ok(Some(settings)) = load_ai_settings_from_db(&db) {
+            return Ok(Some(settings));
+        }
+    }
+
     let path = ai_settings_path(&app)?;
     if !path.exists() {
         return Ok(None);
@@ -54,20 +65,26 @@ pub fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
     let settings = serde_json::from_str::<AiSettings>(&content)
         .map_err(|e| format!("AI 设置文件不是合法 JSON {}: {}", path.display(), e))?;
 
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        let _ = save_ai_settings_to_db(&db, &settings);
+        let _ = fs::remove_file(&path);
+    }
+
     Ok(Some(settings))
 }
 
 #[tauri::command]
 pub fn save_ai_settings(app: AppHandle, settings: AiSettings) -> Result<(), String> {
-    let path = ai_settings_path(&app)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("无法解析 AI 设置目录: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("创建 AI 设置目录失败 {}: {}", parent.display(), e))?;
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        save_ai_settings_to_db(&db, &settings)?;
+    }
 
-    let content = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("序列化 AI 设置失败: {}", e))?;
-    fs::write(&path, content)
-        .map_err(|e| format!("写入 AI 设置失败 {}: {}", path.display(), e))
+    // 移除旧明文 JSON 文件，统一收口至 SQLite 数据库
+    if let Ok(path) = ai_settings_path(&app) {
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    Ok(())
 }

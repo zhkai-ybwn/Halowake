@@ -337,9 +337,7 @@
     <NModal
       v-model:show="projectModalOpen"
       class="project-filter-modal"
-      :auto-focus="false"
       :mask-closable="true"
-      :trap-focus="false"
     >
       <WorkbenchSheet
         size="normal"
@@ -443,30 +441,35 @@
       @close="promptDrawerOpen = false"
     >
       <div class="prompt-drawer-container">
-        <!-- Preset Template Quick Switcher -->
+        <!-- Dynamic Template Switcher Strip -->
         <div class="prompt-preset-row">
           <span class="preset-label">{{ t('codexReport.presetTemplateSelect') }}:</span>
           <div class="preset-buttons">
             <button
+              v-for="tpl in promptTemplates"
+              :key="tpl.id"
               type="button"
               class="preset-chip"
-              @click="applyPreset(DEFAULT_WEB_AI_PROMPT)"
+              :class="{ 'is-active': activeTemplateId === tpl.id }"
+              @click="selectTemplate(tpl)"
             >
-              {{ t('codexReport.presetStandard') }}
+              <span>{{ tpl.name }}</span>
+              <span v-if="tpl.isBuiltin" class="chip-tag">{{ t('codexReport.builtinBadge') }}</span>
+              <span
+                v-if="!tpl.isBuiltin && activeTemplateId === tpl.id"
+                class="chip-del"
+                :title="t('common.delete')"
+                @click.stop="handleDeleteTemplate(tpl)"
+              >
+                ×
+              </span>
             </button>
             <button
               type="button"
-              class="preset-chip"
-              @click="applyPreset(STANDUP_PROMPT_TEMPLATE)"
+              class="preset-chip new-template-btn"
+              @click="openCreateTemplateModal"
             >
-              {{ t('codexReport.presetStandup') }}
-            </button>
-            <button
-              type="button"
-              class="preset-chip"
-              @click="applyPreset(TECH_SUMMARY_PROMPT_TEMPLATE)"
-            >
-              {{ t('codexReport.presetTech') }}
+              + {{ t('codexReport.createTemplate') }}
             </button>
           </div>
         </div>
@@ -476,24 +479,87 @@
           type="textarea"
           :autosize="false"
           class="prompt-editor-textarea"
+          :placeholder="t('codexReport.templateContentPlaceholder')"
         />
+
         <footer class="drawer-footer">
-          <WorkbenchButton @click="promptDraft = DEFAULT_WEB_AI_PROMPT">
-            {{ t('codexReport.restoreDefault') }}
-          </WorkbenchButton>
-          <WorkbenchButton variant="primary" @click="savePrompt">
-            {{ t('common.save') }}
-          </WorkbenchButton>
+          <div class="drawer-footer-left">
+            <WorkbenchButton
+              v-if="currentActiveTemplate?.isBuiltin"
+              @click="handleRestoreBuiltin"
+            >
+              {{ t('codexReport.restoreDefault') }}
+            </WorkbenchButton>
+            <WorkbenchButton
+              v-else-if="currentActiveTemplate"
+              variant="secondary"
+              @click="handleDeleteTemplate(currentActiveTemplate)"
+            >
+              {{ t('common.delete') }}
+            </WorkbenchButton>
+          </div>
+          <div class="drawer-footer-right">
+            <WorkbenchButton variant="primary" @click="saveCurrentPrompt">
+              {{ t('common.save') }}
+            </WorkbenchButton>
+          </div>
         </footer>
       </div>
     </WorkbenchDrawer>
+
+    <!-- Create Custom Template Modal -->
+    <NModal
+      v-model:show="showCreateTemplateModal"
+      class="create-template-modal"
+      :mask-closable="true"
+    >
+      <WorkbenchSheet
+        size="normal"
+        icon="solar:document-add-linear"
+        :title="t('codexReport.createTemplateTitle')"
+        :description="t('codexReport.promptHint')"
+        close-label="Close"
+        @close="showCreateTemplateModal = false"
+      >
+        <div class="create-template-form">
+          <label class="form-field">
+            <span class="field-label">{{ t('codexReport.templateName') }}</span>
+            <NInput
+              v-model:value="newTemplateName"
+              :placeholder="t('codexReport.templateNamePlaceholder')"
+              maxlength="30"
+            />
+          </label>
+          <label class="form-field">
+            <span class="field-label">{{ t('codexReport.templateContent') }}</span>
+            <NInput
+              v-model:value="newTemplateContent"
+              type="textarea"
+              :rows="10"
+              :placeholder="t('codexReport.templateContentPlaceholder')"
+            />
+          </label>
+        </div>
+
+        <template #footer>
+          <div class="modal-footer-actions">
+            <WorkbenchButton @click="showCreateTemplateModal = false">
+              {{ t('common.cancel') }}
+            </WorkbenchButton>
+            <WorkbenchButton variant="primary" @click="handleCreateTemplate">
+              {{ t('common.save') }}
+            </WorkbenchButton>
+          </div>
+        </template>
+      </WorkbenchSheet>
+    </NModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { NCheckbox, NCheckboxGroup, NDatePicker, NInput, NModal, useMessage } from 'naive-ui'
+import { NCheckbox, NCheckboxGroup, NDatePicker, NInput, NModal, useDialog, useMessage } from 'naive-ui'
 import WorkbenchTopbar from '@/components/workbench/WorkbenchTopbar.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
 import WorkbenchTag from '@/components/workbench/WorkbenchTag.vue'
@@ -501,7 +567,15 @@ import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
 import WorkbenchSheet from '@/components/workbench/WorkbenchSheet.vue'
-import { loadCodexProjects, loadCodexReportSessions } from '@/services/codex-report-service'
+import {
+  loadCodexProjects,
+  loadCodexReportSessions,
+  loadCodexReportTemplates,
+  saveCodexReportTemplate,
+  deleteCodexReportTemplate,
+  resetBuiltinCodexReportTemplates,
+  type CodexReportPromptTemplate,
+} from '@/services/codex-report-service'
 import { useLocale } from '@/hooks/useLocale'
 import type { AiToolProvider, CodexProjectInfo, CodexReportSession } from '@/types/codex-report'
 import {
@@ -521,10 +595,21 @@ type SessionView = 'all' | 'included' | 'excluded'
 type EditorMode = 'markdown' | 'preview'
 
 const PROMPT_STORAGE_KEY = 'lumina.codex-report.prompt.v1'
+const ACTIVE_TEMPLATE_KEY = 'lumina.codex-report.active-template.v1'
 const SELECTED_PROJECTS_KEY = 'lumina.codex-report.selected-projects.v1'
 
 const message = useMessage()
+const dialog = useDialog()
 const { t } = useLocale()
+
+const promptTemplates = ref<CodexReportPromptTemplate[]>([])
+const activeTemplateId = ref<string>('builtin-standard')
+const currentActiveTemplate = computed(() =>
+  promptTemplates.value.find(tpl => tpl.id === activeTemplateId.value) || promptTemplates.value[0] || null
+)
+const showCreateTemplateModal = ref(false)
+const newTemplateName = ref('')
+const newTemplateContent = ref('')
 const today = new Date()
 today.setHours(0, 0, 0, 0)
 
@@ -636,9 +721,40 @@ watch(selectedProjects, val => {
 }, { deep: true })
 
 onMounted(async () => {
+  await initPromptTemplates()
   await fetchProjects()
   await loadSessions()
 })
+
+async function initPromptTemplates() {
+  try {
+    const templates = await loadCodexReportTemplates()
+    promptTemplates.value = templates
+    const savedActiveId = localStorage.getItem(ACTIVE_TEMPLATE_KEY)
+    if (savedActiveId && templates.some(t => t.id === savedActiveId)) {
+      activeTemplateId.value = savedActiveId
+    } else if (templates.length > 0) {
+      activeTemplateId.value = templates[0].id
+    }
+    const active = templates.find(t => t.id === activeTemplateId.value)
+    if (active) {
+      webAiPrompt.value = active.content
+      promptDraft.value = active.content
+    }
+  } catch (err) {
+    console.error('Failed to load prompt templates:', err)
+  }
+}
+
+function selectTemplate(template: CodexReportPromptTemplate) {
+  activeTemplateId.value = template.id
+  try {
+    localStorage.setItem(ACTIVE_TEMPLATE_KEY, template.id)
+  } catch {
+    // Ignore storage errors
+  }
+  promptDraft.value = template.content
+}
 
 async function fetchProjects() {
   projectsLoading.value = true
@@ -715,28 +831,117 @@ function isCurrentDay(dayOffset: number) {
 }
 
 function openPromptDrawer() {
-  promptDraft.value = webAiPrompt.value
+  const active = currentActiveTemplate.value
+  promptDraft.value = active ? active.content : webAiPrompt.value
   promptDrawerOpen.value = true
 }
 
-function applyPreset(template: string) {
-  promptDraft.value = template
+async function saveCurrentPrompt() {
+  const active = currentActiveTemplate.value
+  if (!active) return
+  const updated: CodexReportPromptTemplate = {
+    ...active,
+    content: promptDraft.value.trim() || active.content,
+    updatedAt: Date.now(),
+  }
+  try {
+    await saveCodexReportTemplate(updated)
+    webAiPrompt.value = updated.content
+    const index = promptTemplates.value.findIndex(t => t.id === updated.id)
+    if (index >= 0) {
+      promptTemplates.value[index] = updated
+    }
+    message.success(t('codexReport.promptSaved'))
+    promptDrawerOpen.value = false
+  } catch (err) {
+    message.error(String(err))
+  }
 }
 
-function savePrompt() {
-  const value = promptDraft.value.trim() || DEFAULT_WEB_AI_PROMPT
-  webAiPrompt.value = value
-  localStorage.setItem(PROMPT_STORAGE_KEY, value)
-  promptDrawerOpen.value = false
-  message.success(t('codexReport.promptSaved'))
+function openCreateTemplateModal() {
+  newTemplateName.value = ''
+  newTemplateContent.value = promptDraft.value || DEFAULT_WEB_AI_PROMPT
+  showCreateTemplateModal.value = true
+}
+
+async function handleCreateTemplate() {
+  const name = newTemplateName.value.trim()
+  if (!name) {
+    message.warning(t('codexReport.templateNameRequired'))
+    return
+  }
+  const newTemplate: CodexReportPromptTemplate = {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name,
+    content: newTemplateContent.value.trim() || DEFAULT_WEB_AI_PROMPT,
+    isBuiltin: false,
+    sortOrder: promptTemplates.value.length + 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+  try {
+    await saveCodexReportTemplate(newTemplate)
+    promptTemplates.value.push(newTemplate)
+    selectTemplate(newTemplate)
+    webAiPrompt.value = newTemplate.content
+    showCreateTemplateModal.value = false
+    message.success(t('common.savedSuccessfully'))
+  } catch (err) {
+    message.error(String(err))
+  }
+}
+
+function handleDeleteTemplate(template: CodexReportPromptTemplate) {
+  if (template.isBuiltin) return
+  dialog.warning({
+    title: t('common.delete') || '删除模板',
+    content: t('codexReport.deleteTemplateConfirm', { name: template.name }),
+    positiveText: t('common.confirm') || '确定',
+    negativeText: t('common.cancel') || '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteCodexReportTemplate(template.id)
+        promptTemplates.value = promptTemplates.value.filter(t => t.id !== template.id)
+        if (activeTemplateId.value === template.id) {
+          const next = promptTemplates.value[0]
+          if (next) {
+            selectTemplate(next)
+            webAiPrompt.value = next.content
+          }
+        }
+        message.success(t('codexReport.deleteTemplateSuccess'))
+      } catch (err) {
+        message.error(String(err))
+      }
+    },
+  })
+}
+
+function handleRestoreBuiltin() {
+  dialog.warning({
+    title: t('codexReport.restoreDefault'),
+    content: t('codexReport.restoreBuiltinConfirm'),
+    positiveText: t('common.confirm') || '确定',
+    negativeText: t('common.cancel') || '取消',
+    onPositiveClick: async () => {
+      try {
+        const refreshed = await resetBuiltinCodexReportTemplates()
+        promptTemplates.value = refreshed
+        const curr = refreshed.find(t => t.id === activeTemplateId.value) || refreshed[0]
+        if (curr) {
+          selectTemplate(curr)
+          webAiPrompt.value = curr.content
+        }
+        message.success(t('codexReport.restoreBuiltinSuccess'))
+      } catch (err) {
+        message.error(String(err))
+      }
+    },
+  })
 }
 
 function readSavedPrompt() {
-  try {
-    return localStorage.getItem(PROMPT_STORAGE_KEY) || DEFAULT_WEB_AI_PROMPT
-  } catch {
-    return DEFAULT_WEB_AI_PROMPT
-  }
+  return DEFAULT_WEB_AI_PROMPT
 }
 
 function readSavedProjects(): string[] {
@@ -1389,8 +1594,9 @@ async function copyText(text: string, successMessage: string) {
 }
 
 .prompt-preset-row {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -1403,23 +1609,67 @@ async function copyText(text: string, successMessage: string) {
 
 .preset-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .preset-chip {
+  align-items: center;
   background: var(--lumina-surface-3);
   border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-xs);
   color: var(--lumina-text);
   cursor: pointer;
+  display: inline-flex;
   font-size: 11px;
   font-weight: 500;
+  gap: 5px;
   padding: 3px 8px;
   transition: all var(--lumina-duration-fast) var(--lumina-ease-out);
 
   &:hover {
     background: var(--lumina-surface-elevated);
     border-color: var(--lumina-primary);
+    color: var(--lumina-primary);
+  }
+
+  &.is-active {
+    background: var(--lumina-primary-soft);
+    border-color: var(--lumina-primary);
+    color: var(--lumina-primary);
+    font-weight: 600;
+  }
+}
+
+.chip-tag {
+  background: var(--lumina-surface-2);
+  border-radius: 2px;
+  font-size: 9.5px;
+  opacity: 0.75;
+  padding: 0 3px;
+}
+
+.chip-del {
+  border-radius: 50%;
+  color: var(--lumina-text-tertiary);
+  font-size: 13px;
+  height: 14px;
+  line-height: 13px;
+  text-align: center;
+  width: 14px;
+
+  &:hover {
+    background: var(--lumina-surface-3);
+    color: var(--lumina-danger, #ef4444);
+  }
+}
+
+.new-template-btn {
+  border-style: dashed;
+  color: var(--lumina-text-secondary);
+
+  &:hover {
+    border-style: solid;
     color: var(--lumina-primary);
   }
 }
@@ -1435,8 +1685,29 @@ async function copyText(text: string, successMessage: string) {
 }
 
 .drawer-footer {
+  align-items: center;
   display: flex;
   justify-content: space-between;
+  width: 100%;
+}
+
+.create-template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--lumina-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* Project Filter Sheet Modal */

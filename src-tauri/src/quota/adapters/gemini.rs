@@ -34,7 +34,7 @@ pub async fn fetch_gemini_quota(account: &AccountConfig) -> ProviderQuota {
     let api_key = match &account.api_key {
         Some(k) if !k.trim().is_empty() => k.trim(),
         _ => {
-            quota.error_message = Some("未检测到运行中的 Google AI Pro 服务，且未配置 Gemini API Key".to_string());
+            quota.error_message = Some("未检测到运行中的 Google AI Pro (Antigravity) 语言服务，请确保已启动 Antigravity，或在设置中配置 Gemini API Key".to_string());
             return quota;
         }
     };
@@ -93,149 +93,354 @@ pub async fn fetch_gemini_quota(account: &AccountConfig) -> ProviderQuota {
     quota
 }
 
+#[derive(Debug)]
+struct AntigravityTarget {
+    csrf_token: String,
+    ports: Vec<u16>,
+}
+
 async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Option<crate::quota::models::PaceStatus>), String> {
-    // 1. 通过 powershell 查询运行中的 language_server.exe 的命令行与端口
-    let mut cmd = tokio::process::Command::new("powershell");
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
-    let cmd_output = cmd
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$proc = Get-CimInstance Win32_Process -Filter \"Name = 'language_server.exe'\" | Select-Object -First 1; if ($proc) { $conns = (Get-NetTCPConnection -OwningProcess $proc.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort) -join ','; \"$($proc.CommandLine)|||$conns\" }",
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("执行进程查询失败: {}", e))?;
-
-    let stdout_str = String::from_utf8_lossy(&cmd_output.stdout);
-    let parts: Vec<&str> = stdout_str.trim().split("|||").collect();
-    if parts.len() < 2 {
-        return Err("未找到运行中的 language_server 进程".to_string());
-    }
-
-    let command_line = parts[0];
-    let ports_str = parts[1];
-
-    // 提取 csrf_token
-    let csrf_token = extract_arg(command_line, "--csrf_token")
-        .ok_or_else(|| "未从命令行中解析出 csrf_token".to_string())?;
-
-    let ports: Vec<u16> = ports_str
-        .split(',')
-        .filter_map(|p| p.trim().parse::<u16>().ok())
-        .collect();
-
-    if ports.is_empty() {
-        return Err("未检测到 language_server 监听端口".to_string());
+    let targets = discover_antigravity_targets().await;
+    if targets.is_empty() {
+        return Err("未找到运行中的 Antigravity language_server 进程".to_string());
     }
 
     let client = Client::builder()
         .danger_accept_invalid_certs(true)
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_millis(2500))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut response_data: Option<Value> = None;
+    let mut quota_summary_data: Option<Value> = None;
+    let mut user_status_data: Option<Value> = None;
 
-    for port in ports {
-        let url = format!("https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUserStatus", port);
-        let resp = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Connect-Protocol-Version", "1")
-            .header("X-Codeium-Csrf-Token", &csrf_token)
-            .body("{}")
-            .send()
-            .await;
+    for target in &targets {
+        for &port in &target.ports {
+            let base_url = format!("https://127.0.0.1:{}", port);
 
-        if let Ok(res) = resp {
-            if res.status().is_success() {
-                if let Ok(val) = res.json::<Value>().await {
-                    response_data = Some(val);
-                    break;
+            // 1. 请求官方配额摘要接口 RetrieveUserQuotaSummary
+            if quota_summary_data.is_none() {
+                let url = format!("{}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary", base_url);
+                if let Ok(resp) = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Connect-Protocol-Version", "1")
+                    .header("X-Codeium-Csrf-Token", &target.csrf_token)
+                    .body("{}")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(val) = resp.json::<Value>().await {
+                            if val.pointer("/response/groups").is_some() {
+                                quota_summary_data = Some(val);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. 请求用户状态接口 GetUserStatus (获取 Plan 名称)
+            if user_status_data.is_none() {
+                let url = format!("{}/exa.language_server_pb.LanguageServerService/GetUserStatus", base_url);
+                if let Ok(resp) = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Connect-Protocol-Version", "1")
+                    .header("X-Codeium-Csrf-Token", &target.csrf_token)
+                    .body("{}")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(val) = resp.json::<Value>().await {
+                            if val.get("userStatus").is_some() {
+                                user_status_data = Some(val);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if quota_summary_data.is_some() && user_status_data.is_some() {
+                break;
+            }
+        }
+        if quota_summary_data.is_some() && user_status_data.is_some() {
+            break;
+        }
+    }
+
+    let mut plan_name = "Google AI Pro".to_string();
+    if let Some(val) = &user_status_data {
+        if let Some(name) = val.pointer("/userStatus/planStatus/planInfo/planName").and_then(Value::as_str) {
+            plan_name = format!("Google AI {}", name);
+        } else if let Some(tier) = val.pointer("/userStatus/userTier/name").and_then(Value::as_str) {
+            plan_name = tier.to_string();
+        }
+    }
+
+    let mut quotas = Vec::new();
+    let mut pace_status = None;
+    let now_sec = chrono_now_ms() / 1000;
+
+    // 优先从 RetrieveUserQuotaSummary 解析精准周额度与5小时额度
+    if let Some(summary) = &quota_summary_data {
+        if let Some(groups) = summary.pointer("/response/groups").and_then(Value::as_array) {
+            for g in groups {
+                let display_name = g.get("displayName").and_then(Value::as_str).unwrap_or_default();
+                let group_prefix = if display_name.to_lowercase().contains("gemini") {
+                    "Gemini 模型"
+                } else if display_name.to_lowercase().contains("claude") || display_name.to_lowercase().contains("gpt") {
+                    "Claude 和 GPT 模型"
+                } else {
+                    display_name
+                };
+
+                if let Some(buckets) = g.get("buckets").and_then(Value::as_array) {
+                    for b in buckets {
+                        let window = b.get("window").and_then(Value::as_str).unwrap_or_default();
+                        let remaining_fraction = b.get("remainingFraction").and_then(Value::as_f64).unwrap_or(1.0);
+                        let used_percent = ((1.0 - remaining_fraction) * 100.0).clamp(0.0, 100.0);
+                        let reset_time_str = b.get("resetTime").and_then(Value::as_str);
+                        let resets_at = reset_time_str.and_then(parse_rfc3339_seconds);
+                        let resets_in_seconds = resets_at.map(|ts| (ts - now_sec).max(0));
+
+                        let window_label = match window {
+                            "weekly" => "每周限额",
+                            "5h" => "5小时限额",
+                            _ => b.get("displayName").and_then(Value::as_str).unwrap_or("周期限额"),
+                        };
+
+                        let period_label = format!("{} ({})", group_prefix, window_label);
+
+                        quotas.push(QuotaKind::RateLimit {
+                            period_label,
+                            used_percent,
+                            resets_at,
+                            resets_in_seconds,
+                        });
+
+                        // 针对 Gemini 5h 或 weekly 计算健康配速
+                        if group_prefix.contains("Gemini") && window == "5h" {
+                            if let Some(rem_sec) = resets_in_seconds {
+                                pace_status = Some(calculate_pace(used_percent, 18000, rem_sec));
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    let val = response_data.ok_or_else(|| "无法连接到本地 language_server RPC 端点".to_string())?;
+    // 降级：如果 RetrieveUserQuotaSummary 为空，从 GetUserStatus clientModelConfigs 解析
+    if quotas.is_empty() {
+        if let Some(val) = &user_status_data {
+            if let Some(models) = val.pointer("/userStatus/cascadeModelConfigData/clientModelConfigs").and_then(Value::as_array) {
+                let mut gemini_found = false;
+                let mut claude_found = false;
 
-    let mut plan_name = "Google AI Pro".to_string();
-    if let Some(tier) = val.pointer("/userStatus/userTier/name").and_then(Value::as_str) {
-        plan_name = tier.to_string();
-    }
+                for m in models {
+                    let label = m.get("label").and_then(Value::as_str).unwrap_or_default();
+                    let quota_info = match m.get("quotaInfo") {
+                        Some(q) if !q.is_null() => q,
+                        _ => continue,
+                    };
 
-    let mut quotas = Vec::new();
-    let mut pace_status = None;
+                    let remaining_frac = quota_info.get("remainingFraction").and_then(Value::as_f64).unwrap_or(1.0);
+                    let used_percent = ((1.0 - remaining_frac) * 100.0).clamp(0.0, 100.0);
+                    let reset_time_str = quota_info.get("resetTime").and_then(Value::as_str);
 
-    // 解析各模型配额池
-    if let Some(models) = val.pointer("/userStatus/cascadeModelConfigData/clientModelConfigs").and_then(Value::as_array) {
-        let mut gemini_found = false;
-        let mut claude_found = false;
+                    let resets_at = reset_time_str.and_then(parse_rfc3339_seconds);
+                    let resets_in_seconds = resets_at.map(|ts| (ts - now_sec).max(0));
 
-        let now_sec = chrono_now_ms() / 1000;
+                    if label.contains("Gemini") && !gemini_found {
+                        gemini_found = true;
+                        quotas.push(QuotaKind::RateLimit {
+                            period_label: "Gemini 模型 (5小时限额)".to_string(),
+                            used_percent,
+                            resets_at,
+                            resets_in_seconds,
+                        });
 
-        for m in models {
-            let label = m.get("label").and_then(Value::as_str).unwrap_or_default();
-            let quota_info = match m.get("quotaInfo") {
-                Some(q) if !q.is_null() => q,
-                _ => continue,
-            };
-
-            let remaining_frac = quota_info.get("remainingFraction").and_then(Value::as_f64).unwrap_or(1.0);
-            let used_percent = ((1.0 - remaining_frac) * 100.0).clamp(0.0, 100.0);
-            let reset_time_str = quota_info.get("resetTime").and_then(Value::as_str);
-
-            let resets_at = reset_time_str.and_then(parse_rfc3339_seconds);
-            let resets_in_seconds = resets_at.map(|ts| (ts - now_sec).max(0));
-
-            if label.contains("Gemini") && !gemini_found {
-                gemini_found = true;
-                quotas.push(QuotaKind::RateLimit {
-                    period_label: "Gemini 模型限额 (5h)".to_string(),
-                    used_percent,
-                    resets_at,
-                    resets_in_seconds,
-                });
-
-                if let Some(rem_sec) = resets_in_seconds {
-                    pace_status = Some(calculate_pace(used_percent, 18000, rem_sec));
+                        if let Some(rem_sec) = resets_in_seconds {
+                            pace_status = Some(calculate_pace(used_percent, 18000, rem_sec));
+                        }
+                    } else if (label.contains("Claude") || label.contains("GPT")) && !claude_found {
+                        claude_found = true;
+                        quotas.push(QuotaKind::RateLimit {
+                            period_label: "Claude 和 GPT 模型 (5小时限额)".to_string(),
+                            used_percent,
+                            resets_at,
+                            resets_in_seconds,
+                        });
+                    }
                 }
-            } else if (label.contains("Claude") || label.contains("GPT")) && !claude_found {
-                claude_found = true;
-                quotas.push(QuotaKind::RateLimit {
-                    period_label: "Claude / GPT 模型限额".to_string(),
-                    used_percent,
-                    resets_at,
-                    resets_in_seconds,
-                });
             }
         }
     }
 
     if quotas.is_empty() {
-        return Err("未能解析出模型配额信息".to_string());
+        return Err("未能解析出配额信息".to_string());
     }
 
     Ok((plan_name, quotas, pace_status))
 }
 
-fn extract_arg(cmd: &str, arg_name: &str) -> Option<String> {
+async fn discover_antigravity_targets() -> Vec<AntigravityTarget> {
+    let mut targets = Vec::new();
+
+    #[cfg(windows)]
+    {
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.creation_flags(0x08000000);
+        if let Ok(cmd_output) = cmd
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' -or $_.CommandLine -like '*language_server*' } | ForEach-Object { $p = $_.ProcessId; $c = $_.CommandLine; $conns = (Get-NetTCPConnection -OwningProcess $p -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort) -join ','; \"$p|||$c|||$conns\" }",
+            ])
+            .output()
+            .await
+        {
+            let stdout_str = String::from_utf8_lossy(&cmd_output.stdout);
+            for line in stdout_str.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = trimmed.split("|||").collect();
+                if parts.len() >= 2 {
+                    let pid_str = parts[0];
+                    let command_line = parts[1];
+                    let mut ports = Vec::new();
+                    if parts.len() >= 3 {
+                        for p in parts[2].split(',') {
+                            if let Ok(port) = p.trim().parse::<u16>() {
+                                ports.push(port);
+                            }
+                        }
+                    }
+
+                    if ports.is_empty() {
+                        if let Ok(pid) = pid_str.parse::<u32>() {
+                            ports = get_ports_by_netstat(pid).await;
+                        }
+                    }
+
+                    if let Some(csrf_token) = extract_csrf_token(command_line) {
+                        if !ports.is_empty() {
+                            targets.push(AntigravityTarget { csrf_token, ports });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(cmd_output) = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("ps -eo pid,command | grep -i language_server | grep -v grep")
+            .output()
+            .await
+        {
+            let stdout_str = String::from_utf8_lossy(&cmd_output.stdout);
+            for line in stdout_str.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(pid) = parts[0].parse::<u32>() {
+                        let cmd_line = parts[1..].join(" ");
+                        if let Some(csrf_token) = extract_csrf_token(&cmd_line) {
+                            let ports = get_unix_listening_ports(pid).await;
+                            if !ports.is_empty() {
+                                targets.push(AntigravityTarget { csrf_token, ports });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    targets
+}
+
+#[cfg(windows)]
+async fn get_ports_by_netstat(pid: u32) -> Vec<u16> {
+    let mut ports = Vec::new();
+    let mut cmd = tokio::process::Command::new("cmd");
+    cmd.creation_flags(0x08000000);
+    if let Ok(out) = cmd.args(["/C", "netstat -ano -p tcp"]).output().await {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let pid_str = pid.to_string();
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 && parts[1].starts_with("TCP") || parts.len() >= 4 {
+                let state_index = if parts.len() >= 5 { 3 } else { 2 };
+                let pid_index = parts.len() - 1;
+                if parts.get(state_index).map(|s| s.eq_ignore_ascii_case("LISTENING")).unwrap_or(false)
+                    && parts.get(pid_index) == Some(&pid_str.as_str())
+                {
+                    let local_addr = parts[1];
+                    if let Some(idx) = local_addr.rfind(':') {
+                        if let Ok(port) = local_addr[idx + 1..].parse::<u16>() {
+                            if !ports.contains(&port) {
+                                ports.push(port);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ports
+}
+
+#[cfg(not(windows))]
+async fn get_unix_listening_ports(pid: u32) -> Vec<u16> {
+    let mut ports = Vec::new();
+    if let Ok(out) = tokio::process::Command::new("lsof")
+        .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", &pid.to_string()])
+        .output()
+        .await
+    {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for part in parts {
+                if let Some(idx) = part.rfind(':') {
+                    if let Ok(port) = part[idx + 1..].parse::<u16>() {
+                        if !ports.contains(&port) {
+                            ports.push(port);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ports
+}
+
+fn extract_csrf_token(cmd: &str) -> Option<String> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     for i in 0..parts.len() {
-        if parts[i] == arg_name && i + 1 < parts.len() {
-            return Some(parts[i + 1].trim_matches('"').to_string());
+        if parts[i] == "--csrf_token" && i + 1 < parts.len() {
+            return Some(parts[i + 1].trim_matches('"').trim_matches('\'').to_string());
         }
-        if parts[i].starts_with(&format!("{}=", arg_name)) {
-            return Some(parts[i].trim_start_matches(&format!("{}=", arg_name)).trim_matches('"').to_string());
+        if parts[i].starts_with("--csrf_token=") {
+            return Some(parts[i].trim_start_matches("--csrf_token=").trim_matches('"').trim_matches('\'').to_string());
         }
     }
     None
 }
 
 fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
-    // 简单解析 2026-08-21T05:56:43Z
     let s = s.trim_end_matches('Z');
     let parts: Vec<&str> = s.split('T').collect();
     if parts.len() != 2 {
@@ -254,7 +459,6 @@ fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
     let min = time_parts[1];
     let sec = time_parts[2];
 
-    // 计算简易 Unix timestamp (UTC)
     let mut days = (y - 1970) * 365 + (y - 1969) / 4;
     let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     for i in 1..m {
@@ -267,3 +471,4 @@ fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
 
     Some(days * 86400 + hour * 3600 + min * 60 + sec)
 }
+

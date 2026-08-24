@@ -112,6 +112,88 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_review_findings_session_status
       ON review_findings(session_id, status);
     "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS git_commit_history (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      repo_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'ai',
+      selected_file_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS devdock_projects (
+      path TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      is_pinned INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      opened_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_git_commit_history_repo
+      ON git_commit_history(repo_path, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_git_commit_history_expiry
+      ON git_commit_history(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_devdock_projects_opened
+      ON devdock_projects(opened_at DESC);
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS devdock_run_history (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      project_name TEXT NOT NULL,
+      command_id TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      executor TEXT NOT NULL DEFAULT '',
+      command_preview TEXT,
+      exit_code INTEGER,
+      status TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      last_log_line TEXT,
+      expires_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_devdock_run_history_proj_started
+      ON devdock_run_history(project_path, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_devdock_run_history_started
+      ON devdock_run_history(started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_devdock_run_history_expiry
+      ON devdock_run_history(expires_at);
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS app_ai_settings (
+      key TEXT PRIMARY KEY,
+      settings_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_quota_accounts (
+      id TEXT PRIMARY KEY,
+      account_json TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS codex_report_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      is_builtin INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_report_templates_sort
+      ON codex_report_templates(sort_order ASC, updated_at DESC);
+    "#,
 ];
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
@@ -145,16 +227,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migration_creates_review_schema() {
+    fn migration_creates_review_and_history_schema() {
         let mut connection = Connection::open_in_memory().expect("memory database");
         run_migrations(&mut connection).expect("migration");
-        let count: i64 = connection
+        let review_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'review_%'",
                 [],
                 |row| row.get(0),
             )
-            .expect("table count");
-        assert_eq!(count, 5);
+            .expect("review table count");
+        assert_eq!(review_count, 5);
+
+        let history_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('git_commit_history', 'devdock_projects', 'devdock_run_history', 'app_ai_settings', 'app_quota_accounts', 'codex_report_templates')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("history table count");
+        assert_eq!(history_exists, 6);
     }
 }

@@ -86,6 +86,7 @@ const emit = defineEmits<{
   (e: 'open-merge'): void
   (e: 'clone-repository'): void
   (e: 'init-repository'): void
+  (e: 'open-repository-rules'): void
   (e: 'toggle-panel', panel: 'changes' | 'diff' | 'commit'): void
   (e: 'reset-layout'): void
 }>()
@@ -162,6 +163,7 @@ const viewOptions = computed<DropdownOption[]>(() => [
 const projectOptions = computed<DropdownOption[]>(() => props.hasSnapshot ? [
   { label: t('gitAssistant.repo.manageBranches'), key: 'branches' },
   { label: t('gitAssistant.repo.mergeBranch'), key: 'merge' },
+  { label: t('gitAssistant.repositoryRules.title'), key: 'repository-rules' },
   { type: 'divider', key: 'repo-divider' },
   { label: t('gitAssistant.repo.chooseDirectory'), key: 'choose' },
 ] : [
@@ -184,6 +186,7 @@ function handleViewAction(key: string | number) {
 function handleProjectAction(key: string | number) {
   if (key === 'branches') emit('open-branch-selector')
   else if (key === 'merge') emit('open-merge')
+  else if (key === 'repository-rules') emit('open-repository-rules')
   else if (key === 'clone') emit('clone-repository')
   else if (key === 'init') emit('init-repository')
   else if (key === 'choose') emit('pick-directory')

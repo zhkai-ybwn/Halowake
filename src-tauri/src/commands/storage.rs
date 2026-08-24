@@ -183,7 +183,10 @@ pub fn run_storage_cleanup(app: AppHandle, force: bool) -> Result<StorageCleanup
     let (cache_bytes, cache_files) = cleanup_expired_files(&cache_dir, cutoff)?;
     let (log_bytes, log_files) = cleanup_expired_files(&log_dir, cutoff)?;
     let database = app.state::<crate::storage::AppDatabase>();
-    let deleted_records = crate::review::repository::delete_expired_sessions(&database, now as i64)?;
+    let deleted_review_records = crate::review::repository::delete_expired_sessions(&database, now as i64)?;
+    let deleted_git_records = crate::storage::history_repository::delete_expired_git_commit_history(&database, now as i64, cutoff as i64)?;
+    let deleted_devdock_records = crate::storage::history_repository::delete_expired_devdock_run_history(&database, now as i64, cutoff as i64)?;
+    let deleted_records = deleted_review_records + deleted_git_records + deleted_devdock_records;
     settings.last_cleanup_at = Some(now);
     write_storage_settings(&app, &settings)?;
 

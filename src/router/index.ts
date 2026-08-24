@@ -1,9 +1,15 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
+import MainLayout from '@/layouts/MainLayout.vue'
+import GitAssistantView from '@/views/git-assistant/GitAssistantView.vue'
+import DevDockView from '@/views/devdock/DevDockView.vue'
+import CodexReportView from '@/views/codex-report/CodexReportView.vue'
+import AiQuotaView from '@/views/quota/AiQuotaView.vue'
+import SettingsView from '@/views/settings/SettingsView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    component: () => import('@/layouts/MainLayout.vue'),
+    component: MainLayout,
     children: [
       {
         path: '',
@@ -12,27 +18,27 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'git',
         name: 'git-assistant',
-        component: () => import('@/views/git-assistant/GitAssistantView.vue')
+        component: GitAssistantView,
       },
       {
         path: 'devdock',
         name: 'devdock',
-        component: () => import('@/views/devdock/DevDockView.vue')
+        component: DevDockView,
       },
       {
         path: 'codex-report',
         name: 'codex-report',
-        component: () => import('@/views/codex-report/CodexReportView.vue')
+        component: CodexReportView,
       },
       {
         path: 'ai-quota',
         name: 'ai-quota',
-        component: () => import('@/views/quota/AiQuotaView.vue')
+        component: AiQuotaView,
       },
       {
         path: 'settings',
         name: 'settings',
-        component: () => import('@/views/settings/SettingsView.vue')
+        component: SettingsView,
       },
     ]
   },

@@ -22,7 +22,20 @@ fn accounts_file_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(QUOTA_ACCOUNTS_FILE))
 }
 
+use crate::storage::{
+    history_repository::{load_quota_accounts_from_db, save_quota_accounts_to_db},
+    AppDatabase,
+};
+
 pub fn load_accounts_config(app: &AppHandle) -> Result<Vec<AccountConfig>, String> {
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        if let Ok(accounts) = load_quota_accounts_from_db(&db) {
+            if !accounts.is_empty() {
+                return Ok(accounts);
+            }
+        }
+    }
+
     let path = accounts_file_path(app)?;
     if !path.exists() {
         // 如果初次使用且未保存配置，自动探测本地默认
@@ -39,20 +52,27 @@ pub fn load_accounts_config(app: &AppHandle) -> Result<Vec<AccountConfig>, Strin
     let accounts = serde_json::from_str::<Vec<AccountConfig>>(&content)
         .map_err(|e| format!("账号配置文件解析失败: {}", e))?;
 
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        let _ = save_quota_accounts_to_db(&db, &accounts);
+        let _ = fs::remove_file(&path);
+    }
+
     Ok(accounts)
 }
 
 pub fn save_accounts_config(app: &AppHandle, accounts: &[AccountConfig]) -> Result<(), String> {
-    let path = accounts_file_path(app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("创建配置目录失败 {}: {}", parent.display(), e))?;
+    if let Some(db) = app.try_state::<AppDatabase>() {
+        save_quota_accounts_to_db(&db, accounts)?;
     }
 
-    let content = serde_json::to_string_pretty(accounts)
-        .map_err(|e| format!("序列化账号配置失败: {}", e))?;
-    fs::write(&path, content)
-        .map_err(|e| format!("保存账号配置失败 {}: {}", path.display(), e))
+    // 移除旧明文 JSON 文件，统一收口至 SQLite 数据库
+    if let Ok(path) = accounts_file_path(app) {
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, QuotaSummary), String> {

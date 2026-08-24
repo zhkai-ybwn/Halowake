@@ -161,3 +161,58 @@ export async function openProjectUrl(url: string): Promise<void> {
 export async function stopAllProjectProcesses(): Promise<ProjectProcessSnapshot[]> {
   return await invoke<ProjectProcessSnapshot[]>('stop_all_project_processes')
 }
+
+export interface DevDockProjectRecord {
+  path: string
+  name: string
+  isPinned: boolean
+  sortOrder: number
+  createdAt: number
+  openedAt: number
+}
+
+export async function loadDevDockProjects(): Promise<DevDockProjectRecord[]> {
+  return await invoke<DevDockProjectRecord[]>('load_devdock_projects')
+}
+
+export async function saveDevDockProject(project: DevDockProjectRecord): Promise<void> {
+  await invoke('save_devdock_project', { project })
+}
+
+export async function removeDevDockProject(path: string): Promise<void> {
+  await invoke('remove_devdock_project', { path })
+}
+
+export interface DevDockRunHistoryRecord {
+  id: string
+  projectPath: string
+  projectName: string
+  commandId: string
+  commandName: string
+  executor: string
+  commandPreview?: string | null
+  exitCode?: number | null
+  status: string
+  startedAt: number
+  durationMs: number
+  lastLogLine?: string | null
+  expiresAt?: number | null
+}
+
+export async function loadDevDockRunHistory(
+  projectPath?: string,
+  limit?: number,
+): Promise<DevDockRunHistoryRecord[]> {
+  return await invoke<DevDockRunHistoryRecord[]>('load_devdock_run_history', {
+    projectPath: projectPath || null,
+    limit: limit || null,
+  })
+}
+
+export async function clearDevDockRunHistory(
+  projectPath?: string,
+): Promise<void> {
+  await invoke('clear_devdock_run_history', {
+    projectPath: projectPath || null,
+  })
+}

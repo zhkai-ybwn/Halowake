@@ -2,9 +2,97 @@ use crate::commands::project_models::ProjectCommandCandidate;
 use serde_json::json;
 use std::{fs, path::Path};
 
+pub const IGNORED_DIRECTORIES: &[&str] = &[
+    "node_modules",
+    ".git",
+    ".svn",
+    ".hg",
+    "dist",
+    "build",
+    "out",
+    "target",
+    ".output",
+    ".next",
+    ".nuxt",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".pytest_cache",
+    ".idea",
+    ".vscode",
+    "vendor",
+    "bin",
+    "obj",
+];
+
+pub fn validate_project_directory(root: &Path) -> Result<(), String> {
+    if !root.is_dir() {
+        return Err("请选择有效的项目目录。".to_string());
+    }
+
+    // 校验是否为驱动器根目录（例如 C:\、D:\ 或 /）
+    let normal_components = root
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if normal_components.is_empty() {
+        return Err("禁止选择磁盘根目录作为项目。".to_string());
+    }
+
+    // 检查 Windows 系统目录与敏感根目录
+    let lower_components: Vec<String> = normal_components
+        .iter()
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+
+    if lower_components.len() == 1 {
+        let first = lower_components[0].as_str();
+        if matches!(
+            first,
+            "windows"
+                | "program files"
+                | "program files (x86)"
+                | "programdata"
+                | "system volume information"
+                | "$recycle.bin"
+                | "recovery"
+                | "users"
+        ) {
+            return Err("禁止选择系统目录作为项目。".to_string());
+        }
+    } else if lower_components.len() == 2 && lower_components[0] == "users" {
+        // C:\Users\<username> 用户主目录
+        return Err("禁止直接选择用户主目录，请选择具体的项目子目录。".to_string());
+    }
+
+    Ok(())
+}
+
+pub fn has_python_project_markers(root: &Path) -> bool {
+    for marker in [
+        "pyproject.toml",
+        "requirements.txt",
+        "Pipfile",
+        "poetry.lock",
+        "uv.lock",
+        "setup.py",
+        "setup.cfg",
+    ] {
+        if root.join(marker).is_file() {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn discover_commands(project_path: &str) -> Result<Vec<ProjectCommandCandidate>, String> {
     let root = Path::new(project_path);
-    if !root.is_dir() { return Err("请选择有效的项目目录。".to_string()); }
+    validate_project_directory(root)?;
     let mut candidates = Vec::new();
     let interpreter = detected_interpreter(root);
     for file in ["manage.py", "main.py", "app.py", "server.py", "run.py"] {
@@ -31,6 +119,11 @@ pub fn discover_commands(project_path: &str) -> Result<Vec<ProjectCommandCandida
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() { continue; }
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                if IGNORED_DIRECTORIES.contains(&file_name) {
+                    continue;
+                }
+            }
             let Some(extension) = path.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase) else { continue; };
             let executor = match extension.as_str() { "cmd" | "bat" => "cmd", "ps1" => "powershell", _ => continue };
             let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
@@ -99,5 +192,15 @@ mod tests {
     fn does_not_misrepresent_console_entry_points_as_python_modules() {
         assert_eq!(pyproject_script_module("pkg.cli:main"), None);
         assert_eq!(pyproject_script_module("pkg.cli"), Some("pkg.cli"));
+    }
+
+    #[test]
+    fn rejects_drive_roots_and_system_directories() {
+        assert!(validate_project_directory(Path::new("C:\\")).is_err());
+        assert!(validate_project_directory(Path::new("D:\\")).is_err());
+        assert!(validate_project_directory(Path::new("C:\\Windows")).is_err());
+        assert!(validate_project_directory(Path::new("C:\\Program Files")).is_err());
+        assert!(validate_project_directory(Path::new("C:\\Users")).is_err());
+        assert!(validate_project_directory(Path::new("C:\\Users\\alice")).is_err());
     }
 }

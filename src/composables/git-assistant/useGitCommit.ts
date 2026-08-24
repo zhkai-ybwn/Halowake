@@ -9,23 +9,12 @@ import {
 import { commitGitChanges } from '@/services/git/git-service'
 import { useAiSettingsStore } from '@/stores/ai-settings'
 import {
-  GIT_COMMIT_MESSAGE_HISTORY_STORAGE_KEY,
-} from '@/views/git-assistant/git-assistant.config'
-import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
-import { normalizePath, getRepoDisplayName } from './utils'
+  loadGitCommitHistory,
+  saveGitCommitHistory as invokeSaveGitCommitHistory,
+  type GitCommitHistoryRecord,
+} from '@/services/git/git-history-service'
 
-const MAX_COMMIT_MESSAGE_HISTORY = 20
-
-export interface CommitMessageHistoryEntry {
-  id: string
-  repoPath: string
-  repoName: string
-  title: string
-  body: string
-  source: 'ai' | 'manual'
-  selectedFileCount: number
-  createdAt: number
-}
+export type CommitMessageHistoryEntry = GitCommitHistoryRecord
 
 export function useGitCommit(
   getDisplayRepoPath: () => string,
@@ -68,40 +57,18 @@ export function useGitCommit(
     return `commit-message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
   }
 
-  function loadCommitMessageHistory() {
+  async function loadCommitMessageHistory() {
     try {
-      const raw = localStorage.getItem(GIT_COMMIT_MESSAGE_HISTORY_STORAGE_KEY)
-      if (!raw) {
-        commitMessageHistory.value = []
-        return
-      }
-
-      const parsed = JSON.parse(raw) as Partial<CommitMessageHistoryEntry>[]
-      commitMessageHistory.value = parsed
-        .filter(entry => typeof entry.title === 'string' && entry.title.trim())
-        .map(entry => ({
-          id: typeof entry.id === 'string' ? entry.id : createHistoryId(),
-          repoPath: typeof entry.repoPath === 'string' ? entry.repoPath : '',
-          repoName: typeof entry.repoName === 'string' ? entry.repoName : '',
-          title: entry.title as string,
-          body: typeof entry.body === 'string' ? entry.body : '',
-          source: entry.source === 'manual' ? 'manual' : 'ai',
-          selectedFileCount: typeof entry.selectedFileCount === 'number' ? entry.selectedFileCount : 0,
-          createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : Date.now(),
-        }))
-        .sort((left, right) => right.createdAt - left.createdAt)
-        .slice(0, MAX_COMMIT_MESSAGE_HISTORY)
+      const repo = getDisplayRepoPath()
+      const entries = await loadGitCommitHistory(repo || undefined, MAX_COMMIT_MESSAGE_HISTORY)
+      commitMessageHistory.value = entries
     } catch (err) {
-      console.error(err)
+      console.error('Failed to load commit message history from SQLite:', err)
       commitMessageHistory.value = []
     }
   }
 
-  function persistCommitMessageHistory() {
-    localStorage.setItem(GIT_COMMIT_MESSAGE_HISTORY_STORAGE_KEY, JSON.stringify(commitMessageHistory.value))
-  }
-
-  function saveCommitMessageHistory(source: 'ai' | 'manual') {
+  async function saveCommitMessageHistory(source: 'ai' | 'manual') {
     const title = commitTitle.value.trim()
     const body = commitBody.value.trim()
     if (!title && !body) return
@@ -116,14 +83,15 @@ export function useGitCommit(
       source,
       selectedFileCount: getReviewSelectedRaws().length,
       createdAt: Date.now(),
+      expiresAt: null,
     }
 
-    const duplicateKey = `${normalizePath(entry.repoPath).toLowerCase()}::${entry.title}::${entry.body}`
-    commitMessageHistory.value = [
-      entry,
-      ...commitMessageHistory.value.filter(item => `${normalizePath(item.repoPath).toLowerCase()}::${item.title}::${item.body}` !== duplicateKey),
-    ].slice(0, MAX_COMMIT_MESSAGE_HISTORY)
-    persistCommitMessageHistory()
+    try {
+      await invokeSaveGitCommitHistory(entry)
+      await loadCommitMessageHistory()
+    } catch (err) {
+      console.error('Failed to save commit message history to SQLite:', err)
+    }
   }
 
   function restoreCommitMessage(entry: CommitMessageHistoryEntry) {

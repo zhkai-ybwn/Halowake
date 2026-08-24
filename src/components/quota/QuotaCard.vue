@@ -64,7 +64,7 @@
               <div
                 class="progress-bar-fill"
                 :class="getRateColorClass(item.usedPercent)"
-                :style="{ width: Math.min(item.usedPercent, 100) + '%' }"
+                :style="{ width: Math.max(0, 100 - item.usedPercent) + '%' }"
               ></div>
             </div>
 
@@ -75,11 +75,14 @@
           </div>
         </div>
 
-        <!-- 3. 点数/积分展示 -->
-        <div v-for="(item, idx) in creditsQuotas" :key="'cred-' + idx" class="credits-section">
-          <div class="credits-main">
-            <span class="credits-val">{{ item.remaining }}</span>
-            <span class="credits-unit">{{ t('quota.credits') }}</span>
+        <!-- 3. 点数/积分展示 (Prompt 积分 / Flow 积分 / Credits) -->
+        <div v-if="creditsQuotas.length > 0" class="credits-container">
+          <div v-for="(item, idx) in creditsQuotas" :key="'cred-' + idx" class="credit-pill">
+            <span class="credit-pill-label">{{ item.label || t('quota.credits') }}</span>
+            <div class="credit-pill-num-group">
+              <span class="credit-pill-val">{{ item.remaining.toLocaleString() }}</span>
+              <span v-if="item.total" class="credit-pill-total">/ {{ item.total.toLocaleString() }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -196,8 +199,9 @@ const creditsQuotas = computed(() => {
 })
 
 function getRateColorClass(usedPercent: number): string {
-  if (usedPercent >= 90) return 'is-danger'
-  if (usedPercent >= 75) return 'is-warning'
+  const remaining = 100 - usedPercent
+  if (remaining <= 10) return 'is-danger'
+  if (remaining <= 25) return 'is-warning'
   return 'is-healthy'
 }
 
@@ -539,22 +543,45 @@ async function handleOpenExternal(url: string) {
   }
 }
 
-.credits-section {
+.credits-container {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.credit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--lumina-surface-2);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-sm);
+  padding: 4px 10px;
+  font-size: 11.5px;
+}
+
+.credit-pill-label {
+  color: var(--lumina-text-secondary);
+  font-weight: 500;
+}
+
+.credit-pill-num-group {
+  display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 2px;
 }
 
-.credits-val {
-  font-size: 20px;
-  font-weight: 700;
+.credit-pill-val {
   font-family: var(--lumina-font-mono);
-  color: var(--lumina-text);
+  font-weight: 700;
+  color: var(--lumina-primary);
+  font-size: 13px;
 }
 
-.credits-unit {
-  font-size: 11px;
+.credit-pill-total {
+  font-family: var(--lumina-font-mono);
   color: var(--lumina-text-tertiary);
+  font-size: 10.5px;
 }
 
 .pace-section {

@@ -39,7 +39,7 @@
         :is-script-running="isScriptRunning"
         :is-script-starting="isScriptStarting"
         :projects="visibleProjects"
-        :recent-count="recentCommands.length"
+        :recent-count="runHistory.length"
         :script-action-label="scriptActionLabel"
         :script-sort="scriptSort"
         :set-alias-input-ref="setAliasInputRef"
@@ -48,7 +48,7 @@
         @configure-commands="openCommandConfig"
         @dismiss-project-error="dismissProjectError"
         @finish-edit-alias="finishEditAlias"
-        @open-recent="recentDrawerOpen = true"
+        @open-recent="openRecentDrawer"
         @remove-project="removeProject"
         @rename-project="renameProject"
         @scan-project="project => scanProject(project, { touch: true })"
@@ -75,11 +75,12 @@
     </section>
 
     <DevDockRecentDrawer
-      :commands="recentCommands"
-      :is-running="isRecentCommandRunning"
+      :history="runHistory"
+      :is-running="isHistoryItemRunning"
       :show="recentDrawerOpen"
       @close="recentDrawerOpen = false"
-      @start-command="startRecentCommand"
+      @start-command="startHistoryCommand"
+      @clear-history="handleClearRunHistory"
     />
 
     <DevDockCommandConfigDrawer
@@ -98,9 +99,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { useLocale } from '@/hooks/useLocale'
-import { GIT_RECENT_REPOS_STORAGE_KEY, GIT_REPO_STORAGE_KEY } from '@/constants/git'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
 import WorkbenchTag from '@/components/workbench/WorkbenchTag.vue'
@@ -114,22 +114,27 @@ import {
   restartProjectProcess,
   startProjectCommand as invokeStartProjectCommand,
   stopProjectProcess,
+  loadDevDockProjects,
+  saveDevDockProject,
+  removeDevDockProject as invokeRemoveDevDockProject,
+  loadDevDockRunHistory,
+  clearDevDockRunHistory,
   type ProjectProcessLogs,
   type ProjectProcessSnapshot,
   type ProjectCommand,
+  type DevDockRunHistoryRecord,
 } from '@/services/project/project-service'
 import DevDockLogModal from './components/DevDockLogModal.vue'
 import DevDockCommandConfigDrawer from './components/DevDockCommandConfigDrawer.vue'
 import DevDockProcessPanel from './components/DevDockProcessPanel.vue'
 import DevDockProjectList from './components/DevDockProjectList.vue'
 import DevDockRecentDrawer from './components/DevDockRecentDrawer.vue'
-import type { DevDockProject, RecentCommand, ScriptSort, StoredProject } from './types'
+import type { DevDockProject, ScriptSort, StoredProject } from './types'
 
+const DEVDOCK_PROJECTS_STORAGE_KEY = 'lumina.devdock.projects.v2'
 const DEVDOC_PINNED_SCRIPTS_STORAGE_KEY = 'lumina.devdock.pinnedCommands.v1'
-const DEVDOC_RECENT_COMMANDS_STORAGE_KEY = 'lumina.devdock.recentCommands.v1'
 const DEVDOC_SCRIPT_SORT_STORAGE_KEY = 'lumina.devdock.commandSort.v2'
 const LEGACY_PINNED_SCRIPTS_STORAGE_KEY = 'lumina.devdock.pinnedScripts'
-const LEGACY_RECENT_COMMANDS_STORAGE_KEY = 'lumina.devdock.recentCommands'
 const SCRIPT_PRIORITY = ['dev', 'serve', 'start', 'tauri:dev', 'preview', 'build', 'test', 'lint']
 
 interface ProjectScriptView {
@@ -140,10 +145,11 @@ interface ProjectScriptView {
 
 const { t } = useLocale()
 const message = useMessage()
+const dialog = useDialog()
 const projects = ref<DevDockProject[]>([])
 const pinnedScripts = ref(new Set<string>())
 const expandedCommandProjects = reactive(new Set<string>())
-const recentCommands = ref<RecentCommand[]>([])
+const runHistory = ref<DevDockRunHistoryRecord[]>([])
 const recentDrawerOpen = ref(false)
 const processes = ref<ProjectProcessSnapshot[]>([])
 const processBusy = reactive(new Set<string>())
@@ -157,6 +163,7 @@ const scriptSort = ref<ScriptSort>(loadScriptSort())
 const pinEditing = ref(false)
 const processInspectorOpen = ref(false)
 const configProject = ref<DevDockProject | null>(null)
+let isFirstMount = true
 let logPollTimer: ReturnType<typeof window.setInterval> | undefined
 let processPollTimer: ReturnType<typeof window.setInterval> | undefined
 const loadingAll = computed(() => projects.value.some(project => project.loading))
@@ -185,17 +192,23 @@ const visibleProjects = computed(() => {
   return sortedProjects.value.filter(project => filteredScripts(project).length > 0)
 })
 
-onMounted(() => {
+onMounted(async () => {
   pinnedScripts.value = loadPinnedScripts()
-  recentCommands.value = loadRecentCommands()
-  projects.value = loadStoredProjects()
+  await initStoredProjects()
   void scanAllProjects()
   void refreshProcesses()
+  void refreshRunHistory()
   startProcessPolling()
 })
 
 onActivated(() => {
+  if (isFirstMount) {
+    isFirstMount = false
+    return
+  }
+  void scanAllProjects()
   void refreshProcesses()
+  void refreshRunHistory()
   startProcessPolling()
 })
 
@@ -216,8 +229,50 @@ async function handleAddProject() {
   })
 
   if (typeof selected !== 'string') return
-  const project = rememberProject(selected)
-  await scanProject(project, { touch: true })
+  const normalized = normalizePath(selected)
+  const existing = projects.value.find(project => normalizePath(project.path) === normalized)
+  if (existing) {
+    await scanProject(existing, { touch: true })
+    return
+  }
+
+  const project: DevDockProject = {
+    path: selected,
+    name: getProjectDisplayName(selected),
+    loading: true,
+    error: '',
+    manifest: null,
+    openedAt: Date.now(),
+  }
+  projects.value = [project, ...projects.value]
+
+  try {
+    await saveDevDockProject({
+      path: project.path,
+      name: project.name,
+      isPinned: false,
+      sortOrder: 0,
+      createdAt: Date.now(),
+      openedAt: project.openedAt,
+    })
+    await scanProject(project, { touch: true })
+    if (project.manifest?.name) {
+      project.name = project.manifest.name
+      void saveDevDockProject({
+        path: project.path,
+        name: project.name,
+        isPinned: false,
+        sortOrder: 0,
+        createdAt: Date.now(),
+        openedAt: project.openedAt,
+      })
+    }
+    message.success(t('devdock.project.addSuccess', { name: project.name }))
+  } catch (err) {
+    const rawMsg = err instanceof Error ? err.message : String(err)
+    const cleanMsg = rawMsg.replace(/^加载项目配置任务异常:\s*/, '')
+    message.error(reportError('devdock.add-project', cleanMsg), { duration: 6000 })
+  }
 }
 
 function openCommandConfig(project: DevDockProject) {
@@ -237,7 +292,7 @@ async function scanAllProjects() {
 
 async function scanProject(project: DevDockProject, options: { touch?: boolean } = {}) {
   if (options.touch) {
-    touchProject(project)
+    void touchProject(project)
   }
   project.loading = true
   project.error = ''
@@ -246,7 +301,8 @@ async function scanProject(project: DevDockProject, options: { touch?: boolean }
     project.error = project.manifest.configError || ''
   } catch (err) {
     project.manifest = null
-    project.error = err instanceof Error ? err.message : String(err)
+    const rawMsg = err instanceof Error ? err.message : String(err)
+    project.error = rawMsg.replace(/^加载项目配置任务异常:\s*/, '')
   } finally {
     project.loading = false
   }
@@ -260,9 +316,16 @@ function renameProject(path: string, name: string) {
   }
 }
 
-function normalizeProjectAlias(project: DevDockProject) {
+async function normalizeProjectAlias(project: DevDockProject) {
   project.name = project.name.trim() || project.manifest?.name || getProjectDisplayName(project.path)
-  persistProjects()
+  await saveDevDockProject({
+    path: project.path,
+    name: project.name,
+    isPinned: false,
+    sortOrder: 0,
+    createdAt: Date.now(),
+    openedAt: project.openedAt,
+  })
 }
 
 function setAliasInputRef(el: HTMLInputElement | null, path: string) {
@@ -285,7 +348,7 @@ function startEditAlias(path: string) {
 }
 
 function finishEditAlias(project: DevDockProject) {
-  normalizeProjectAlias(project)
+  void normalizeProjectAlias(project)
   editingAliasPath.value = null
 }
 
@@ -297,81 +360,82 @@ function dismissProjectError(project: DevDockProject) {
   project.error = ''
 }
 
-function removeProject(path: string) {
+async function removeProject(path: string) {
   const normalized = normalizePath(path)
   projects.value = projects.value.filter(project => normalizePath(project.path) !== normalized)
-  persistProjects()
+  try {
+    await invokeRemoveDevDockProject(path)
+  } catch (err) {
+    reportError('devdock.remove-project', err)
+  }
 }
 
-function rememberProject(path: string) {
-  const normalized = normalizePath(path)
-  const existing = projects.value.find(project => normalizePath(project.path) === normalized)
-  if (existing) return existing
-
-  const project: DevDockProject = {
-    path,
-    name: getProjectDisplayName(path),
-    loading: false,
-    error: '',
-    manifest: null,
-    openedAt: Date.now(),
-  }
-  projects.value = [project, ...projects.value]
-  localStorage.setItem(GIT_REPO_STORAGE_KEY, path)
-  persistProjects()
-  return project
-}
-
-function loadStoredProjects() {
-  const stored = readRecentProjects()
-  const current = localStorage.getItem(GIT_REPO_STORAGE_KEY)
-  if (current) {
-    stored.unshift({ path: current, name: getProjectDisplayName(current) })
-  }
-
-  const seen = new Set<string>()
-  return stored
-    .filter(project => typeof project.path === 'string' && project.path.trim())
-    .filter(project => {
-      const normalized = normalizePath(project.path || '')
-      if (seen.has(normalized)) return false
-      seen.add(normalized)
-      return true
-    })
-    .map(project => ({
-      path: project.path as string,
-      name: project.name || getProjectDisplayName(project.path as string),
+async function initStoredProjects() {
+  // 1. 优先从 SQLite 加载已有项目
+  try {
+    const records = await loadDevDockProjects()
+    projects.value = records.map(record => ({
+      path: record.path,
+      name: record.name || getProjectDisplayName(record.path),
       loading: false,
       error: '',
       manifest: null,
-      openedAt: typeof project.openedAt === 'number' ? project.openedAt : 0,
+      openedAt: record.openedAt,
     }))
-    .sort((left, right) => right.openedAt - left.openedAt)
-}
-
-function readRecentProjects(): StoredProject[] {
-  try {
-    const raw = localStorage.getItem(GIT_RECENT_REPOS_STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as StoredProject[]) : []
   } catch (err) {
-    reportError('devdock.load-recent-projects', err)
-    return []
+    reportError('devdock.init-stored-projects', err)
+    projects.value = []
+  }
+
+  // 2. 独立执行旧 localStorage 数据平滑迁移（即使解析失败也不影响已有项目）
+  try {
+    const raw = localStorage.getItem(DEVDOCK_PROJECTS_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as StoredProject[]
+      if (Array.isArray(parsed) && parsed.length) {
+        for (const item of parsed) {
+          if (item && item.path) {
+            await saveDevDockProject({
+              path: item.path,
+              name: item.name || getProjectDisplayName(item.path),
+              isPinned: false,
+              sortOrder: 0,
+              createdAt: Date.now(),
+              openedAt: typeof item.openedAt === 'number' ? item.openedAt : Date.now(),
+            })
+          }
+        }
+        const refreshed = await loadDevDockProjects()
+        projects.value = refreshed.map(record => ({
+          path: record.path,
+          name: record.name || getProjectDisplayName(record.path),
+          loading: false,
+          error: '',
+          manifest: null,
+          openedAt: record.openedAt,
+        }))
+      }
+      localStorage.removeItem(DEVDOCK_PROJECTS_STORAGE_KEY)
+    }
+  } catch (migrateErr) {
+    reportError('devdock.migrate-legacy-projects', migrateErr)
   }
 }
 
-function persistProjects() {
-  const stored = projects.value.map(project => ({
-    path: project.path,
-    name: project.name || getProjectDisplayName(project.path),
-    openedAt: project.openedAt,
-  }))
-  localStorage.setItem(GIT_RECENT_REPOS_STORAGE_KEY, JSON.stringify(stored))
-}
-
-function touchProject(project: DevDockProject) {
+async function touchProject(project: DevDockProject) {
   project.openedAt = Date.now()
-  localStorage.setItem(GIT_REPO_STORAGE_KEY, project.path)
-  persistProjects()
+  try {
+    await saveDevDockProject({
+      path: project.path,
+      name: project.name,
+      isPinned: false,
+      sortOrder: 0,
+      createdAt: Date.now(),
+      openedAt: project.openedAt,
+    })
+  } catch (err) {
+    reportError('devdock.touch-project', err)
+  }
 }
 
 function filteredScripts(project: DevDockProject) {
@@ -457,7 +521,7 @@ function persistScriptSort() {
 }
 
 function getScriptLastUsed(projectPath: string, commandId: string) {
-  return recentCommands.value.find(command => normalizePath(command.projectPath) === normalizePath(projectPath) && command.commandId === commandId)?.usedAt ?? 0
+  return runHistory.value.find(record => normalizePath(record.projectPath) === normalizePath(projectPath) && record.commandId === commandId)?.startedAt ?? 0
 }
 
 function getScriptPriority(name: string) {
@@ -503,7 +567,7 @@ function loadPinnedScripts() {
 }
 
 async function startScript(project: DevDockProject, command: ProjectCommand) {
-  recordRecentCommand(project, command)
+  void touchProject(project)
   await startProjectCommand({
     projectPath: project.path,
     commandId: command.id,
@@ -519,9 +583,9 @@ async function toggleScript(project: DevDockProject, command: ProjectCommand) {
   await startScript(project, command)
 }
 
-async function startRecentCommand(command: RecentCommand) {
-  await startProjectCommand(command)
-  recentDrawerOpen.value = false
+function openRecentDrawer() {
+  recentDrawerOpen.value = true
+  void refreshRunHistory()
 }
 
 async function startProjectCommand(command: {
@@ -539,12 +603,14 @@ async function startProjectCommand(command: {
   } finally {
     startingScripts.delete(key)
     await refreshProcesses()
+    void refreshRunHistory()
   }
 }
 
 async function refreshProcesses() {
   try {
     processes.value = await listProjectProcesses()
+    void refreshRunHistory()
   } catch (err) {
     reportError('devdock.refresh-processes', err)
   }
@@ -572,6 +638,7 @@ async function stopProcess(processId: string) {
   } finally {
     processBusy.delete(processId)
     await refreshProcesses()
+    void refreshRunHistory()
   }
 }
 
@@ -584,6 +651,7 @@ async function restartProcess(processId: string) {
   } finally {
     processBusy.delete(processId)
     await refreshProcesses()
+    void refreshRunHistory()
   }
 }
 
@@ -643,57 +711,6 @@ function updateProcess(process: ProjectProcessSnapshot) {
   ].sort((left, right) => right.startedAt - left.startedAt)
 }
 
-function recordRecentCommand(project: DevDockProject, projectCommand: ProjectCommand) {
-  touchProject(project)
-  const command: RecentCommand = {
-    projectPath: project.path,
-    projectName: project.manifest?.name || project.name,
-    commandId: projectCommand.id,
-    commandName: projectCommand.name,
-    commandPreview: projectCommand.commandPreview,
-    executor: projectCommand.executor,
-    source: projectCommand.source,
-    usedAt: Date.now(),
-  }
-  recentCommands.value = [
-    command,
-    ...recentCommands.value.filter(
-      item => normalizePath(item.projectPath) !== normalizePath(command.projectPath) || item.commandId !== command.commandId,
-    ),
-  ].slice(0, 12)
-  localStorage.setItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(recentCommands.value))
-}
-
-function loadRecentCommands() {
-  try {
-    const raw = localStorage.getItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY)
-    if (raw) return (JSON.parse(raw) as RecentCommand[])
-      .filter(command => command.projectPath && command.commandId)
-      .sort((left, right) => right.usedAt - left.usedAt)
-      .slice(0, 12)
-    const legacyRaw = localStorage.getItem(LEGACY_RECENT_COMMANDS_STORAGE_KEY)
-    const legacy = legacyRaw ? (JSON.parse(legacyRaw) as Array<Record<string, unknown>>) : []
-    const parsed = legacy.map(item => ({
-      projectPath: String(item.projectPath || ''),
-      projectName: String(item.projectName || ''),
-      commandId: `package:${String(item.scriptName || '')}`,
-      commandName: String(item.scriptName || ''),
-      commandPreview: String(item.command || ''),
-      executor: 'package-script',
-      source: 'package-json',
-      usedAt: Number(item.usedAt || 0),
-    }))
-    if (parsed.length) localStorage.setItem(DEVDOC_RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(parsed))
-    return parsed
-      .filter(command => command.projectPath && command.commandId)
-      .sort((left, right) => right.usedAt - left.usedAt)
-      .slice(0, 12)
-  } catch (err) {
-    reportError('devdock.load-recent-commands', err)
-    return []
-  }
-}
-
 function isScriptStarting(projectPath: string, scriptName: string) {
   return startingScripts.has(getScriptKey(projectPath, scriptName))
 }
@@ -709,8 +726,43 @@ function findRunningScript(projectPath: string, scriptName: string) {
   )
 }
 
-function isRecentCommandRunning(command: RecentCommand) {
-  return isScriptRunning(command.projectPath, command.commandId)
+async function refreshRunHistory() {
+  try {
+    runHistory.value = await loadDevDockRunHistory()
+  } catch (err) {
+    reportError('devdock.load-history', err)
+  }
+}
+
+function isHistoryItemRunning(item: DevDockRunHistoryRecord) {
+  return isScriptRunning(item.projectPath, item.commandId)
+}
+
+async function startHistoryCommand(item: DevDockRunHistoryRecord) {
+  await startProjectCommand({
+    projectPath: item.projectPath,
+    commandId: item.commandId,
+  })
+  recentDrawerOpen.value = false
+}
+
+function handleClearRunHistory() {
+  if (!runHistory.value.length) return
+  dialog.warning({
+    title: t('common.confirm') || '确认清空',
+    content: t('devdock.processes.clearHistoryConfirm') || '确定要清空全部运行历史记录吗？',
+    positiveText: t('common.confirm') || '确定',
+    negativeText: t('common.cancel') || '取消',
+    onPositiveClick: async () => {
+      try {
+        await clearDevDockRunHistory()
+        await refreshRunHistory()
+        message.success(t('devdock.processes.clearHistorySuccess') || '运行历史已清空')
+      } catch (err) {
+        message.error(reportError('devdock.clear-history', err))
+      }
+    },
+  })
 }
 
 function scriptActionLabel(projectPath: string, scriptName: string) {

@@ -63,6 +63,7 @@ pub enum QuotaKind {
     },
     #[serde(rename_all = "camelCase")]
     Credits {
+        label: Option<String>,
         remaining: f64,
         total: Option<f64>,
     },

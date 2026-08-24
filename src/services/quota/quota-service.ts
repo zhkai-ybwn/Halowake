@@ -29,6 +29,7 @@ export type QuotaKind =
     }
   | {
       type: 'credits'
+      label?: string
       remaining: number
       total?: number
     }

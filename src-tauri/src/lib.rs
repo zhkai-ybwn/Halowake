@@ -13,6 +13,8 @@ pub fn run() {
         .manage(commands::project_process::ProjectProcessState::default())
         .manage(review::ReviewTaskRegistry::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -95,16 +97,28 @@ pub fn run() {
             commands::git::generate_git_ai_analysis_from_prompt,
             commands::git::cancel_git_ai_analysis,
             commands::git::test_ai_model_connection,
+            commands::git::load_git_commit_history,
+            commands::git::save_git_commit_history,
+            commands::git::clear_git_commit_history,
             commands::ai_settings::load_ai_settings,
             commands::ai_settings::save_ai_settings,
             commands::codex_report::load_codex_projects,
             commands::codex_report::load_codex_report_sessions,
             commands::codex_report::detect_installed_ai_tools,
+            commands::codex_report_template::load_codex_report_templates,
+            commands::codex_report_template::save_codex_report_template,
+            commands::codex_report_template::delete_codex_report_template,
+            commands::codex_report_template::reset_builtin_codex_report_templates,
             commands::project::load_project_manifest,
             commands::project::load_project_config,
             commands::project::validate_project_config,
             commands::project::save_project_config_command,
             commands::project::discover_project_commands,
+            commands::project::load_devdock_projects,
+            commands::project::save_devdock_project,
+            commands::project::remove_devdock_project,
+            commands::project::load_devdock_run_history,
+            commands::project::clear_devdock_run_history,
             commands::project_process::start_project_command,
             commands::project_process::start_project_process,
             commands::project_process::list_project_processes,

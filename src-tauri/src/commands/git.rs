@@ -369,3 +369,31 @@ pub async fn test_ai_model_connection(model: AiModelConfig) -> Result<String, St
 
     Ok(format!("{} connected", model.name))
 }
+
+#[tauri::command]
+pub async fn load_git_commit_history(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    repo_path: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<crate::storage::history_repository::GitCommitHistoryRecord>, String> {
+    let repo_path = repo_path.filter(|p| !p.trim().is_empty());
+    let limit = limit.unwrap_or(20);
+    crate::storage::history_repository::list_git_commit_history_entries(&database, repo_path.as_deref(), limit)
+}
+
+#[tauri::command]
+pub async fn save_git_commit_history(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    entry: crate::storage::history_repository::GitCommitHistoryRecord,
+) -> Result<(), String> {
+    crate::storage::history_repository::save_git_commit_history_entry(&database, &entry)
+}
+
+#[tauri::command]
+pub async fn clear_git_commit_history(
+    database: tauri::State<'_, crate::storage::AppDatabase>,
+    repo_path: Option<String>,
+) -> Result<(), String> {
+    let repo_path = repo_path.filter(|p| !p.trim().is_empty());
+    crate::storage::history_repository::clear_git_commit_history_entries(&database, repo_path.as_deref())
+}

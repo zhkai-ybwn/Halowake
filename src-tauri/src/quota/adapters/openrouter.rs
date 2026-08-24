@@ -90,6 +90,7 @@ pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
         } else {
             // 没有 limit 时，说明无固定限额或按充值扣费
             quota.quotas.push(QuotaKind::Credits {
+                label: Some("已消耗积分".to_string()),
                 remaining: usage,
                 total: None,
             });

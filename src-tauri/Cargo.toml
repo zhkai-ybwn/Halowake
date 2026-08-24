@@ -1,6 +1,6 @@
 [package]
 name = "lumina"
-version = "1.0.0"
+version = "1.1.0"
 description = "Lumina Developer Workbench"
 authors = ["Lumina contributors"]
 license = "MIT"
@@ -24,6 +24,8 @@ log = "0.4"
 tauri = { version = "2.9.0", features = ["tray-icon"] }
 tauri-plugin-log = "2.0.0"
 tauri-plugin-dialog = "2.6.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

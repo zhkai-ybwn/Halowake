@@ -23,12 +23,23 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
             });
         }
 
-        let gemini_dir = Path::new(&home).join(".gemini");
-        if gemini_dir.exists() {
+        let gemini_paths = [
+            Path::new(&home).join(".gemini"),
+            Path::new(&home).join(".antigravity"),
+            Path::new(&home).join("AppData").join("Roaming").join("Google").join("Antigravity"),
+            Path::new(&home).join("AppData").join("Local").join("Google").join("Antigravity"),
+            Path::new(&home).join(".config").join("antigravity"),
+        ];
+
+        let has_gemini_env = env::var("GEMINI_HOME").is_ok() || env::var("ANTIGRAVITY_HOME").is_ok();
+        let has_gemini_path = gemini_paths.iter().any(|p| p.exists());
+
+        // 只要存在常见目录、环境变量，或者作为默认支持项提供
+        if has_gemini_path || has_gemini_env || true {
             accounts.push(AccountConfig {
                 id: "discovered-gemini-antigravity".to_string(),
                 provider_type: ProviderType::Gemini,
-                name: "Google AI Pro (Gemini)".to_string(),
+                name: "Google AI Pro (Antigravity / Gemini)".to_string(),
                 api_key: None,
                 base_url: None,
                 enabled: true,
