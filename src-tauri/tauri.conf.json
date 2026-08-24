@@ -46,7 +46,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUzRkU0NDg4MTNFRTYyREMKUldURlExbVovRUtqZVhRMDY4Uzd3c3YxbklyR041T0ZodVJ0UzdqZ0t5V24xa3pXbWZ2Q0RzT2kK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQjNFQzcyQ0ZDNkMzOEMKUldTTXc4YlBjdXl6a2dBU0NldjlKdVh5Tm42Wi9HQVlZK2U4N2c3RFVvT1hnNUVpNjg1Q3RDVnkK",
       "endpoints": [
         "https://github.com/zhkai-ybwn/Lumina/releases/latest/download/latest.json"
       ]
