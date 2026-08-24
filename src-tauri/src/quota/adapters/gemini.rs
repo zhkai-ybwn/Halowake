@@ -99,74 +99,104 @@ struct AntigravityTarget {
     ports: Vec<u16>,
 }
 
+async fn probe_single_port(
+    client: &Client,
+    port: u16,
+    csrf_token: &str,
+) -> (Option<Value>, Option<Value>) {
+    let base_url = format!("https://127.0.0.1:{}", port);
+    let summary_url = format!(
+        "{}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
+        base_url
+    );
+    let status_url = format!(
+        "{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
+        base_url
+    );
+
+    let summary_req = client
+        .post(&summary_url)
+        .header("Content-Type", "application/json")
+        .header("Connect-Protocol-Version", "1")
+        .header("X-Codeium-Csrf-Token", csrf_token)
+        .body("{}")
+        .send();
+
+    let status_req = client
+        .post(&status_url)
+        .header("Content-Type", "application/json")
+        .header("Connect-Protocol-Version", "1")
+        .header("X-Codeium-Csrf-Token", csrf_token)
+        .body("{}")
+        .send();
+
+    let (summary_res, status_res) = tokio::join!(summary_req, status_req);
+
+    let summary_data = match summary_res {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<Value>()
+            .await
+            .ok()
+            .filter(|v| v.pointer("/response/groups").is_some()),
+        _ => None,
+    };
+
+    let status_data = match status_res {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<Value>()
+            .await
+            .ok()
+            .filter(|v| v.get("userStatus").is_some()),
+        _ => None,
+    };
+
+    (summary_data, status_data)
+}
+
 async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Option<crate::quota::models::PaceStatus>), String> {
     let targets = discover_antigravity_targets().await;
     if targets.is_empty() {
         return Err("未找到运行中的 Antigravity language_server 进程".to_string());
     }
 
+    // 关键配置：no_proxy() 强制直连 127.0.0.1，避免被全局/系统代理（VPN/Clash 等）拦截
     let client = Client::builder()
         .danger_accept_invalid_certs(true)
-        .timeout(Duration::from_millis(2500))
+        .no_proxy()
+        .timeout(Duration::from_millis(3000))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("初始化本地 HTTP 客户端失败: {}", e))?;
 
     let mut quota_summary_data: Option<Value> = None;
     let mut user_status_data: Option<Value> = None;
 
+    // 并行探测所有候选端口，快速收敛
     for target in &targets {
+        let mut set = tokio::task::JoinSet::new();
         for &port in &target.ports {
-            let base_url = format!("https://127.0.0.1:{}", port);
+            let cl = client.clone();
+            let token = target.csrf_token.clone();
+            set.spawn(async move {
+                probe_single_port(&cl, port, &token).await
+            });
+        }
 
-            // 1. 请求官方配额摘要接口 RetrieveUserQuotaSummary
-            if quota_summary_data.is_none() {
-                let url = format!("{}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary", base_url);
-                if let Ok(resp) = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("Connect-Protocol-Version", "1")
-                    .header("X-Codeium-Csrf-Token", &target.csrf_token)
-                    .body("{}")
-                    .send()
-                    .await
-                {
-                    if resp.status().is_success() {
-                        if let Ok(val) = resp.json::<Value>().await {
-                            if val.pointer("/response/groups").is_some() {
-                                quota_summary_data = Some(val);
-                            }
-                        }
-                    }
+        while let Some(res) = set.join_next().await {
+            if let Ok((summary_opt, status_opt)) = res {
+                if quota_summary_data.is_none() && summary_opt.is_some() {
+                    quota_summary_data = summary_opt;
                 }
-            }
-
-            // 2. 请求用户状态接口 GetUserStatus (获取 Plan 名称)
-            if user_status_data.is_none() {
-                let url = format!("{}/exa.language_server_pb.LanguageServerService/GetUserStatus", base_url);
-                if let Ok(resp) = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("Connect-Protocol-Version", "1")
-                    .header("X-Codeium-Csrf-Token", &target.csrf_token)
-                    .body("{}")
-                    .send()
-                    .await
-                {
-                    if resp.status().is_success() {
-                        if let Ok(val) = resp.json::<Value>().await {
-                            if val.get("userStatus").is_some() {
-                                user_status_data = Some(val);
-                            }
-                        }
-                    }
+                if user_status_data.is_none() && status_opt.is_some() {
+                    user_status_data = status_opt;
                 }
-            }
-
-            if quota_summary_data.is_some() && user_status_data.is_some() {
-                break;
+                if quota_summary_data.is_some() && user_status_data.is_some() {
+                    set.abort_all();
+                    break;
+                }
             }
         }
-        if quota_summary_data.is_some() && user_status_data.is_some() {
+
+        if quota_summary_data.is_some() || user_status_data.is_some() {
             break;
         }
     }
@@ -296,6 +326,9 @@ async fn discover_antigravity_targets() -> Vec<AntigravityTarget> {
         cmd.creation_flags(0x08000000);
         if let Ok(cmd_output) = cmd
             .args([
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NonInteractive",
                 "-NoProfile",
                 "-Command",
                 "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' -or $_.CommandLine -like '*language_server*' } | ForEach-Object { $p = $_.ProcessId; $c = $_.CommandLine; $conns = (Get-NetTCPConnection -OwningProcess $p -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort) -join ','; \"$p|||$c|||$conns\" }",
@@ -317,7 +350,9 @@ async fn discover_antigravity_targets() -> Vec<AntigravityTarget> {
                     if parts.len() >= 3 {
                         for p in parts[2].split(',') {
                             if let Ok(port) = p.trim().parse::<u16>() {
-                                ports.push(port);
+                                if !ports.contains(&port) {
+                                    ports.push(port);
+                                }
                             }
                         }
                     }
@@ -376,17 +411,18 @@ async fn get_ports_by_netstat(pid: u32) -> Vec<u16> {
     let mut ports = Vec::new();
     let mut cmd = tokio::process::Command::new("cmd");
     cmd.creation_flags(0x08000000);
-    if let Ok(out) = cmd.args(["/C", "netstat -ano -p tcp"]).output().await {
+    if let Ok(out) = cmd.args(["/C", "netstat -ano"]).output().await {
         let stdout = String::from_utf8_lossy(&out.stdout);
         let pid_str = pid.to_string();
         for line in stdout.lines() {
+            let line = line.trim();
+            if !line.to_uppercase().contains("LISTENING") {
+                continue;
+            }
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 5 && parts[1].starts_with("TCP") || parts.len() >= 4 {
-                let state_index = if parts.len() >= 5 { 3 } else { 2 };
-                let pid_index = parts.len() - 1;
-                if parts.get(state_index).map(|s| s.eq_ignore_ascii_case("LISTENING")).unwrap_or(false)
-                    && parts.get(pid_index) == Some(&pid_str.as_str())
-                {
+            if parts.len() >= 4 {
+                let line_pid = parts[parts.len() - 1];
+                if line_pid == pid_str {
                     let local_addr = parts[1];
                     if let Some(idx) = local_addr.rfind(':') {
                         if let Ok(port) = local_addr[idx + 1..].parse::<u16>() {
@@ -428,6 +464,18 @@ async fn get_unix_listening_ports(pid: u32) -> Vec<u16> {
 }
 
 fn extract_csrf_token(cmd: &str) -> Option<String> {
+    if let Some(pos) = cmd.find("--csrf_token") {
+        let remainder = &cmd[pos + "--csrf_token".len()..];
+        let trimmed = remainder.trim_start_matches(|c: char| c == '=' || c.is_whitespace());
+        let token: String = trimmed
+            .chars()
+            .take_while(|&c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            .collect();
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     for i in 0..parts.len() {
         if parts[i] == "--csrf_token" && i + 1 < parts.len() {
@@ -472,3 +520,25 @@ fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
     Some(days * 86400 + hour * 3600 + min * 60 + sec)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_csrf_token() {
+        let cmd1 = r#""C:\bin\language_server.exe" --csrf_token be67ca93-8574-4156-a4ee-e31eb9b2caf2 --port 0"#;
+        assert_eq!(extract_csrf_token(cmd1), Some("be67ca93-8574-4156-a4ee-e31eb9b2caf2".to_string()));
+
+        let cmd2 = r#""D:\Program Files\Antigravity\language_server.exe" --csrf_token=xyz_123-abc"#;
+        assert_eq!(extract_csrf_token(cmd2), Some("xyz_123-abc".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_antigravity_local_status_if_running() {
+        let res = fetch_antigravity_local_status().await;
+        if let Ok((plan, quotas, pace)) = res {
+            println!("Detected plan: {}, quotas: {:?}, pace: {:?}", plan, quotas, pace);
+            assert!(!quotas.is_empty());
+        }
+    }
+}
