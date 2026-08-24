@@ -580,8 +580,6 @@ import { useLocale } from '@/hooks/useLocale'
 import type { AiToolProvider, CodexProjectInfo, CodexReportSession } from '@/types/codex-report'
 import {
   DEFAULT_WEB_AI_PROMPT,
-  STANDUP_PROMPT_TEMPLATE,
-  TECH_SUMMARY_PROMPT_TEMPLATE,
   formatSessionTime,
   getProjectName,
   getProviderIcon,
@@ -594,7 +592,6 @@ import {
 type SessionView = 'all' | 'included' | 'excluded'
 type EditorMode = 'markdown' | 'preview'
 
-const PROMPT_STORAGE_KEY = 'lumina.codex-report.prompt.v1'
 const ACTIVE_TEMPLATE_KEY = 'lumina.codex-report.active-template.v1'
 const SELECTED_PROJECTS_KEY = 'lumina.codex-report.selected-projects.v1'
 
