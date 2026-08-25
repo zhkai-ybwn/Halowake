@@ -29,18 +29,9 @@
 
 随着 **Claude Code、Google Antigravity、Codex CLI、OpenCode、Cursor** 等 AI Coding Agent 成为现代开发者的主力工具，我们的编码方式发生了剧变：大量业务逻辑在 Agent 对话中被极速实现，但原有的本地开发工具链并没有跟上节奏，反而产生了大量碎片化痛点：
 
-```mermaid
-graph LR
-  A[AI Coding Agent 时代] --> B[Git 提交割裂]
-  A --> C[本地进程与终端散落]
-  A --> D[Agent 会话分散 & 日报难写]
-  A --> E[多平台 AI 额度焦虑]
-  
-  B --> F[Lumina 一体化工作台]
-  C --> F
-  D --> F
-  E --> F
-```
+<p align="center">
+  <img src="src/assets/lumina-workflow.png" alt="Lumina Workflow & Architecture" width="100%" />
+</p>
 
 1. **Git 提交的繁琐与割裂**：
    - 过去为了生成标准的 Conventional Commit，要把 Diff 贴给昂贵的通用大模型，成本高昂。
@@ -206,6 +197,10 @@ Lumina 诞生于一线开发者的真实痛点，期待您的体验与反馈：
 ---
 
 ## 💡 Why Lumina?
+
+<p align="center">
+  <img src="src/assets/lumina-workflow.png" alt="Lumina Workflow & Architecture" width="100%" />
+</p>
 
 As **AI Coding Agents** (Claude Code, Google Antigravity, Codex CLI, OpenCode, Cursor, etc.) take over modern software development, developer workflows have fundamentally shifted. Lumina was crafted to bridge the critical gaps in this new landscape:
 
