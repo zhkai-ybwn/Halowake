@@ -32,10 +32,131 @@ const PROCESS_LIMIT: usize = 40;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-#[derive(Default)]
+#[cfg(windows)]
+struct WindowsJobHandle {
+    handle: std::os::windows::io::RawHandle,
+}
+
+#[cfg(windows)]
+unsafe impl Send for WindowsJobHandle {}
+#[cfg(windows)]
+unsafe impl Sync for WindowsJobHandle {}
+
+#[cfg(windows)]
+impl WindowsJobHandle {
+    fn new() -> Option<Self> {
+        use std::os::windows::io::RawHandle;
+        use std::ptr::null_mut;
+
+        #[repr(C)]
+        struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+            per_process_user_time_limit: i64,
+            per_job_user_time_limit: i64,
+            limit_flags: u32,
+            minimum_working_set_size: usize,
+            maximum_working_set_size: usize,
+            active_process_limit: u32,
+            affinity: usize,
+            priority_class: u32,
+            scheduling_class: u32,
+        }
+
+        #[repr(C)]
+        struct IO_COUNTERS {
+            read_operation_count: u64,
+            write_operation_count: u64,
+            other_operation_count: u64,
+            read_transfer_count: u64,
+            write_transfer_count: u64,
+            other_transfer_count: u64,
+        }
+
+        #[repr(C)]
+        struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+            basic_limit_information: JOBOBJECT_BASIC_LIMIT_INFORMATION,
+            io_info: IO_COUNTERS,
+            process_memory_limit: usize,
+            job_memory_limit: usize,
+            peak_process_memory_limit: usize,
+            peak_job_memory_limit: usize,
+        }
+
+        const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+        const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+
+        extern "system" {
+            fn CreateJobObjectW(lpJobAttributes: *mut std::ffi::c_void, lpName: *const u16) -> RawHandle;
+            fn SetInformationJobObject(
+                hJob: RawHandle,
+                JobObjectInformationClass: i32,
+                lpJobObjectInformation: *const std::ffi::c_void,
+                cbJobObjectInformationLength: u32,
+            ) -> i32;
+            fn CloseHandle(hObject: RawHandle) -> i32;
+        }
+
+        unsafe {
+            let handle = CreateJobObjectW(null_mut(), std::ptr::null());
+            if handle.is_null() || handle == -1isize as RawHandle {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ret = SetInformationJobObject(
+                handle,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                &info as *const _ as *const std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if ret == 0 {
+                CloseHandle(handle);
+                return None;
+            }
+            Some(Self { handle })
+        }
+    }
+
+    fn assign_process(&self, process_handle: std::os::windows::io::RawHandle) -> bool {
+        extern "system" {
+            fn AssignProcessToJobObject(
+                hJob: std::os::windows::io::RawHandle,
+                hProcess: std::os::windows::io::RawHandle,
+            ) -> i32;
+        }
+        unsafe { AssignProcessToJobObject(self.handle, process_handle) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJobHandle {
+    fn drop(&mut self) {
+        extern "system" {
+            fn CloseHandle(hObject: std::os::windows::io::RawHandle) -> i32;
+        }
+        unsafe {
+            if !self.handle.is_null() && self.handle != -1isize as std::os::windows::io::RawHandle {
+                CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
 pub struct ProjectProcessState {
     next_id: AtomicU64,
     processes: Mutex<HashMap<String, ManagedProcess>>,
+    #[cfg(windows)]
+    job_handle: Option<WindowsJobHandle>,
+}
+
+impl Default for ProjectProcessState {
+    fn default() -> Self {
+        Self {
+            next_id: AtomicU64::new(0),
+            processes: Mutex::new(HashMap::new()),
+            #[cfg(windows)]
+            job_handle: WindowsJobHandle::new(),
+        }
+    }
 }
 
 impl Drop for ProjectProcessState {
@@ -321,6 +442,11 @@ fn start_process(
     let mut child = command
         .spawn()
         .map_err(|e| format!("启动命令失败: {}", e))?;
+    #[cfg(windows)]
+    if let Some(ref job) = state.job_handle {
+        use std::os::windows::io::AsRawHandle;
+        job.assign_process(child.as_raw_handle());
+    }
     let pid = child.id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -426,6 +552,11 @@ fn spawn_resolved_process(
     database: Option<AppDatabase>,
 ) -> Result<ProjectProcessSnapshot, String> {
     let mut child = command.spawn().map_err(|error| format!("SPAWN_FAILED: {error}"))?;
+    #[cfg(windows)]
+    if let Some(ref job) = state.job_handle {
+        use std::os::windows::io::AsRawHandle;
+        job.assign_process(child.as_raw_handle());
+    }
     let pid = child.id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
