@@ -26,9 +26,9 @@
 
     <section class="devdock-shell" :class="{ 'inspector-open': processInspectorOpen }">
       <DevDockProjectList
-        class="source-list"
         v-model:pin-editing="pinEditing"
         v-model:script-search="scriptSearch"
+        class="source-list"
         :displayed-scripts="displayedScripts"
         :editing-alias-path="editingAliasPath"
         :filtered-scripts="filteredScripts"

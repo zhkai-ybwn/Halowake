@@ -61,8 +61,8 @@
           <button
             type="button"
             :class="{ active: selectedProvider === 'all' }"
-            @click="selectedProvider = 'all'"
             :title="t('codexReport.allTools')"
+            @click="selectedProvider = 'all'"
           >
             <Icon icon="solar:layers-minimalistic-linear" class="provider-btn-icon" />
             <span>{{ t('codexReport.allTools') }}</span>
@@ -70,8 +70,8 @@
           <button
             type="button"
             :class="{ active: selectedProvider === 'codex' }"
-            @click="selectedProvider = 'codex'"
             title="Codex CLI"
+            @click="selectedProvider = 'codex'"
           >
             <Icon icon="solar:code-square-linear" class="provider-btn-icon icon-codex" />
             <span>Codex</span>
@@ -79,8 +79,8 @@
           <button
             type="button"
             :class="{ active: selectedProvider === 'claude' }"
-            @click="selectedProvider = 'claude'"
             title="Claude Code"
+            @click="selectedProvider = 'claude'"
           >
             <Icon icon="solar:magic-stick-3-linear" class="provider-btn-icon icon-claude" />
             <span>Claude</span>
@@ -88,8 +88,8 @@
           <button
             type="button"
             :class="{ active: selectedProvider === 'antigravity' }"
-            @click="selectedProvider = 'antigravity'"
             title="Antigravity"
+            @click="selectedProvider = 'antigravity'"
           >
             <Icon icon="solar:planet-linear" class="provider-btn-icon icon-agy" />
             <span>Antigravity</span>
@@ -97,8 +97,8 @@
           <button
             type="button"
             :class="{ active: selectedProvider === 'opencode' }"
-            @click="selectedProvider = 'opencode'"
             title="OpenCode"
+            @click="selectedProvider = 'opencode'"
           >
             <Icon icon="solar:terminal-linear" class="provider-btn-icon icon-opencode" />
             <span>OpenCode</span>

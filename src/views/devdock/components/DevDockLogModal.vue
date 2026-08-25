@@ -336,12 +336,6 @@ function renderLogLine(text: string) {
   return ansiUp.ansi_to_html(text)
 }
 
-function formatLevelLabel(level: string) {
-  if (level === 'warning') return 'WARN'
-  if (level === 'error') return 'ERR'
-  return 'INFO'
-}
-
 function classifyLogLevel(stream: 'stdout' | 'stderr' | 'system', text: string): LogLevel {
   const content = text.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '').toLowerCase()
   const nonZeroExit = stream === 'system' && (
