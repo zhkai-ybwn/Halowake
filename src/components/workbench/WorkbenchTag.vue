@@ -28,20 +28,28 @@ const toneClass = computed(() => `tone-${props.tone}`)
   border-radius: var(--lumina-radius-xs);
   display: inline-flex;
   flex: 0 0 auto;
+  font-family: var(--lumina-font-sans);
   font-size: 11px;
-  gap: 8px;
+  gap: 6px;
   height: 24px;
+  line-height: 1;
   min-width: 0;
   padding: 0 8px;
   white-space: nowrap;
 
   span {
+    align-items: center;
     color: var(--lumina-text-secondary);
+    display: inline-flex;
+    line-height: 1;
   }
 
   strong {
+    align-items: center;
     color: var(--lumina-text);
+    display: inline-flex;
     font-weight: 650;
+    line-height: 1;
   }
 
   &.tone-primary {

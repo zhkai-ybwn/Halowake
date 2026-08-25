@@ -79,7 +79,7 @@ defineEmits<{
   right: 12px;
   top: 12px;
   width: 28px;
-  z-index: 3;
+  z-index: 20;
 
   &:hover {
     background: var(--lumina-button-secondary-hover);

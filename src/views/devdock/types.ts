@@ -7,6 +7,7 @@ export interface DevDockProject {
   error: string
   manifest: ProjectManifest | null
   openedAt: number
+  scanned?: boolean
 }
 
 export interface StoredProject {

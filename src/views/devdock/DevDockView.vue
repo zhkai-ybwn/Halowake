@@ -70,6 +70,8 @@
         @open-url="openProcessUrl"
         @restart="restartProcess"
         @stop="stopProcess"
+        @dismiss="dismissProcess"
+        @clear-completed="handleClearCompletedProcesses"
         @close="processInspectorOpen = false"
       />
     </section>
@@ -152,6 +154,7 @@ const expandedCommandProjects = reactive(new Set<string>())
 const runHistory = ref<DevDockRunHistoryRecord[]>([])
 const recentDrawerOpen = ref(false)
 const processes = ref<ProjectProcessSnapshot[]>([])
+const dismissedProcessIds = reactive(new Set<string>())
 const processBusy = reactive(new Set<string>())
 const startingScripts = reactive(new Set<string>())
 const processLogs = ref<ProjectProcessLogs | null>(null)
@@ -167,7 +170,7 @@ let isFirstMount = true
 let logPollTimer: ReturnType<typeof window.setInterval> | undefined
 let processPollTimer: ReturnType<typeof window.setInterval> | undefined
 const loadingAll = computed(() => projects.value.some(project => project.loading))
-const scannedCount = computed(() => projects.value.filter(project => project.manifest).length)
+const scannedCount = computed(() => projects.value.filter(project => Boolean(project.scanned)).length)
 const scanProgressLabel = computed(() => {
   if (!loadingAll.value) return t('devdock.actions.scanAll')
   return t('devdock.actions.scanningWithProgress', { scanned: scannedCount.value, total: projects.value.length })
@@ -209,7 +212,7 @@ onActivated(() => {
     return
   }
   // Only rescan if projects are not yet scanned or if 60s has elapsed since last scan
-  const needsRescan = projects.value.some(p => !p.manifest) || Date.now() - lastScannedAt > 60_000
+  const needsRescan = projects.value.some(p => !p.scanned) || Date.now() - lastScannedAt > 60_000
   if (needsRescan) {
     void scanAllProjects()
   }
@@ -249,6 +252,7 @@ async function handleAddProject() {
     error: '',
     manifest: null,
     openedAt: Date.now(),
+    scanned: false,
   }
   projects.value = [project, ...projects.value]
 
@@ -312,6 +316,7 @@ async function scanProject(project: DevDockProject, options: { touch?: boolean }
     project.error = rawMsg.replace(/^加载项目配置任务异常:\s*/, '')
   } finally {
     project.loading = false
+    project.scanned = true
   }
 }
 
@@ -388,6 +393,7 @@ async function initStoredProjects() {
       error: '',
       manifest: null,
       openedAt: record.openedAt,
+      scanned: false,
     }))
   } catch (err) {
     reportError('devdock.init-stored-projects', err)
@@ -420,6 +426,7 @@ async function initStoredProjects() {
           error: '',
           manifest: null,
           openedAt: record.openedAt,
+          scanned: false,
         }))
       }
       localStorage.removeItem(DEVDOCK_PROJECTS_STORAGE_KEY)
@@ -616,7 +623,8 @@ async function startProjectCommand(command: {
 
 async function refreshProcesses() {
   try {
-    processes.value = await listProjectProcesses()
+    const list = await listProjectProcesses()
+    processes.value = list.filter(p => !dismissedProcessIds.has(p.id))
     void refreshRunHistory()
   } catch (err) {
     reportError('devdock.refresh-processes', err)
@@ -639,7 +647,6 @@ async function stopProcess(processId: string) {
   processBusy.add(processId)
   try {
     await stopProjectProcess(processId)
-    processes.value = processes.value.filter(process => process.id !== processId)
   } catch (err) {
     message.error(reportError('devdock.stop', err), { duration: 8000 })
   } finally {
@@ -660,6 +667,21 @@ async function restartProcess(processId: string) {
     await refreshProcesses()
     void refreshRunHistory()
   }
+}
+
+function dismissProcess(processId: string) {
+  dismissedProcessIds.add(processId)
+  processes.value = processes.value.filter(p => p.id !== processId)
+}
+
+function handleClearCompletedProcesses() {
+  const completed = processes.value.filter(p => p.status.state !== 'running' && p.status.state !== 'starting')
+  if (!completed.length) return
+  for (const p of completed) {
+    dismissedProcessIds.add(p.id)
+  }
+  processes.value = processes.value.filter(p => p.status.state === 'running' || p.status.state === 'starting')
+  message.success(t('devdock.processes.clearCompletedSuccess'))
 }
 
 async function openProcessLogs(processId: string) {
@@ -706,6 +728,7 @@ async function refreshProcessLogs(processId: string) {
 }
 
 function updateProcess(process: ProjectProcessSnapshot) {
+  dismissedProcessIds.delete(process.id)
   const commandId = process.commandId || process.scriptName
   processes.value = [
     process,
