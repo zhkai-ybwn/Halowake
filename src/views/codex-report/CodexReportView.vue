@@ -338,6 +338,8 @@
       v-model:show="projectModalOpen"
       class="project-filter-modal"
       :mask-closable="true"
+      :auto-focus="false"
+      :trap-focus="false"
     >
       <WorkbenchSheet
         size="normal"
@@ -512,6 +514,8 @@
       v-model:show="showCreateTemplateModal"
       class="create-template-modal"
       :mask-closable="true"
+      :auto-focus="false"
+      :trap-focus="false"
     >
       <WorkbenchSheet
         size="normal"
@@ -522,15 +526,15 @@
         @close="showCreateTemplateModal = false"
       >
         <div class="create-template-form">
-          <label class="form-field">
+          <div class="form-field">
             <span class="field-label">{{ t('codexReport.templateName') }}</span>
             <NInput
               v-model:value="newTemplateName"
               :placeholder="t('codexReport.templateNamePlaceholder')"
               maxlength="30"
             />
-          </label>
-          <label class="form-field">
+          </div>
+          <div class="form-field">
             <span class="field-label">{{ t('codexReport.templateContent') }}</span>
             <NInput
               v-model:value="newTemplateContent"
@@ -538,7 +542,7 @@
               :rows="10"
               :placeholder="t('codexReport.templateContentPlaceholder')"
             />
-          </label>
+          </div>
         </div>
 
         <template #footer>
@@ -1850,6 +1854,12 @@ async function copyText(text: string, successMessage: string) {
 .modal-selected-summary {
   color: var(--lumina-text-secondary);
   font-size: 12px;
+}
+
+.modal-footer-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 1024px) {

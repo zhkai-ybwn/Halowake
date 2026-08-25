@@ -40,7 +40,7 @@ export const useUpdaterStore = defineStore('updater', () => {
       try {
         currentVersion.value = await getApplicationVersion()
       } catch {
-        currentVersion.value = '1.1.1'
+        currentVersion.value = '1.1.2'
       }
 
       const update = await check()
