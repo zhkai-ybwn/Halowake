@@ -134,6 +134,12 @@ export const useUpdaterStore = defineStore('updater', () => {
 
   async function relaunchApplication() {
     try {
+      try {
+        const { stopAllProjectProcesses } = await import('@/services/project/project-service')
+        await stopAllProjectProcesses()
+      } catch (procErr) {
+        console.warn('[Updater] Failed to stop processes before relaunch:', procErr)
+      }
       await relaunch()
     } catch (err: unknown) {
       console.error('[Updater] Relaunch failed:', err)

@@ -29,10 +29,14 @@
   --lumina-duration-slow: 400ms;
 
   /* Material recipes */
-  --lumina-vibrancy: saturate(180%) blur(20px);
+  --lumina-vibrancy: none;
   --lumina-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --lumina-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   --lumina-font-mono: "SF Mono", "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+}
+
+.platform-macos {
+  --lumina-vibrancy: saturate(180%) blur(20px);
 }
 
 @media (prefers-reduced-motion: reduce) {

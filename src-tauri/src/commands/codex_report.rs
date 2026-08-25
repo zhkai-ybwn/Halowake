@@ -76,22 +76,30 @@ fn get_local_appdata_dir() -> Option<PathBuf> {
 }
 
 #[tauri::command]
-pub fn detect_installed_ai_tools() -> Result<Vec<InstalledToolInfo>, String> {
+pub async fn detect_installed_ai_tools() -> Result<Vec<InstalledToolInfo>, String> {
+    tokio::task::spawn_blocking(detect_installed_ai_tools_sync)
+        .await
+        .map_err(|e| format!("执行检测任务失败: {}", e))?
+}
+
+fn detect_installed_ai_tools_sync() -> Result<Vec<InstalledToolInfo>, String> {
     let home = get_home_dir()?;
     let mut tools = Vec::new();
 
     // 1. Codex
     let codex_dir = home.join(".codex").join("sessions");
     let codex_installed = codex_dir.exists();
-    let mut codex_files = Vec::new();
+    let mut codex_count = 0;
     if codex_installed {
+        let mut codex_files = Vec::new();
         let _ = collect_jsonl_files(&codex_dir, &mut codex_files);
+        codex_count = codex_files.len();
     }
     tools.push(InstalledToolInfo {
         provider: "codex".to_string(),
         name: "Codex CLI".to_string(),
         is_installed: codex_installed,
-        session_count: codex_files.len(),
+        session_count: codex_count,
     });
 
     // 2. Claude Code
@@ -159,7 +167,13 @@ pub fn detect_installed_ai_tools() -> Result<Vec<InstalledToolInfo>, String> {
 }
 
 #[tauri::command]
-pub fn load_codex_projects() -> Result<Vec<CodexProjectInfo>, String> {
+pub async fn load_codex_projects() -> Result<Vec<CodexProjectInfo>, String> {
+    tokio::task::spawn_blocking(load_codex_projects_sync)
+        .await
+        .map_err(|e| format!("执行加载项目任务失败: {}", e))?
+}
+
+fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     let home = get_home_dir()?;
     let mut project_map: HashMap<String, (String, usize, Option<String>, String)> = HashMap::new();
 
@@ -256,7 +270,13 @@ pub fn load_codex_projects() -> Result<Vec<CodexProjectInfo>, String> {
 }
 
 #[tauri::command]
-pub fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
+pub async fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
+    tokio::task::spawn_blocking(move || load_codex_report_sessions_sync(query))
+        .await
+        .map_err(|e| format!("执行加载会话任务失败: {}", e))?
+}
+
+fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
     let home = get_home_dir()?;
     let selected_providers = query.providers.clone().unwrap_or_else(|| {
         vec![
@@ -267,14 +287,17 @@ pub fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexRe
         ]
     });
 
+    let from_date = if query.from.len() >= 10 { &query.from[..10] } else { &query.from };
+    let to_date = if query.to.len() >= 10 { &query.to[..10] } else { &query.to };
+
     let mut all_sessions = Vec::new();
 
-    // 1. Codex
+    // 1. Codex (with date directory pruning)
     if selected_providers.iter().any(|p| p == "codex" || p == "all") {
         let codex_dir = home.join(".codex").join("sessions");
         if codex_dir.exists() {
             let mut session_files = Vec::new();
-            let _ = collect_jsonl_files(&codex_dir, &mut session_files);
+            collect_codex_jsonl_files_pruned(&codex_dir, from_date, to_date, &mut session_files);
             for path in &session_files {
                 if let Some(session) = parse_codex_session(path, &query.from, &query.to) {
                     all_sessions.push(session);
@@ -297,7 +320,7 @@ pub fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexRe
         }
     }
 
-    // 3. Antigravity
+    // 3. Antigravity (with mtime check & fast streaming reader)
     if selected_providers.iter().any(|p| p == "antigravity" || p == "all") {
         let brain_dir = home.join(".gemini").join("antigravity").join("brain");
         if brain_dir.exists() {
@@ -347,6 +370,42 @@ pub fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexRe
     Ok(all_sessions)
 }
 
+/// Prune Codex directories based on YYYY/MM/DD structure
+fn collect_codex_jsonl_files_pruned(codex_dir: &Path, from_date: &str, to_date: &str, files: &mut Vec<PathBuf>) {
+    let from_year = if from_date.len() >= 4 { &from_date[..4] } else { "1970" };
+    let to_year = if to_date.len() >= 4 { &to_date[..4] } else { "9999" };
+    let from_ym = if from_date.len() >= 7 { &from_date[..7] } else { "1970-01" };
+    let to_ym = if to_date.len() >= 7 { &to_date[..7] } else { "9999-12" };
+
+    let Ok(year_entries) = fs::read_dir(codex_dir) else { return };
+    for year_entry in year_entries.filter_map(Result::ok) {
+        let year_path = year_entry.path();
+        if !year_path.is_dir() { continue; }
+        let Some(year_str) = year_path.file_name().and_then(|n| n.to_str()) else { continue; };
+        if year_str < from_year || year_str > to_year { continue; }
+
+        let Ok(month_entries) = fs::read_dir(&year_path) else { continue };
+        for month_entry in month_entries.filter_map(Result::ok) {
+            let month_path = month_entry.path();
+            if !month_path.is_dir() { continue; }
+            let Some(month_str) = month_path.file_name().and_then(|n| n.to_str()) else { continue; };
+            let current_ym = format!("{}-{}", year_str, month_str);
+            if current_ym.as_str() < from_ym || current_ym.as_str() > to_ym { continue; }
+
+            let Ok(day_entries) = fs::read_dir(&month_path) else { continue };
+            for day_entry in day_entries.filter_map(Result::ok) {
+                let day_path = day_entry.path();
+                if !day_path.is_dir() { continue; }
+                let Some(day_str) = day_path.file_name().and_then(|n| n.to_str()) else { continue; };
+                let current_ymd = format!("{}-{}-{}", year_str, month_str, day_str);
+                if current_ymd.as_str() < from_date || current_ymd.as_str() > to_date { continue; }
+
+                let _ = collect_jsonl_files(&day_path, files);
+            }
+        }
+    }
+}
+
 fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in fs::read_dir(directory)
         .map_err(|error| format!("读取目录失败 {}: {}", directory.display(), error))?
@@ -369,6 +428,9 @@ fn extract_codex_session_meta(path: &Path) -> Option<(String, Option<String>)> {
 
     for line in reader.lines().take(15) {
         let line = line.ok()?;
+        if !line.contains("\"session_meta\"") {
+            continue;
+        }
         if let Ok(entry) = serde_json::from_str::<Value>(&line) {
             if entry.get("type").and_then(Value::as_str) == Some("session_meta") {
                 let payload = entry.get("payload");
@@ -388,14 +450,22 @@ fn extract_codex_session_meta(path: &Path) -> Option<(String, Option<String>)> {
 }
 
 fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportSession> {
-    let content = fs::read_to_string(path).ok()?;
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
     let mut draft = SessionDraft {
         provider: "codex".to_string(),
         ..Default::default()
     };
 
-    for line in content.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue; };
+        // Fast string pre-filter to avoid unnecessary serde deserialization
+        if !line.contains("\"session_meta\"") && !line.contains("\"user_message\"") && !line.contains("\"final_answer\"") {
+            continue;
+        }
+
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         let timestamp = entry.get("timestamp").and_then(Value::as_str).unwrap_or_default();
@@ -448,7 +518,9 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
 }
 
 fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReportSession> {
-    let content = fs::read_to_string(path).ok()?;
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
     let session_id = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
     let parent_name = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or_default();
     let inferred_cwd = decode_claude_project_path(parent_name);
@@ -460,8 +532,13 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
         ..Default::default()
     };
 
-    for line in content.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue; };
+        if !line.contains("\"user\"") && !line.contains("\"assistant\"") {
+            continue;
+        }
+
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
 
@@ -510,7 +587,9 @@ fn parse_antigravity_transcript(
     from: &str,
     to: &str,
 ) -> Option<CodexReportSession> {
-    let content = fs::read_to_string(path).ok()?;
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
     let (project_name, cwd) = project_mappings
         .get(conv_id)
         .cloned()
@@ -524,8 +603,14 @@ fn parse_antigravity_transcript(
         ..Default::default()
     };
 
-    for line in content.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+    for line_res in reader.lines() {
+        let Ok(line) = line_res else { continue; };
+        // Fast skip lines that are not user input or planner response
+        if !line.contains("\"USER_INPUT\"") && !line.contains("\"PLANNER_RESPONSE\"") {
+            continue;
+        }
+
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
 

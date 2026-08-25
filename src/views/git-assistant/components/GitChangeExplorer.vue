@@ -821,6 +821,8 @@ onUnmounted(() => {
 
 .file-row {
   border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
+  content-visibility: auto;
+  contain-intrinsic-size: 0 30px;
   cursor: default;
   min-height: 30px;
 

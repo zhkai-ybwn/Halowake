@@ -455,6 +455,8 @@ function handleSortChange(event: Event) {
   background: var(--lumina-surface-1);
   border: 1px solid var(--lumina-card-border);
   border-radius: var(--lumina-radius-md);
+  content-visibility: auto;
+  contain-intrinsic-size: 0 120px;
   overflow: hidden;
 
   & + & {

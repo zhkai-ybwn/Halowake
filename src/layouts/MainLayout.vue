@@ -42,7 +42,7 @@
 
       <main class="view-host">
         <router-view v-slot="{ Component }">
-          <transition name="route-fade"><keep-alive><component :is="Component" /></keep-alive></transition>
+          <transition name="route-fade" mode="out-in"><keep-alive><component :is="Component" /></keep-alive></transition>
         </router-view>
       </main>
     </div>
@@ -122,6 +122,7 @@ const rememberChoice = ref(false)
 let unlistenResize: UnlistenFn | null = null
 let unlistenCloseRequested: UnlistenFn | null = null
 let unlistenTrayExit: UnlistenFn | null = null
+let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const navItems = computed(() => [
   { route: 'devdock', label: t('workbench.devdock'), icon: 'solar:folder-with-files-linear', description: t('workbench.devdockDescription') },
@@ -144,12 +145,28 @@ watch(commandPaletteOpen, open => { if (open) void nextTick(() => commandInput.v
 
 onMounted(async () => {
   await refreshMaximizedState()
-  unlistenResize = await appWindow.onResized(refreshMaximizedState)
+  unlistenResize = await appWindow.onResized(handleWindowResized)
   unlistenCloseRequested = await appWindow.onCloseRequested(event => { event.preventDefault(); void handleCloseRequest() })
   unlistenTrayExit = await listen('lumina://request-exit', () => { void requestExit() })
   window.addEventListener('keydown', handleGlobalKeydown)
 })
-onUnmounted(() => { unlistenResize?.(); unlistenCloseRequested?.(); unlistenTrayExit?.(); window.removeEventListener('keydown', handleGlobalKeydown) })
+onUnmounted(() => {
+  if (resizeDebounceTimer) {
+    clearTimeout(resizeDebounceTimer)
+    resizeDebounceTimer = null
+  }
+  unlistenResize?.()
+  unlistenCloseRequested?.()
+  unlistenTrayExit?.()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+})
+
+function handleWindowResized() {
+  if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer)
+  resizeDebounceTimer = setTimeout(() => {
+    void refreshMaximizedState()
+  }, 120)
+}
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   const mod = hasPrimaryModifier(event)

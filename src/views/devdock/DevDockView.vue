@@ -192,6 +192,8 @@ const visibleProjects = computed(() => {
   return sortedProjects.value.filter(project => filteredScripts(project).length > 0)
 })
 
+let lastScannedAt = 0
+
 onMounted(async () => {
   pinnedScripts.value = loadPinnedScripts()
   await initStoredProjects()
@@ -206,7 +208,11 @@ onActivated(() => {
     isFirstMount = false
     return
   }
-  void scanAllProjects()
+  // Only rescan if projects are not yet scanned or if 60s has elapsed since last scan
+  const needsRescan = projects.value.some(p => !p.manifest) || Date.now() - lastScannedAt > 60_000
+  if (needsRescan) {
+    void scanAllProjects()
+  }
   void refreshProcesses()
   void refreshRunHistory()
   startProcessPolling()
@@ -287,6 +293,7 @@ async function handleConfigSaved() {
 }
 
 async function scanAllProjects() {
+  lastScannedAt = Date.now()
   await runWithConcurrency(projects.value, 3, project => scanProject(project))
 }
 

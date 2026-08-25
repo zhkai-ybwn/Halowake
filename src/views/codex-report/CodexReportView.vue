@@ -709,9 +709,10 @@ const combinedContent = computed(
   () => `${webAiPrompt.value.trim()}\n\n---\n\n${workRecord.value.trim()}`
 )
 
-const markdownPreview = computed(() =>
-  marked.parse(escapeHtml(workRecord.value || t('codexReport.noWorkRecord')), { async: false })
-)
+const markdownPreview = computed(() => {
+  if (editorMode.value !== 'preview') return ''
+  return marked.parse(escapeHtml(workRecord.value || t('codexReport.noWorkRecord')), { async: false })
+})
 
 watch(selectedProjects, val => {
   try {
@@ -721,10 +722,12 @@ watch(selectedProjects, val => {
   }
 }, { deep: true })
 
-onMounted(async () => {
-  await initPromptTemplates()
-  await fetchProjects()
-  await loadSessions()
+onMounted(() => {
+  void Promise.allSettled([
+    initPromptTemplates(),
+    fetchProjects(),
+    loadSessions(),
+  ])
 })
 
 async function initPromptTemplates() {
@@ -1347,6 +1350,8 @@ async function copyText(text: string, successMessage: string) {
   background: var(--lumina-surface-elevated);
   border: 0.5px solid var(--lumina-separator);
   border-radius: var(--lumina-radius-sm);
+  content-visibility: auto;
+  contain-intrinsic-size: 0 78px;
   cursor: pointer;
   display: flex;
   gap: 8px;
