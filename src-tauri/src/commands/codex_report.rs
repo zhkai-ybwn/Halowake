@@ -287,17 +287,16 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
         ]
     });
 
-    let from_date = if query.from.len() >= 10 { &query.from[..10] } else { &query.from };
     let to_date = if query.to.len() >= 10 { &query.to[..10] } else { &query.to };
 
     let mut all_sessions = Vec::new();
 
-    // 1. Codex (with date directory pruning)
+    // 1. Codex (with date directory pruning for future dates)
     if selected_providers.iter().any(|p| p == "codex" || p == "all") {
         let codex_dir = home.join(".codex").join("sessions");
         if codex_dir.exists() {
             let mut session_files = Vec::new();
-            collect_codex_jsonl_files_pruned(&codex_dir, from_date, to_date, &mut session_files);
+            collect_codex_jsonl_files_pruned(&codex_dir, to_date, &mut session_files);
             for path in &session_files {
                 if let Some(session) = parse_codex_session(path, &query.from, &query.to) {
                     all_sessions.push(session);
@@ -370,11 +369,9 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
     Ok(all_sessions)
 }
 
-/// Prune Codex directories based on YYYY/MM/DD structure
-fn collect_codex_jsonl_files_pruned(codex_dir: &Path, from_date: &str, to_date: &str, files: &mut Vec<PathBuf>) {
-    let from_year = if from_date.len() >= 4 { &from_date[..4] } else { "1970" };
+/// Prune Codex directories based on YYYY/MM/DD structure for future dates only
+fn collect_codex_jsonl_files_pruned(codex_dir: &Path, to_date: &str, files: &mut Vec<PathBuf>) {
     let to_year = if to_date.len() >= 4 { &to_date[..4] } else { "9999" };
-    let from_ym = if from_date.len() >= 7 { &from_date[..7] } else { "1970-01" };
     let to_ym = if to_date.len() >= 7 { &to_date[..7] } else { "9999-12" };
 
     let Ok(year_entries) = fs::read_dir(codex_dir) else { return };
@@ -382,7 +379,7 @@ fn collect_codex_jsonl_files_pruned(codex_dir: &Path, from_date: &str, to_date: 
         let year_path = year_entry.path();
         if !year_path.is_dir() { continue; }
         let Some(year_str) = year_path.file_name().and_then(|n| n.to_str()) else { continue; };
-        if year_str < from_year || year_str > to_year { continue; }
+        if year_str > to_year { continue; }
 
         let Ok(month_entries) = fs::read_dir(&year_path) else { continue };
         for month_entry in month_entries.filter_map(Result::ok) {
@@ -390,7 +387,7 @@ fn collect_codex_jsonl_files_pruned(codex_dir: &Path, from_date: &str, to_date: 
             if !month_path.is_dir() { continue; }
             let Some(month_str) = month_path.file_name().and_then(|n| n.to_str()) else { continue; };
             let current_ym = format!("{}-{}", year_str, month_str);
-            if current_ym.as_str() < from_ym || current_ym.as_str() > to_ym { continue; }
+            if current_ym.as_str() > to_ym { continue; }
 
             let Ok(day_entries) = fs::read_dir(&month_path) else { continue };
             for day_entry in day_entries.filter_map(Result::ok) {
@@ -398,7 +395,7 @@ fn collect_codex_jsonl_files_pruned(codex_dir: &Path, from_date: &str, to_date: 
                 if !day_path.is_dir() { continue; }
                 let Some(day_str) = day_path.file_name().and_then(|n| n.to_str()) else { continue; };
                 let current_ymd = format!("{}-{}-{}", year_str, month_str, day_str);
-                if current_ymd.as_str() < from_date || current_ymd.as_str() > to_date { continue; }
+                if current_ymd.as_str() > to_date { continue; }
 
                 let _ = collect_jsonl_files(&day_path, files);
             }
@@ -453,7 +450,20 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
     let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
+    let default_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| {
+            if s.len() > 36 {
+                s[s.len() - 36..].to_string()
+            } else {
+                s.to_string()
+            }
+        })
+        .unwrap_or_default();
+
     let mut draft = SessionDraft {
+        id: default_id,
         provider: "codex".to_string(),
         ..Default::default()
     };
@@ -461,7 +471,12 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
     for line_res in reader.lines() {
         let Ok(line) = line_res else { continue; };
         // Fast string pre-filter to avoid unnecessary serde deserialization
-        if !line.contains("\"session_meta\"") && !line.contains("\"user_message\"") && !line.contains("\"final_answer\"") {
+        if !line.contains("\"session_meta\"")
+            && !line.contains("\"user\"")
+            && !line.contains("\"user_message\"")
+            && !line.contains("\"final_answer\"")
+            && !line.contains("\"assistant\"")
+        {
             continue;
         }
 
@@ -473,15 +488,19 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
         let payload = entry.get("payload").unwrap_or(&Value::Null);
 
         if entry_type == "session_meta" {
-            draft.id = payload
+            let sid = payload
                 .get("session_id")
                 .or_else(|| payload.get("id"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            draft.cwd = payload.get("cwd").and_then(Value::as_str).map(str::to_string);
-            if !timestamp.is_empty() {
-                draft.started_at = timestamp.to_string();
+                .and_then(Value::as_str);
+            if let Some(id) = sid {
+                if !id.is_empty() {
+                    draft.id = id.to_string();
+                }
+            }
+            if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
+                if !cwd.is_empty() {
+                    draft.cwd = Some(cwd.to_string());
+                }
             }
             continue;
         }
@@ -490,27 +509,39 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
             continue;
         }
 
-        update_bounds(&mut draft, timestamp);
-        match entry_type {
-            "event_msg" if payload.get("type").and_then(Value::as_str) == Some("user_message") => {
-                if let Some(text) = payload
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .and_then(clean_user_message)
-                {
-                    draft.user_messages.push(text);
+        let payload_type = payload.get("type").and_then(Value::as_str).unwrap_or_default();
+        let role = payload
+            .get("role")
+            .or_else(|| entry.get("role"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        // 1. User messages
+        if (entry_type == "event_msg" && payload_type == "user_message") || role == "user" {
+            let text = payload
+                .get("message")
+                .and_then(extract_text_value)
+                .or_else(|| payload.get("content").and_then(extract_text_value))
+                .or_else(|| extract_text_value(payload));
+            if let Some(cleaned) = text.and_then(|s| clean_user_message(&s)) {
+                update_bounds(&mut draft, timestamp);
+                draft.user_messages.push(cleaned);
+            }
+        }
+        // 2. Assistant messages
+        else if role == "assistant" {
+            let phase = payload.get("phase").and_then(Value::as_str);
+            if phase == Some("final_answer") || phase.is_none() {
+                let text = payload
+                    .get("content")
+                    .and_then(extract_text_value)
+                    .or_else(|| payload.get("message").and_then(extract_text_value))
+                    .or_else(|| extract_text_value(payload));
+                if let Some(cleaned) = text.and_then(|s| clean_result_message(&s)) {
+                    update_bounds(&mut draft, timestamp);
+                    draft.assistant_messages.push(cleaned);
                 }
             }
-            "response_item" if payload.get("type").and_then(Value::as_str) == Some("message") => {
-                let role = payload.get("role").and_then(Value::as_str);
-                let phase = payload.get("phase").and_then(Value::as_str);
-                if role == Some("assistant") && phase == Some("final_answer") {
-                    if let Some(text) = clean_result_message(&message_content_text(payload)) {
-                        draft.assistant_messages.push(text);
-                    }
-                }
-            }
-            _ => {}
         }
     }
 
@@ -671,13 +702,10 @@ fn parse_opencode_session(path: &Path, from: &str, to: &str) -> Option<CodexRepo
 
     let session_id = val.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
     let cwd = val.get("cwd").or_else(|| val.get("projectPath")).and_then(Value::as_str).map(str::to_string);
-    let created_at = val.get("createdAt").or_else(|| val.get("timestamp")).and_then(Value::as_str).unwrap_or_default();
 
     let mut draft = SessionDraft {
         id: session_id,
         provider: "opencode".to_string(),
-        started_at: created_at.to_string(),
-        ended_at: created_at.to_string(),
         cwd,
         ..Default::default()
     };
@@ -688,16 +716,18 @@ fn parse_opencode_session(path: &Path, from: &str, to: &str) -> Option<CodexRepo
             let timestamp = msg.get("timestamp").and_then(Value::as_str).unwrap_or_default();
             let text = msg.get("content").and_then(extract_text_value);
 
-            if !timestamp.is_empty() {
-                update_bounds(&mut draft, timestamp);
+            if !timestamp.is_empty() && !is_in_range(timestamp, from, to) {
+                continue;
             }
 
             if role == "user" {
                 if let Some(t) = text.and_then(|s| clean_user_message(&s)) {
+                    update_bounds(&mut draft, timestamp);
                     draft.user_messages.push(t);
                 }
             } else if role == "assistant" {
                 if let Some(t) = text.and_then(|s| clean_result_message(&s)) {
+                    update_bounds(&mut draft, timestamp);
                     draft.assistant_messages.push(t);
                 }
             }
@@ -836,19 +866,6 @@ fn get_project_name(cwd: &str) -> String {
         .to_string()
 }
 
-fn message_content_text(payload: &Value) -> String {
-    payload
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("text").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn clean_user_message(text: &str) -> Option<String> {
     clean_report_text(text, 1_500, true)
 }
@@ -909,3 +926,39 @@ fn deduplicate(messages: Vec<String>) -> Vec<String> {
     }
     unique
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_parse_codex_session_and_directory_pruning() {
+        let temp_dir = std::env::temp_dir().join(format!("lumina_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let session_dir = temp_dir.join("2026").join("08").join("21");
+        fs::create_dir_all(&session_dir).expect("create temp dir");
+
+        let file_path = session_dir.join("rollout-2026-08-21T13-26-11-01a022c8-aac1-77f2-9f3e-dcc481ea205d.jsonl");
+        let mut file = File::create(&file_path).expect("create test file");
+        writeln!(file, r#"{{"timestamp":"2026-08-21T05:26:12.296Z","type":"session_meta","payload":{{"session_id":"01a022c8-aac1-77f2-9f3e-dcc481ea205d","cwd":"D:\\test_project"}}}}"#).unwrap();
+        writeln!(file, r#"{{"timestamp":"2026-08-25T02:59:50.846Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"帮我找一台离线电表"}}]}}}}"#).unwrap();
+        writeln!(file, r#"{{"timestamp":"2026-08-25T03:00:37.806Z","type":"response_item","payload":{{"type":"message","role":"assistant","phase":"final_answer","content":[{{"type":"output_text","text":"已定位到离线电表数据"}}]}}}}"#).unwrap();
+        drop(file);
+
+        let mut collected = Vec::new();
+        collect_codex_jsonl_files_pruned(&temp_dir, "2026-08-25", &mut collected);
+        assert_eq!(collected.len(), 1, "Should collect historical session file");
+
+        let session = parse_codex_session(&file_path, "2026-08-24T16:00:00.000Z", "2026-08-25T15:59:59.999Z")
+            .expect("should parse session");
+        assert_eq!(session.id, "01a022c8-aac1-77f2-9f3e-dcc481ea205d");
+        assert_eq!(session.user_messages.len(), 1);
+        assert!(session.user_messages[0].contains("帮我找一台离线电表"));
+        assert_eq!(session.assistant_messages.len(), 1);
+        assert!(session.assistant_messages[0].contains("已定位到离线电表数据"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}
+
