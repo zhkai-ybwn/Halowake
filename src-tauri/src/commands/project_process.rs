@@ -733,16 +733,54 @@ fn detect_urls(lines: &VecDeque<ProjectProcessLogLine>) -> Vec<String> {
 
 fn append_detected_ports(text: &str, ports: &mut Vec<u16>) {
     let text = strip_ansi(text);
-    for token in text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != ':' && ch != '.' && ch != '/') {
-        if let Some(port) = parse_port_token(token) {
+    let lower = text.to_lowercase();
+    if !lower.contains(':') && !lower.contains("port") {
+        return;
+    }
+
+    // 1. Check for localhost URLs and host:port tokens
+    for token in text.split_whitespace() {
+        let candidate = token
+            .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | '"' | '\'' | '|' | '`' | '#' | '!'))
+            .trim_end_matches('.')
+            .trim_end_matches(':')
+            .trim_end_matches(',');
+
+        if let Some(port) = extract_port_from_host_port(candidate) {
             if !ports.contains(&port) {
                 ports.push(port);
+            }
+        }
+    }
+
+    // 2. Check for explicit "port" keywords: e.g. "port: 3000", "port 3000", "port:3000", "PORT 8080"
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric() && c != ':' && c != '=');
+        if cleaned == "port" || cleaned == "port:" || cleaned == "port=" {
+            if let Some(next_word) = words.get(i + 1) {
+                let digits: String = next_word.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(port) = digits.parse::<u16>() {
+                    if (1024..=65535).contains(&port) && !ports.contains(&port) {
+                        ports.push(port);
+                    }
+                }
+            }
+        } else if let Some(rest) = cleaned.strip_prefix("port:").or_else(|| cleaned.strip_prefix("port=")) {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(port) = digits.parse::<u16>() {
+                if (1024..=65535).contains(&port) && !ports.contains(&port) {
+                    ports.push(port);
+                }
             }
         }
     }
 }
 
 fn append_detected_urls(text: &str, urls: &mut Vec<String>) {
+    if !text.contains("http://") && !text.contains("https://") {
+        return;
+    }
     let text = strip_ansi(text);
     for token in text.split_whitespace() {
         let candidate = token
@@ -759,6 +797,37 @@ fn append_detected_urls(text: &str, urls: &mut Vec<String>) {
     }
 }
 
+fn is_valid_local_host(host: &str) -> bool {
+    let host = host.trim_matches('[').trim_matches(']');
+    host == "localhost"
+        || host == "127.0.0.1"
+        || host == "0.0.0.0"
+        || host == "::1"
+        || host == "::"
+        || host.ends_with(".local")
+        || is_private_ip(host)
+}
+
+fn extract_port_from_host_port(token: &str) -> Option<u16> {
+    let without_protocol = token
+        .strip_prefix("https://")
+        .or_else(|| token.strip_prefix("http://"))
+        .unwrap_or(token);
+    let host_and_port = without_protocol.split('/').next().unwrap_or("");
+    if let Some(index) = host_and_port.rfind(':') {
+        let host = &host_and_port[..index];
+        let port_text = &host_and_port[index + 1..];
+        if is_valid_local_host(host) {
+            if let Ok(port) = port_text.parse::<u16>() {
+                if (1024..=65535).contains(&port) {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn is_localhost_url(url: &str) -> bool {
     let without_protocol = url
         .strip_prefix("https://")
@@ -771,11 +840,7 @@ fn is_localhost_url(url: &str) -> bool {
         .split(':')
         .next()
         .unwrap_or("");
-    host == "localhost"
-        || host == "127.0.0.1"
-        || host == "0.0.0.0"
-        || host.ends_with(".local")
-        || is_private_ip(host)
+    is_valid_local_host(host)
 }
 
 fn is_private_ip(host: &str) -> bool {
@@ -825,20 +890,6 @@ fn strip_ansi(text: &str) -> String {
         output.push(ch);
     }
     output
-}
-
-fn parse_port_token(token: &str) -> Option<u16> {
-    let port_text = if let Some(index) = token.rfind(':') {
-        &token[index + 1..]
-    } else {
-        return None;
-    };
-    let port = port_text.trim_matches('/').parse::<u16>().ok()?;
-    if (1024..=65535).contains(&port) {
-        Some(port)
-    } else {
-        None
-    }
 }
 
 fn clone_process(process: &ManagedProcess) -> ManagedProcess {
@@ -1282,6 +1333,23 @@ mod tests {
             *detected_urls.lock().unwrap(),
             vec!["http://localhost:4300/".to_string()]
         );
+    }
+
+    #[test]
+    fn ignores_file_locations_and_bundle_line_numbers_in_port_detection() {
+        let mut ports = Vec::new();
+        append_detected_ports("chunk-vendors.js:35788:12", &mut ports);
+        append_detected_ports("ERROR in ./src/app/component.ts:14884", &mut ports);
+        append_detected_ports("at Object.run (vendor.js:52164)", &mut ports);
+        append_detected_ports("main.ts:42544", &mut ports);
+        append_detected_ports("styles.js:53312", &mut ports);
+        assert!(ports.is_empty());
+
+        append_detected_ports("Local: http://localhost:4204/", &mut ports);
+        append_detected_ports("Server listening on port 3000", &mut ports);
+        append_detected_ports("Ready at http://127.0.0.1:8080", &mut ports);
+        ports.sort_unstable();
+        assert_eq!(ports, vec![3000, 4204, 8080]);
     }
 
     #[test]

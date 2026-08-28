@@ -245,7 +245,7 @@ async function handleAddProject() {
     return
   }
 
-  const project: DevDockProject = {
+  const project = reactive<DevDockProject>({
     path: selected,
     name: getProjectDisplayName(selected),
     loading: true,
@@ -253,7 +253,7 @@ async function handleAddProject() {
     manifest: null,
     openedAt: Date.now(),
     scanned: false,
-  }
+  })
   projects.value = [project, ...projects.value]
 
   try {
@@ -816,8 +816,8 @@ function processStatusLabel(process: ProjectProcessSnapshot) {
 }
 
 function processUrl(process: ProjectProcessSnapshot) {
-  const networkUrl = process.urls.find(url => !/\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(?=[:/])/i.test(url))
-  return networkUrl || process.urls[0] || ''
+  const localUrl = process.urls.find(url => /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(?=[:/])/i.test(url))
+  return localUrl || process.urls[0] || ''
 }
 
 async function openProcessUrl(process: ProjectProcessSnapshot) {
