@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Lumina
+description: Report a reproducible problem in Halowake
 title: '[Bug]: '
 labels:
   - bug
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Lumina version
+      label: Halowake version
       placeholder: e.g. 0.1.0
     validations:
       required: true

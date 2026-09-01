@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Lumina",
+  "productName": "Halowake",
   "version": "1.1.6",
   "identifier": "com.yubei.lumina",
-  "mainBinaryName": "Lumina",
+  "mainBinaryName": "Halowake",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "Lumina - Developer Assistant",
+        "title": "Halowake - AI Coding Companion",
         "width": 1280,
         "height": 820,
         "minWidth": 1120,
@@ -62,7 +62,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQjNFQzcyQ0ZDNkMzOEMKUldTTXc4YlBjdXl6a2dBU0NldjlKdVh5Tm42Wi9HQVlZK2U4N2c3RFVvT1hnNUVpNjg1Q3RDVnkK",
       "endpoints": [
-        "https://github.com/zhkai-ybwn/Lumina/releases/latest/download/latest.json"
+        "https://github.com/zhkai-ybwn/Halowake/releases/latest/download/latest.json"
       ]
     }
   }

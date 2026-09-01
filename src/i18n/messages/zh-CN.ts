@@ -126,11 +126,11 @@ export default {
     settingsDescription: '调整外观、语言、模型和应用行为',
   },
   topbar: {
-    titleGit: 'Lumina - Git Assistant',
-    titleDevDock: 'Lumina - DevDock',
-    titleCodexReport: 'Lumina - AI 工作日报',
-    titleAiQuota: 'Lumina - AI 额度中心',
-    titleSettings: 'Lumina - 设置',
+    titleGit: 'Halowake - Git Assistant',
+    titleDevDock: 'Halowake - DevDock',
+    titleCodexReport: 'Halowake - AI 工作日报',
+    titleAiQuota: 'Halowake - AI 额度中心',
+    titleSettings: 'Halowake - 设置',
     settings: '设置',
     toggleSidebar: '展开或收起侧边栏',
     commandPalette: '搜索功能或前往工作区',
@@ -142,7 +142,7 @@ export default {
     maximize: '最大化',
     restore: '还原窗口',
     close: '关闭',
-    exitTitle: '关闭 Lumina',
+    exitTitle: '关闭 Halowake',
     exitRunningHint: '以下项目仍在运行。退出会停止这些进程并释放对应端口。',
     exitIdleHint: '当前没有运行中的项目进程。',
     hideToTray: '最小化到托盘',
@@ -184,7 +184,7 @@ export default {
       dependencyCount: '{dependencies} / dev {devDependencies}',
     },
     empty: {
-      title: 'DevDock 已接入 Lumina',
+      title: 'DevDock 已接入 Halowake',
       description:
         '下一步会读取 package.json、识别 scripts、运行状态和端口。当前先共享项目目录，并预留项目运行控制台布局。',
       noManifest:
@@ -334,7 +334,7 @@ export default {
   },
   settings: {
     title: '设置中心',
-    description: '管理 Lumina 的应用偏好和 AI 配置。',
+    description: '管理 Halowake 的应用偏好和 AI 配置。',
     navSections: {
       app: '软件',
     },
@@ -346,13 +346,13 @@ export default {
       storage: '本地存储',
       models: '模型',
       routing: '任务路由',
-      about: '关于 Lumina',
+      about: '关于 Halowake',
     },
     save: '保存',
     cancel: '取消',
     language: {
       title: '语言设置',
-      description: '选择 Lumina 的显示语言。',
+      description: '选择 Halowake 的显示语言。',
       optionZh: '简体中文',
       optionEn: 'English',
     },
@@ -371,11 +371,11 @@ export default {
       hideToTray: '最小化到托盘',
       hideToTrayHint: '保持项目进程运行，并可从系统托盘重新打开。',
       exit: '退出并停止全部',
-      exitHint: '停止所有运行中的项目进程后退出 Lumina。',
+      exitHint: '停止所有运行中的项目进程后退出 Halowake。',
     },
     shortcuts: {
       title: '键盘快捷键',
-      description: '集中查看 Lumina 支持的快捷操作，按钮旁不再常驻显示按键提示。',
+      description: '集中查看 Halowake 支持的快捷操作，按钮旁不再常驻显示按键提示。',
       platformHint: '快捷键会根据当前操作系统自动使用 Ctrl 或 Command。',
       general: '通用',
       git: 'Git 工具',
@@ -389,7 +389,7 @@ export default {
     },
     storage: {
       title: '本地存储',
-      description: 'Lumina 的数据只保存在此设备。你可以查看磁盘占用并控制历史数据的保留时间。',
+      description: 'Halowake 的数据只保存在此设备。你可以查看磁盘占用并控制历史数据的保留时间。',
       refresh: '刷新',
       currentUsage: '当前占用',
       categories: {
@@ -400,7 +400,7 @@ export default {
         webview: '界面数据',
       },
       autoCleanup: '自动清理过期数据',
-      autoCleanupHint: '启动 Lumina 时检查一次，持续运行期间每 24 小时复查。',
+      autoCleanupHint: '启动 Halowake 时检查一次，持续运行期间每 24 小时复查。',
       retention: '默认保留时间',
       retentionHint: '历史、缓存和旧日志将在 {days} 天后过期。',
       retentionDisabledHint: '自动清理已关闭，数据不会按时间过期。',
@@ -452,7 +452,7 @@ export default {
       },
     },
     about: {
-      tagline: '面向开发者的本地工作台',
+      tagline: 'AI Coding 时代的本地开发伴侣',
       version: '版本',
       developer: '开发者',
       repository: '项目仓库',

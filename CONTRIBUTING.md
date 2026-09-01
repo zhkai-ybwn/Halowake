@@ -1,11 +1,11 @@
-# Contributing to Lumina
+# Contributing to Halowake
 
-Thanks for helping improve Lumina. The most useful contributions at this stage are reproducible bug reports, workflow feedback from real multi-project development, and small focused pull requests.
+Thanks for helping improve Halowake. The most useful contributions at this stage are reproducible bug reports, workflow feedback from real multi-project development, and small focused pull requests.
 
 ## Before opening an issue
 
 - Search existing issues first.
-- For a bug, include the Lumina version, operating system, project package manager, exact steps, expected behavior, and actual behavior.
+- For a bug, include the Halowake version, operating system, project package manager, exact steps, expected behavior, and actual behavior.
 - Do not include API keys, private repository URLs, internal hosts, or source code you cannot share.
 
 ## Local development
@@ -13,8 +13,8 @@ Thanks for helping improve Lumina. The most useful contributions at this stage a
 Requirements: Node.js 20+, Rust 1.77.2+, Git, and the Tauri 2 system prerequisites.
 
 ```bash
-git clone https://github.com/zhkai-ybwn/Lumina.git
-cd Lumina
+git clone https://github.com/zhkai-ybwn/Halowake.git
+cd Halowake
 npm install
 npm run tauri:dev
 ```

@@ -24,6 +24,7 @@ pub struct CodexProjectInfo {
     pub session_count: usize,
     pub last_active_at: Option<String>,
     pub provider: Option<String>,
+    pub providers: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -166,6 +167,57 @@ fn detect_installed_ai_tools_sync() -> Result<Vec<InstalledToolInfo>, String> {
     Ok(tools)
 }
 
+#[derive(Debug)]
+struct ProjectAccumulator {
+    name: String,
+    cwd: String,
+    session_count: usize,
+    last_active_at: Option<String>,
+    providers: Vec<String>,
+}
+
+fn record_project_activity(
+    project_map: &mut HashMap<String, ProjectAccumulator>,
+    cwd_raw: &str,
+    name_hint: Option<&str>,
+    timestamp: Option<String>,
+    provider: &str,
+    count: usize,
+) {
+    let normalized = normalize_project_path(cwd_raw);
+    if normalized.is_empty() {
+        return;
+    }
+    let key = normalized.to_lowercase();
+    let name = if let Some(hint) = name_hint {
+        if !hint.is_empty() && hint != "Outside of Project" {
+            hint.to_string()
+        } else {
+            get_project_name(&normalized)
+        }
+    } else {
+        get_project_name(&normalized)
+    };
+
+    let entry = project_map.entry(key).or_insert_with(|| ProjectAccumulator {
+        name,
+        cwd: normalized.clone(),
+        session_count: 0,
+        last_active_at: None,
+        providers: Vec::new(),
+    });
+
+    entry.session_count += count;
+    if !entry.providers.iter().any(|p| p == provider) {
+        entry.providers.push(provider.to_string());
+    }
+    if let Some(ts) = timestamp {
+        if entry.last_active_at.as_ref().map_or(true, |existing| &ts > existing) {
+            entry.last_active_at = Some(ts);
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn load_codex_projects() -> Result<Vec<CodexProjectInfo>, String> {
     tokio::task::spawn_blocking(load_codex_projects_sync)
@@ -175,7 +227,7 @@ pub async fn load_codex_projects() -> Result<Vec<CodexProjectInfo>, String> {
 
 fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     let home = get_home_dir()?;
-    let mut project_map: HashMap<String, (String, usize, Option<String>, String)> = HashMap::new();
+    let mut project_map: HashMap<String, ProjectAccumulator> = HashMap::new();
 
     // 1. Codex Projects
     let codex_dir = home.join(".codex").join("sessions");
@@ -184,14 +236,7 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
         let _ = collect_jsonl_files(&codex_dir, &mut session_files);
         for path in &session_files {
             if let Some((cwd, timestamp)) = extract_codex_session_meta(path) {
-                let name = get_project_name(&cwd);
-                let entry = project_map.entry(cwd.clone()).or_insert_with(|| (name, 0, None, "codex".to_string()));
-                entry.1 += 1;
-                if let Some(ts) = timestamp {
-                    if entry.2.as_ref().map_or(true, |existing| &ts > existing) {
-                        entry.2 = Some(ts);
-                    }
-                }
+                record_project_activity(&mut project_map, &cwd, None, timestamp, "codex", 1);
             }
         }
     }
@@ -205,13 +250,11 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
                 if path.is_dir() {
                     let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
                     let cwd = decode_claude_project_path(&folder_name);
-                    let name = get_project_name(&cwd);
                     let mut session_files = Vec::new();
                     let _ = collect_jsonl_files(&path, &mut session_files);
                     let count = session_files.len();
                     if count > 0 {
-                        let entry = project_map.entry(cwd.clone()).or_insert_with(|| (name, 0, None, "claude".to_string()));
-                        entry.1 += count;
+                        record_project_activity(&mut project_map, &cwd, None, None, "claude", count);
                     }
                 }
             }
@@ -234,13 +277,7 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
                                 .unwrap_or("");
                             let cwd = decode_uri_to_path(folder_uri).unwrap_or_else(|| name.clone());
                             if !name.is_empty() && name != "Outside of Project" {
-                                let entry = project_map.entry(cwd).or_insert_with(|| (name, 0, None, "antigravity".to_string()));
-                                entry.1 += 1;
-                                if let Some(ts) = updated_at {
-                                    if entry.2.as_ref().map_or(true, |existing| &ts > existing) {
-                                        entry.2 = Some(ts);
-                                    }
-                                }
+                                record_project_activity(&mut project_map, &cwd, Some(&name), updated_at, "antigravity", 1);
                             }
                         }
                     }
@@ -250,13 +287,23 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     }
 
     let mut projects: Vec<CodexProjectInfo> = project_map
-        .into_iter()
-        .map(|(cwd, (name, count, last_active, provider))| CodexProjectInfo {
-            name,
-            cwd,
-            session_count: count,
-            last_active_at: last_active,
-            provider: Some(provider),
+        .into_values()
+        .map(|acc| {
+            let provider = if acc.providers.len() == 1 {
+                acc.providers.first().cloned()
+            } else if acc.providers.is_empty() {
+                None
+            } else {
+                Some("multi".to_string())
+            };
+            CodexProjectInfo {
+                name: acc.name,
+                cwd: acc.cwd,
+                session_count: acc.session_count,
+                last_active_at: acc.last_active_at,
+                provider,
+                providers: acc.providers,
+            }
         })
         .collect();
 
@@ -499,7 +546,9 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
             }
             if let Some(cwd) = payload.get("cwd").and_then(Value::as_str) {
                 if !cwd.is_empty() {
-                    draft.cwd = Some(cwd.to_string());
+                    let norm_cwd = normalize_project_path(cwd);
+                    draft.project_name = get_project_name(&norm_cwd);
+                    draft.cwd = Some(norm_cwd);
                 }
             }
             continue;
@@ -614,28 +663,35 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
 fn parse_antigravity_transcript(
     path: &Path,
     conv_id: &str,
-    project_mappings: &HashMap<String, (String, String)>,
+    project_mappings: &[(String, String)],
     from: &str,
     to: &str,
 ) -> Option<CodexReportSession> {
     let file = fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
-    let (project_name, cwd) = project_mappings
-        .get(conv_id)
-        .cloned()
-        .unwrap_or_else(|| ("Antigravity Project".to_string(), "".to_string()));
-
     let mut draft = SessionDraft {
         id: conv_id.to_string(),
         provider: "antigravity".to_string(),
-        cwd: if cwd.is_empty() { None } else { Some(cwd.clone()) },
-        project_name: project_name.clone(),
         ..Default::default()
     };
 
+    let mut inferred_project_name: Option<String> = None;
+    let mut inferred_cwd: Option<String> = None;
+
     for line_res in reader.lines() {
         let Ok(line) = line_res else { continue; };
+
+        if inferred_cwd.is_none() {
+            for (pname, pcwd) in project_mappings {
+                if line.to_lowercase().contains(&pcwd.to_lowercase()) || line.contains(pname) {
+                    inferred_project_name = Some(pname.clone());
+                    inferred_cwd = Some(pcwd.clone());
+                    break;
+                }
+            }
+        }
+
         // Fast skip lines that are not user input or planner response
         if !line.contains("\"USER_INPUT\"") && !line.contains("\"PLANNER_RESPONSE\"") {
             continue;
@@ -668,14 +724,15 @@ fn parse_antigravity_transcript(
                 }
             }
         } else if entry_type == "PLANNER_RESPONSE" {
-            if draft.cwd.is_none() {
+            if inferred_cwd.is_none() {
                 if let Some(tool_calls) = entry.get("tool_calls").and_then(Value::as_array) {
                     for call in tool_calls {
                         if let Some(args) = call.get("args") {
                             if let Some(dir) = args.get("SearchDirectory").or_else(|| args.get("Cwd")).and_then(Value::as_str) {
                                 let dir_clean = dir.trim_matches('"');
-                                draft.cwd = Some(dir_clean.to_string());
-                                draft.project_name = get_project_name(dir_clean);
+                                let norm_dir = normalize_project_path(dir_clean);
+                                inferred_cwd = Some(norm_dir.clone());
+                                inferred_project_name = Some(get_project_name(&norm_dir));
                                 break;
                             }
                         }
@@ -692,6 +749,11 @@ fn parse_antigravity_transcript(
             }
         }
     }
+
+    draft.cwd = inferred_cwd;
+    draft.project_name = inferred_project_name.unwrap_or_else(|| {
+        draft.cwd.as_deref().map(get_project_name).unwrap_or_else(|| "Antigravity Project".to_string())
+    });
 
     finalize_draft(draft, from, to)
 }
@@ -779,8 +841,29 @@ fn extract_agy_user_request(content: &str) -> String {
     content.trim().to_string()
 }
 
-fn load_antigravity_project_mappings(home: &Path) -> HashMap<String, (String, String)> {
-    let mut mappings = HashMap::new();
+pub fn normalize_project_path(raw: &str) -> String {
+    let mut p = raw.trim().replace('/', "\\");
+    if let Some(stripped) = p.strip_prefix("file:\\\\\\") {
+        p = stripped.to_string();
+    } else if let Some(stripped) = p.strip_prefix("file:\\\\") {
+        p = stripped.to_string();
+    } else if let Some(stripped) = p.strip_prefix("file:\\") {
+        p = stripped.to_string();
+    }
+    p = p.replace("%3A", ":").replace("%3a", ":");
+
+    if p.len() >= 2 && p.chars().nth(1) == Some(':') {
+        let drive = p.chars().next().unwrap().to_ascii_uppercase();
+        p = format!("{}{}", drive, &p[1..]);
+    }
+    while p.len() > 3 && p.ends_with('\\') {
+        p.pop();
+    }
+    p
+}
+
+fn load_antigravity_project_mappings(home: &Path) -> Vec<(String, String)> {
+    let mut mappings = Vec::new();
     let config_projects = home.join(".gemini").join("config").join("projects");
     if config_projects.exists() {
         if let Ok(entries) = fs::read_dir(config_projects) {
@@ -794,8 +877,9 @@ fn load_antigravity_project_mappings(home: &Path) -> HashMap<String, (String, St
                                 .and_then(Value::as_str)
                                 .unwrap_or("");
                             let cwd = decode_uri_to_path(folder_uri).unwrap_or_else(|| name.clone());
+                            let norm_cwd = normalize_project_path(&cwd);
                             if !name.is_empty() && name != "Outside of Project" {
-                                mappings.insert(name.clone(), (name, cwd));
+                                mappings.push((name, norm_cwd));
                             }
                         }
                     }
@@ -809,7 +893,7 @@ fn load_antigravity_project_mappings(home: &Path) -> HashMap<String, (String, St
 fn decode_claude_project_path(folder_name: &str) -> String {
     let s = folder_name.replace("__", "\\").replace('_', "\\");
     if s.len() > 2 && s.chars().nth(1) == Some(':') {
-        s
+        normalize_project_path(&s)
     } else {
         folder_name.to_string()
     }
@@ -818,7 +902,7 @@ fn decode_claude_project_path(folder_name: &str) -> String {
 fn decode_uri_to_path(uri: &str) -> Option<String> {
     if let Some(stripped) = uri.strip_prefix("file:///") {
         let decoded = stripped.replace("%3A", ":").replace("%3a", ":").replace('/', "\\");
-        return Some(decoded);
+        return Some(normalize_project_path(&decoded));
     }
     None
 }
@@ -858,7 +942,8 @@ fn update_bounds(draft: &mut SessionDraft, timestamp: &str) {
 }
 
 fn get_project_name(cwd: &str) -> String {
-    let path = Path::new(cwd);
+    let normalized = normalize_project_path(cwd);
+    let path = Path::new(&normalized);
     path.file_name()
         .and_then(|n| n.to_str())
         .filter(|s| !s.is_empty())
@@ -959,6 +1044,20 @@ mod tests {
         assert!(session.assistant_messages[0].contains("已定位到离线电表数据"));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_multi_provider_project_aggregation_and_path_normalization() {
+        let mut project_map = HashMap::new();
+        record_project_activity(&mut project_map, "D:\\ly_project\\ami-insight", None, Some("2026-08-28T06:00:00Z".to_string()), "codex", 13);
+        record_project_activity(&mut project_map, "d:/ly_project/ami-insight", Some("ami-insight"), Some("2026-08-28T09:00:00Z".to_string()), "antigravity", 1);
+
+        assert_eq!(project_map.len(), 1, "Should merge different casings/slashes into 1 project");
+        let proj = project_map.values().next().unwrap();
+        assert_eq!(proj.name, "ami-insight");
+        assert_eq!(proj.session_count, 14);
+        assert_eq!(proj.providers, vec!["codex".to_string(), "antigravity".to_string()]);
+        assert_eq!(proj.last_active_at, Some("2026-08-28T09:00:00Z".to_string()));
     }
 }
 

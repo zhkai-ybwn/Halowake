@@ -3,7 +3,7 @@
     <header class="about-identity">
       <img src="@/assets/logo.png" alt="" />
       <div>
-        <h2>Lumina</h2>
+        <h2>Halowake</h2>
         <p>{{ t('settings.about.tagline') }}</p>
       </div>
     </header>
@@ -56,7 +56,7 @@
       <div class="about-row">
         <dt>
           <span>{{ t('settings.about.repository') }}</span>
-          <small>zhkai-ybwn/Lumina</small>
+          <small>zhkai-ybwn/Halowake</small>
         </dt>
         <dd>
           <button type="button" @click="openLink(REPOSITORY_URL)">
@@ -83,7 +83,7 @@ import { getApplicationVersion, openExternalUrl } from '@/services/app-service'
 import { useUpdaterStore } from '@/stores/updater'
 
 const DEVELOPER_URL = 'https://github.com/zhkai-ybwn'
-const REPOSITORY_URL = 'https://github.com/zhkai-ybwn/Lumina'
+const REPOSITORY_URL = 'https://github.com/zhkai-ybwn/Halowake'
 
 const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()

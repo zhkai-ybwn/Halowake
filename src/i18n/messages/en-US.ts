@@ -78,7 +78,7 @@ export default {
     copyWorkRecord: 'Copy Work Facts',
     editorPlaceholder: 'Load and select sessions, then prepare the work record.',
     noWorkRecord: 'No work record yet.',
-    footerHint: 'Lumina suggests exclusions; you can include any session and regenerate at any time.',
+    footerHint: 'Halowake suggests exclusions; you can include any session and regenerate at any time.',
     promptTemplate: 'Prompt Template',
     combinedCopied: 'Copied [Prompt + Work Facts], ready to paste into web AI!',
     copyForAi: 'Copy for Web AI',
@@ -126,11 +126,11 @@ export default {
     settingsDescription: 'Adjust appearance, language, models, and app behavior',
   },
   topbar: {
-    titleGit: 'Lumina - Git Assistant',
-    titleDevDock: 'Lumina - DevDock',
-    titleCodexReport: 'Lumina - AI Work Report',
-    titleAiQuota: 'Lumina - AI Quotas',
-    titleSettings: 'Lumina - Settings',
+    titleGit: 'Halowake - Git Assistant',
+    titleDevDock: 'Halowake - DevDock',
+    titleCodexReport: 'Halowake - AI Work Report',
+    titleAiQuota: 'Halowake - AI Quotas',
+    titleSettings: 'Halowake - Settings',
     settings: 'Settings',
     toggleSidebar: 'Expand or collapse sidebar',
     commandPalette: 'Search features or go to a workspace',
@@ -142,7 +142,7 @@ export default {
     maximize: 'Maximize',
     restore: 'Restore window',
     close: 'Close',
-    exitTitle: 'Close Lumina',
+    exitTitle: 'Close Halowake',
     exitRunningHint:
       'These projects are still running. Exiting stops them and releases their ports.',
     exitIdleHint: 'No project processes are currently running.',
@@ -185,7 +185,7 @@ export default {
       dependencyCount: '{dependencies} / dev {devDependencies}',
     },
     empty: {
-      title: 'DevDock is connected to Lumina',
+      title: 'DevDock is connected to Halowake',
       description:
         'Next, DevDock will read package.json, detect scripts, running services, and ports. For now it shares the selected project directory and reserves the project control console layout.',
       noManifest:
@@ -338,7 +338,7 @@ export default {
   },
   settings: {
     title: 'Settings',
-    description: 'Manage Lumina application preferences and AI configuration.',
+    description: 'Manage Halowake application preferences and AI configuration.',
     navSections: {
       app: 'Application',
     },
@@ -350,13 +350,13 @@ export default {
       storage: 'Local Storage',
       models: 'Models',
       routing: 'Task Routing',
-      about: 'About Lumina',
+      about: 'About Halowake',
     },
     save: 'Save',
     cancel: 'Cancel',
     language: {
       title: 'Language',
-      description: 'Choose the display language for Lumina.',
+      description: 'Choose the display language for Halowake.',
       optionZh: 'Simplified Chinese',
       optionEn: 'English',
     },
@@ -369,17 +369,17 @@ export default {
     },
     closeBehavior: {
       title: 'Close behavior',
-      description: 'Choose what happens when you close Lumina or its window.',
+      description: 'Choose what happens when you close Halowake or its window.',
       ask: 'Ask every time',
       askHint: 'Show a confirmation window so you can decide for each close.',
       hideToTray: 'Minimize to tray',
-      hideToTrayHint: 'Keep project processes running and reopen Lumina from the system tray.',
+      hideToTrayHint: 'Keep project processes running and reopen Halowake from the system tray.',
       exit: 'Exit and stop all',
-      exitHint: 'Stop all running project processes, then exit Lumina.',
+      exitHint: 'Stop all running project processes, then exit Halowake.',
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',
-      description: 'Find Lumina keyboard actions in one place without persistent hints beside buttons.',
+      description: 'Find Halowake keyboard actions in one place without persistent hints beside buttons.',
       platformHint: 'Shortcuts automatically use Ctrl or Command for the current operating system.',
       general: 'General',
       git: 'Git Tools',
@@ -393,7 +393,7 @@ export default {
     },
     storage: {
       title: 'Local Storage',
-      description: 'Lumina keeps its data on this device. Review disk usage and control how long history is retained.',
+      description: 'Halowake keeps its data on this device. Review disk usage and control how long history is retained.',
       refresh: 'Refresh',
       currentUsage: 'Current usage',
       categories: {
@@ -404,7 +404,7 @@ export default {
         webview: 'Interface data',
       },
       autoCleanup: 'Automatically clean expired data',
-      autoCleanupHint: 'Check when Lumina starts and every 24 hours while it remains open.',
+      autoCleanupHint: 'Check when Halowake starts and every 24 hours while it remains open.',
       retention: 'Default retention',
       retentionHint: 'History, cache, and old logs expire after {days} days.',
       retentionDisabledHint: 'Automatic cleanup is off, so data will not expire by age.',
@@ -457,7 +457,7 @@ export default {
       },
     },
     about: {
-      tagline: 'A local workbench for developers',
+      tagline: 'A local-first companion for AI coding workflows.',
       version: 'Version',
       developer: 'Developer',
       repository: 'Repository',

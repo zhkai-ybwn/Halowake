@@ -395,8 +395,13 @@
                   <div class="project-info">
                     <div class="project-name-row">
                       <span class="project-name">{{ project.name }}</span>
-                      <span v-if="project.provider" class="project-prov-badge" :class="`prov-${project.provider}`">
-                        {{ getProviderLabel(project.provider) }}
+                      <span
+                        v-for="prov in (project.providers?.length ? project.providers : (project.provider ? [project.provider] : []))"
+                        :key="prov"
+                        class="project-prov-badge"
+                        :class="`prov-${prov}`"
+                      >
+                        {{ getProviderLabel(prov) }}
                       </span>
                       <span v-if="project.sessionCount" class="project-count-badge">
                         {{ t('codexReport.sessionsCountBadge', { count: project.sessionCount }) }}
@@ -638,18 +643,44 @@ const promptDraft = ref(webAiPrompt.value)
 const allProjectList = computed<CodexProjectInfo[]>(() => {
   const map = new Map<string, CodexProjectInfo>()
   for (const p of availableProjects.value) {
-    if (p.name) map.set(p.name, { ...p })
+    if (!p.name) continue
+    const existing = map.get(p.name)
+    if (!existing) {
+      map.set(p.name, {
+        ...p,
+        providers: p.providers || (p.provider ? [p.provider] : []),
+      })
+    } else {
+      const combinedProviders = Array.from(
+        new Set([...(existing.providers || []), ...(p.providers || []), ...(p.provider ? [p.provider] : [])])
+      )
+      map.set(p.name, {
+        name: p.name,
+        cwd: existing.cwd || p.cwd,
+        sessionCount: (existing.sessionCount || 0) + (p.sessionCount || 0),
+        lastActiveAt: [existing.lastActiveAt, p.lastActiveAt].filter(Boolean).sort().at(-1) ?? null,
+        provider: combinedProviders.length === 1 ? combinedProviders[0] : 'multi',
+        providers: combinedProviders,
+      })
+    }
   }
   for (const s of sessions.value) {
     const name = s.projectName || getProjectName(s.cwd)
-    if (!map.has(name)) {
+    const existing = map.get(name)
+    if (!existing) {
       map.set(name, {
         name,
         cwd: s.cwd || name,
         sessionCount: 1,
         lastActiveAt: s.startedAt,
         provider: s.provider,
+        providers: s.provider ? [s.provider] : [],
       })
+    } else if (s.provider && !existing.providers?.includes(s.provider)) {
+      existing.providers = [...(existing.providers || []), s.provider]
+      if (existing.providers.length > 1) {
+        existing.provider = 'multi'
+      }
     }
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
@@ -721,6 +752,15 @@ watch(selectedProjects, val => {
     // Ignore storage errors
   }
 }, { deep: true })
+
+watch(
+  () => [dateRange.value?.[0], dateRange.value?.[1], selectedProvider.value],
+  ([start, end, prov], [oldStart, oldEnd, oldProv]) => {
+    if (start && end && (start !== oldStart || end !== oldEnd || prov !== oldProv)) {
+      void loadSessions()
+    }
+  }
+)
 
 onMounted(() => {
   void Promise.allSettled([

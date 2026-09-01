@@ -12,6 +12,7 @@ export interface CodexProjectInfo {
   sessionCount: number
   lastActiveAt?: string | null
   provider?: string | null
+  providers?: string[]
 }
 
 export interface CodexReportSession {

@@ -2230,11 +2230,11 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             Some("192.168.0.127")
         );
         assert_eq!(
-            remote_host_from_url("https://github.com/zhkai-ybwn/Lumina.git").as_deref(),
+            remote_host_from_url("https://github.com/zhkai-ybwn/Halowake.git").as_deref(),
             Some("github.com")
         );
         assert_eq!(
-            remote_host_from_url("git@github.com:zhkai-ybwn/Lumina.git").as_deref(),
+            remote_host_from_url("git@github.com:zhkai-ybwn/Halowake.git").as_deref(),
             Some("github.com")
         );
     }

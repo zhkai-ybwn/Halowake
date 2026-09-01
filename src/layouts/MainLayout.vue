@@ -10,7 +10,7 @@
         <WorkbenchIconButton icon="solar:sidebar-minimalistic-linear" :label="t('topbar.toggleSidebar')" :active="!sidebarCollapsed" @click.stop="toggleSidebar" @dblclick.stop />
         <div class="titlebar-identity" data-tauri-drag-region>
           <img src="@/assets/logo.png" alt="" data-tauri-drag-region />
-          <div data-tauri-drag-region><strong data-tauri-drag-region>Lumina</strong><span data-tauri-drag-region>{{ currentModuleLabel }}</span></div>
+          <div data-tauri-drag-region><strong data-tauri-drag-region>Halowake</strong><span data-tauri-drag-region>{{ currentModuleLabel }}</span></div>
         </div>
       </div>
 
