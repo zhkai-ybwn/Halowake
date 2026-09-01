@@ -1,6 +1,6 @@
 [package]
 name = "lumina"
-version = "1.1.6"
+version = "1.2.0"
 description = "Halowake - A local-first companion for AI coding workflows"
 authors = ["Halowake contributors"]
 license = "MIT"
