@@ -128,7 +128,7 @@ pub fn get_storage_overview(app: AppHandle) -> Result<StorageOverview, String> {
         .app_log_dir()
         .map_err(|error| format!("解析应用日志目录失败: {error}"))?;
 
-    // Only count Lumina-owned targets. Tauri may map config and data to the same
+    // Only count Halowake-owned targets. Tauri may map config and data to the same
     // platform directory, so scanning their roots would double-count data.
     let configuration_bytes = ["ai-settings.json", STORAGE_SETTINGS_FILE]
         .iter()

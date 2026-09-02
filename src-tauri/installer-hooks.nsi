@@ -1,4 +1,4 @@
-; Lumina Windows NSIS Installer Hooks
+; Halowake Windows NSIS Installer Hooks
 ; Comprehensive lifecycle & shortcut management:
 ; 1. Terminates orphan dev server processes & main processes before replacing binaries.
 ; 2. Enforces single-instance desktop shortcut and cleans up duplicate/stale/cross-context shortcuts.

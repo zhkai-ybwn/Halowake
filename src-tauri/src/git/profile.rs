@@ -188,7 +188,7 @@ fn ensure_local_exclude(repo_root: &str) -> Result<(), String> {
 fn read_profile(repo_root: &str, created: bool) -> Result<GitProjectProfileFile, String> {
     let path = profile_path(repo_root);
     let content = fs::read_to_string(&path)
-        .map_err(|e| format!("读取 Lumina 项目配置失败 {}: {}", path.display(), e))?;
+        .map_err(|e| format!("读取 Halowake 项目配置失败 {}: {}", path.display(), e))?;
 
     Ok(GitProjectProfileFile {
         repo_root: repo_root.to_string(),
@@ -209,14 +209,14 @@ pub fn ensure_project_profile(repo_path: &str) -> Result<GitProjectProfileFile, 
 
     let parent = path
         .parent()
-        .ok_or_else(|| format!("无法解析 Lumina 项目配置目录: {}", path.display()))?;
+        .ok_or_else(|| format!("无法解析 Halowake 项目配置目录: {}", path.display()))?;
     fs::create_dir_all(parent)
-        .map_err(|e| format!("创建 Lumina 项目配置目录失败 {}: {}", parent.display(), e))?;
+        .map_err(|e| format!("创建 Halowake 项目配置目录失败 {}: {}", parent.display(), e))?;
 
     let content = serde_json::to_string_pretty(&default_profile(&root))
-        .map_err(|e| format!("生成 Lumina 项目配置失败: {}", e))?;
+        .map_err(|e| format!("生成 Halowake 项目配置失败: {}", e))?;
     fs::write(&path, content)
-        .map_err(|e| format!("写入 Lumina 项目配置失败 {}: {}", path.display(), e))?;
+        .map_err(|e| format!("写入 Halowake 项目配置失败 {}: {}", path.display(), e))?;
 
     read_profile(&root, true)
 }
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn project_profile_is_ignored_in_local_git_exclude() {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let repo = std::env::temp_dir().join(format!("lumina-profile-test-{unique}"));
+        let repo = std::env::temp_dir().join(format!("halowake-profile-test-{unique}"));
         fs::create_dir_all(&repo).unwrap();
         assert!(Command::new("git").arg("init").arg(&repo).status().unwrap().success());
 
@@ -256,17 +256,17 @@ pub fn save_project_profile(repo_path: &str, content: &str) -> Result<GitProject
     let root = repo_root(repo_path)?;
     let path = profile_path(&root);
     let parsed: Value = serde_json::from_str(content)
-        .map_err(|e| format!("Lumina 项目配置不是合法 JSON: {}", e))?;
+        .map_err(|e| format!("Halowake 项目配置不是合法 JSON: {}", e))?;
     let pretty = serde_json::to_string_pretty(&parsed)
-        .map_err(|e| format!("格式化 Lumina 项目配置失败: {}", e))?;
+        .map_err(|e| format!("格式化 Halowake 项目配置失败: {}", e))?;
 
     let parent = path
         .parent()
-        .ok_or_else(|| format!("无法解析 Lumina 项目配置目录: {}", path.display()))?;
+        .ok_or_else(|| format!("无法解析 Halowake 项目配置目录: {}", path.display()))?;
     fs::create_dir_all(parent)
-        .map_err(|e| format!("创建 Lumina 项目配置目录失败 {}: {}", parent.display(), e))?;
+        .map_err(|e| format!("创建 Halowake 项目配置目录失败 {}: {}", parent.display(), e))?;
     fs::write(&path, pretty)
-        .map_err(|e| format!("保存 Lumina 项目配置失败 {}: {}", path.display(), e))?;
+        .map_err(|e| format!("保存 Halowake 项目配置失败 {}: {}", path.display(), e))?;
 
     read_profile(&root, false)
 }

@@ -13,6 +13,10 @@ import {
   saveGitCommitHistory as invokeSaveGitCommitHistory,
   type GitCommitHistoryRecord,
 } from '@/services/git/git-history-service'
+import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
+import { getRepoDisplayName } from './utils'
+
+const MAX_COMMIT_MESSAGE_HISTORY = 20
 
 export type CommitMessageHistoryEntry = GitCommitHistoryRecord
 

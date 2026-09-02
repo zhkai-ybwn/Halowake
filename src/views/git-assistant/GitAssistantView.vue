@@ -320,7 +320,8 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :mask-closable="true">
+      <!-- Filterable selects teleport their menus; keep this modal focus policy intact. -->
+      <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
         <WorkbenchSheet
           icon="solar:branching-paths-down-linear"
           :title="t('gitAssistant.repo.manageBranches')"
@@ -453,7 +454,8 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="mergeDialogOpen" class="repository-action-modal" :mask-closable="true">
+      <!-- Same focus policy as the branch modal for the filterable merge-source select. -->
+      <NModal v-model:show="mergeDialogOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
         <WorkbenchSheet
           icon="solar:branching-paths-up-linear"
           :title="t('gitAssistant.repo.mergeBranch')"
@@ -655,22 +657,11 @@
 </template>
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSelect, type SelectGroupOption, type SelectOption } from 'naive-ui'
-import { open } from '@tauri-apps/plugin-dialog'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { NButton, NCheckbox, NInput, NModal, NSelect } from 'naive-ui'
 import { useLocale } from '@/hooks/useLocale'
 import {
-  cloneGitRepository,
-  checkoutGitRemoteBranch,
-  createGitBranch,
-  initGitRepository,
-  mergeGitBranch,
   openGitFileExternal,
   revertGitFile,
-  stageGitFiles,
-  scoreGitReviewFiles,
-  switchGitBranch,
-  unstageGitFiles,
 } from '@/services/git/git-service'
 import { openGitLogWindow } from '@/services/git/git-log-window'
 import { openGitDiffWindow } from '@/services/git/git-diff-window'
@@ -687,7 +678,7 @@ import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
 import WorkbenchSplitHandle from '@/components/workbench/WorkbenchSplitHandle.vue'
 import WorkbenchSheet from '@/components/workbench/WorkbenchSheet.vue'
 import { GIT_REPO_STORAGE_KEY } from './git-assistant.config'
-import { useGitSnapshot, useGitDiff, useGitRemote, useGitCommit } from '@/composables/git-assistant'
+import { useGitSnapshot, useGitDiff, useGitRemote, useGitCommit, useGitWorkspaceLayout, useGitReview, useGitBranchOptions, useGitRepositorySetup, useGitBranchActions, useGitStaging, useGitConflictDialog } from '@/composables/git-assistant'
 import {
   normalizePath,
   getFileName,
@@ -695,15 +686,11 @@ import {
   formatHistoryTime,
 } from '@/composables/git-assistant/utils'
 import type { GitFileStatus } from '@/types/git'
-import { useReviewStore } from '@/stores/review'
-import { listenLocalCodeReview } from '@/services/review-service'
-import type { ReviewBudgetMode } from '@/types/review'
 
 const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffViewer.vue'))
 
 const { t } = useLocale()
 const aiSettings = useAiSettingsStore()
-const reviewStore = useReviewStore()
 
 // ── Composables ──
 const {
@@ -717,7 +704,7 @@ const {
 function clearReviewSelection() { reviewSelectedRaws.value = [] }
 
 const {
-  currentDiff, diffMode, diffLoading, showDiff, activeFileRaw,
+  currentDiff, diffMode, diffLoading, showDiff, activeFileRaw, loadDiffForFile,
 } = useGitDiff(() => displayRepoPath.value, (msg) => { error.value = msg })
 
 const {
@@ -746,146 +733,19 @@ const {
 )
 
 // ── UI-only state ──
-type GitWorkspacePanel = 'changes' | 'diff' | 'commit'
-
-interface GitWorkspaceLayout {
-  visible: Record<GitWorkspacePanel, boolean>
-  widths: {
-    changes: number
-    commit: number
-  }
-}
-
-const GIT_WORKSPACE_LAYOUT_STORAGE_KEY = 'lumina.gitAssistant.workspaceLayout.v1'
-const SPLIT_HANDLE_WIDTH = 7
-const DIFF_MIN_WIDTH = 220
-const PANEL_LIMITS = {
-  changes: { min: 280, default: 340 },
-  commit: { min: 300, default: 320 },
-} as const
-const DEFAULT_PANEL_LAYOUT: GitWorkspaceLayout = {
-  visible: { changes: true, diff: true, commit: true },
-  widths: { changes: PANEL_LIMITS.changes.default, commit: PANEL_LIMITS.commit.default },
-}
-
-const workspaceBody = ref<HTMLElement | null>(null)
-const workspaceWidth = ref(0)
-const panelLayout = ref<GitWorkspaceLayout>(loadPanelLayout())
-let workspaceResizeObserver: ResizeObserver | null = null
+const {
+  PANEL_LIMITS, workspaceBody, panelLayout, workspaceGridStyle, effectiveCommitWidth, commitMaxWidth,
+  leadingHandleLabel, leadingHandleValue, leadingHandleMin, leadingHandleMax,
+  togglePanel, resetPanelLayout, resetPanelWidth, resizeCommitPanel, resizeLeadingPanel, resetLeadingPanelWidth,
+  observeWorkspaceBody, disconnectWorkspaceObserver,
+} = useGitWorkspaceLayout(t)
 
 const keyword = ref('')
 const statusFilter = ref<GitAssistantStatusFilter>('all')
 const recommendedOnly = ref(false)
 const recentRepoManagerOpen = ref(false)
 const repositoryRulesOpen = ref(false)
-const branchLoading = ref(false)
-const branchSelectorOpen = ref(false)
-const branchSelectionValue = ref<string | null>(null)
-const newBranchDraft = ref('')
-const mergeDialogOpen = ref(false)
-const mergeLoading = ref(false)
-const mergeSourceValue = ref<string | null>(null)
-const mergeMode = ref<'default' | 'no-ff'>('default')
-const conflictDialogOpen = ref(false)
-const conflictSelectedPaths = ref<string[]>([])
-const repositorySetupOpen = ref(false)
-const repositorySetupMode = ref<'init' | 'clone'>('init')
-const repositoryLoading = ref(false)
-const repositoryPathDraft = ref('')
-const cloneUrlDraft = ref('')
-const reviewScores = ref(new Map<string, { score: number; categories: string[]; scoreBreakdown: Array<{ factor: string; delta: number; evidence: string }>; eligible: boolean; skipped: boolean }>())
-const reviewScoring = ref(false)
-const reviewPanelOpen = ref(false)
-const reviewPanelRevision = ref(0)
-const reviewScoreProgress = ref({ completed: 0, total: 0, phase: '', filePath: '' })
-let reviewScoreRequestId = 0
-let unlistenReviewScoreProgress: UnlistenFn | null = null
-let unlistenLocalReview: UnlistenFn | null = null
-
 // ── Computed ──
-const visiblePanelCount = computed(() => Object.values(panelLayout.value.visible).filter(Boolean).length)
-const storedCommitWidth = computed(() => Math.max(panelLayout.value.widths.commit, PANEL_LIMITS.commit.min))
-const changesMaxWidth = computed(() => {
-  const visible = panelLayout.value.visible
-  const reservedDiff = visible.diff ? DIFF_MIN_WIDTH : 0
-  const reservedCommit = visible.commit
-    ? (visible.diff ? storedCommitWidth.value : PANEL_LIMITS.commit.min)
-    : 0
-  const handles = Math.max(0, visiblePanelCount.value - 1) * SPLIT_HANDLE_WIDTH
-  return Math.max(
-    PANEL_LIMITS.changes.min,
-    (workspaceWidth.value || 1280) - reservedDiff - reservedCommit - handles,
-  )
-})
-const effectiveChangesWidth = computed(() => clamp(
-  panelLayout.value.widths.changes,
-  PANEL_LIMITS.changes.min,
-  changesMaxWidth.value,
-))
-const commitMaxWidth = computed(() => {
-  const visible = panelLayout.value.visible
-  const reservedDiff = visible.diff ? DIFF_MIN_WIDTH : 0
-  const reservedChanges = visible.changes
-    ? (visible.diff ? effectiveChangesWidth.value : PANEL_LIMITS.changes.min)
-    : 0
-  const handles = Math.max(0, visiblePanelCount.value - 1) * SPLIT_HANDLE_WIDTH
-  return Math.max(
-    PANEL_LIMITS.commit.min,
-    (workspaceWidth.value || 1280) - reservedDiff - reservedChanges - handles,
-  )
-})
-const effectiveCommitWidth = computed(() => clamp(
-  panelLayout.value.widths.commit,
-  PANEL_LIMITS.commit.min,
-  commitMaxWidth.value,
-))
-const leadingHandleControlsCommit = computed(() => (
-  panelLayout.value.visible.changes
-  && !panelLayout.value.visible.diff
-  && panelLayout.value.visible.commit
-))
-const leadingHandleLabel = computed(() => t(
-  leadingHandleControlsCommit.value
-    ? 'gitAssistant.layout.resizeCommit'
-    : 'gitAssistant.layout.resizeChanges',
-))
-const leadingHandleValue = computed(() => (
-  leadingHandleControlsCommit.value ? effectiveCommitWidth.value : effectiveChangesWidth.value
-))
-const leadingHandleMin = computed(() => (
-  leadingHandleControlsCommit.value ? PANEL_LIMITS.commit.min : PANEL_LIMITS.changes.min
-))
-const leadingHandleMax = computed(() => (
-  leadingHandleControlsCommit.value ? commitMaxWidth.value : changesMaxWidth.value
-))
-const workspaceGridStyle = computed(() => {
-  const visible = panelLayout.value.visible
-  const columns: string[] = []
-
-  if (visible.changes) {
-    columns.push(
-      visiblePanelCount.value === 1
-        ? 'minmax(0, 1fr)'
-        : !visible.diff && visible.commit
-          ? `minmax(${PANEL_LIMITS.changes.min}px, 1fr)`
-          : `${effectiveChangesWidth.value}px`,
-    )
-    if (visible.diff || visible.commit) columns.push(`${SPLIT_HANDLE_WIDTH}px`)
-  }
-  if (visible.diff) {
-    columns.push(visiblePanelCount.value === 1 ? 'minmax(0, 1fr)' : `minmax(${DIFF_MIN_WIDTH}px, 1fr)`)
-    if (visible.commit) columns.push(`${SPLIT_HANDLE_WIDTH}px`)
-  }
-  if (visible.commit) {
-    columns.push(
-      visiblePanelCount.value === 1
-        ? 'minmax(0, 1fr)'
-        : `${effectiveCommitWidth.value}px`,
-    )
-  }
-
-  return { gridTemplateColumns: columns.join(' ') }
-})
 
 const parsedFiles = computed<GitFileStatus[]>(() => parseGitStatusList(snapshot.value?.status ?? []))
 
@@ -929,70 +789,64 @@ const recommendedFiles = computed(() =>
   [...allFiles.value].filter(f => f.recommended).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
 )
 const conflictedFiles = computed(() => allFiles.value.filter(f => f.type === 'updated-but-unmerged'))
-const selectedFileViews = computed(() => allFiles.value.filter(f => reviewSelectedRaws.value.includes(f.raw)))
-const reviewModel = computed(() => aiSettings.getModelForTask('light-review'))
-const branchOptions = computed<(SelectOption | SelectGroupOption)[]>(() => {
-  const branches = snapshot.value?.branches ?? []
-  const localList = branches.filter(b => b.kind === 'local')
-  const remoteList = branches.filter(b => b.kind === 'remote' && !b.name.endsWith('/HEAD'))
-
-  const options: (SelectOption | SelectGroupOption)[] = []
-  if (localList.length > 0) {
-    options.push({
-      type: 'group',
-      key: 'local-group',
-      label: t('gitAssistant.repo.localBranches'),
-      children: localList.map(branch => ({
-        label: branch.current ? `${branch.name} (${t('gitAssistant.repo.currentBranch')})` : branch.name,
-        value: `${branch.kind}:${branch.name}`,
-      })),
-    })
-  }
-  if (remoteList.length > 0) {
-    options.push({
-      type: 'group',
-      key: 'remote-group',
-      label: t('gitAssistant.repo.remoteBranches'),
-      children: remoteList.map(branch => ({
-        label: branch.name,
-        value: `${branch.kind}:${branch.name}`,
-      })),
-    })
-  }
-  return options
+const {
+  conflictDialogOpen, conflictSelectedPaths,
+  openConflictDialog, toggleConflictSelection, handleMarkConflictPathsResolved,
+} = useGitConflictDialog({
+  getConflictedFilePaths: () => conflictedFiles.value.map(file => file.path),
+  markResolved: handleMarkResolved,
 })
-const currentBranchValue = computed(() => {
-  const branch = snapshot.value?.branches.find(item => item.current)
-  return branch ? `${branch.kind}:${branch.name}` : null
+const {
+  reviewStore, reviewScores, reviewScoring, reviewPanelOpen, reviewPanelRevision, reviewScoreProgress,
+  reviewModel, selectedFileViews, toggleReviewSelection, setReviewSelection, loadReviewScores,
+  openReviewPanel, startCodeReview, openReviewFindingFile, startReviewListeners, stopReviewListeners,
+} = useGitReview({
+  getRepositoryPath: () => displayRepoPath.value,
+  getRepositoryRoot: () => snapshot.value?.repoRoot || displayRepoPath.value,
+  getFiles: () => allFiles.value,
+  getSnapshotStatus: () => snapshot.value?.status,
+  getModel: () => aiSettings.getModelForTask('light-review'),
+  reviewSelectedRaws,
+  onError: message => { error.value = message },
+  openFileDiff: handleOpenDiff,
+  errorFallback: () => t('gitAssistant.errorFallback'),
 })
-const mergeSourceOptions = computed<(SelectOption | SelectGroupOption)[]>(() => {
-  const branches = (snapshot.value?.branches ?? []).filter(branch => !branch.current && !branch.name.endsWith('/HEAD'))
-  const localList = branches.filter(b => b.kind === 'local')
-  const remoteList = branches.filter(b => b.kind === 'remote')
-
-  const options: (SelectOption | SelectGroupOption)[] = []
-  if (localList.length > 0) {
-    options.push({
-      type: 'group',
-      key: 'local-merge-group',
-      label: t('gitAssistant.repo.localBranches'),
-      children: localList.map(branch => ({ label: branch.name, value: branch.name })),
-    })
-  }
-  if (remoteList.length > 0) {
-    options.push({
-      type: 'group',
-      key: 'remote-merge-group',
-      label: t('gitAssistant.repo.remoteBranches'),
-      children: remoteList.map(branch => ({ label: branch.name, value: branch.name })),
-    })
-  }
-  return options
+const { branchOptions, currentBranchValue, mergeSourceOptions, mergeModeOptions } = useGitBranchOptions(snapshot, t)
+const {
+  branchLoading, branchSelectorOpen, branchSelectionValue, newBranchDraft,
+  mergeDialogOpen, mergeLoading, mergeSourceValue, mergeMode,
+  openBranchSelector, openMergeDialog, handleCreateBranch, handleMergeBranch, handleBranchSelection,
+} = useGitBranchActions({
+  getRepositoryPath: () => displayRepoPath.value,
+  getCurrentBranchValue: () => currentBranchValue.value,
+  snapshot,
+  setError: message => { error.value = message },
+  translate: t,
+  loadSnapshot: loadSnapshotByPath,
+  startGitCommand,
+  finishGitCommand,
+  failGitCommand,
 })
-const mergeModeOptions = computed<SelectOption[]>(() => [
-  { label: t('gitAssistant.repo.mergeModeDefault'), value: 'default' },
-  { label: t('gitAssistant.repo.mergeModeNoFastForward'), value: 'no-ff' },
-])
+const { handleStageFiles } = useGitStaging({
+  getRepositoryPath: () => displayRepoPath.value,
+  getFiles: () => allFiles.value,
+  setError: message => { error.value = message },
+  translate: t,
+  loadSnapshot: loadSnapshotByPath,
+  startGitCommand,
+  finishGitCommand,
+  failGitCommand,
+})
+const {
+  repositorySetupOpen, repositorySetupMode, repositoryLoading, repositoryPathDraft, cloneUrlDraft,
+  openRepositorySetup, pickRepositoryTarget, handleRepositorySetup,
+} = useGitRepositorySetup({
+  repoPath,
+  setError: message => { error.value = message },
+  translate: t,
+  loadSnapshot: loadSnapshotByPath,
+  finishGitCommand,
+})
 const promptFileGroups = computed(() => {
   if (!promptPreview.value) return []
   const groups = new Map<string, { path: string; role: string; scope: string; kind: string; strategy: string; evidenceCount: number; rawChars: number; cleanedChars: number; skipped: boolean; reason?: string | null }[]>()
@@ -1085,106 +939,6 @@ function historySourceLabel(source: 'ai' | 'manual') {
   return source === 'manual' ? t('gitAssistant.history.manual') : t('gitAssistant.history.ai')
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function cloneDefaultPanelLayout(): GitWorkspaceLayout {
-  return {
-    visible: { ...DEFAULT_PANEL_LAYOUT.visible },
-    widths: { ...DEFAULT_PANEL_LAYOUT.widths },
-  }
-}
-
-function normalizePanelWidth(value: unknown, fallback: number, min: number) {
-  const width = Number(value)
-  return Number.isFinite(width) ? Math.max(width, min) : fallback
-}
-
-function loadPanelLayout(): GitWorkspaceLayout {
-  try {
-    const stored = JSON.parse(localStorage.getItem(GIT_WORKSPACE_LAYOUT_STORAGE_KEY) || 'null') as Partial<GitWorkspaceLayout> | null
-    if (!stored?.visible || !stored.widths) return cloneDefaultPanelLayout()
-    const visible = {
-      changes: stored.visible.changes !== false,
-      diff: stored.visible.diff !== false,
-      commit: stored.visible.commit !== false,
-    }
-    if (!Object.values(visible).some(Boolean)) visible.diff = true
-    return {
-      visible,
-      widths: {
-        changes: normalizePanelWidth(stored.widths.changes, PANEL_LIMITS.changes.default, PANEL_LIMITS.changes.min),
-        commit: normalizePanelWidth(stored.widths.commit, PANEL_LIMITS.commit.default, PANEL_LIMITS.commit.min),
-      },
-    }
-  } catch {
-    return cloneDefaultPanelLayout()
-  }
-}
-
-function persistPanelLayout() {
-  try {
-    localStorage.setItem(GIT_WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(panelLayout.value))
-  } catch {
-    // Layout persistence is optional; the workbench remains usable without storage.
-  }
-}
-
-function togglePanel(panel: GitWorkspacePanel) {
-  const visible = panelLayout.value.visible
-  if (visible[panel] && visiblePanelCount.value === 1) return
-  panelLayout.value = {
-    ...panelLayout.value,
-    visible: { ...visible, [panel]: !visible[panel] },
-  }
-}
-
-function resetPanelLayout() {
-  panelLayout.value = cloneDefaultPanelLayout()
-}
-
-function resetPanelWidth(panel: 'changes' | 'commit') {
-  panelLayout.value = {
-    ...panelLayout.value,
-    widths: { ...panelLayout.value.widths, [panel]: PANEL_LIMITS[panel].default },
-  }
-}
-
-function resizeChangesPanel(delta: number) {
-  panelLayout.value = {
-    ...panelLayout.value,
-    widths: {
-      ...panelLayout.value.widths,
-      changes: clamp(effectiveChangesWidth.value + delta, PANEL_LIMITS.changes.min, changesMaxWidth.value),
-    },
-  }
-}
-
-function resizeCommitPanel(delta: number) {
-  panelLayout.value = {
-    ...panelLayout.value,
-    widths: {
-      ...panelLayout.value.widths,
-      commit: clamp(effectiveCommitWidth.value - delta, PANEL_LIMITS.commit.min, commitMaxWidth.value),
-    },
-  }
-}
-
-function resizeLeadingPanel(delta: number) {
-  if (leadingHandleControlsCommit.value) {
-    resizeCommitPanel(delta)
-  } else {
-    resizeChangesPanel(delta)
-  }
-}
-
-function resetLeadingPanelWidth() {
-  resetPanelWidth(leadingHandleControlsCommit.value ? 'commit' : 'changes')
-}
-
-watch(panelLayout, persistPanelLayout, { deep: true })
-
 function handleStatusFilterChange(value: string) {
   statusFilter.value = value as GitAssistantStatusFilter
 }
@@ -1220,160 +974,11 @@ async function handleFileAction(payload: { action: 'open-diff' | 'diff-previous'
   if (payload.action === 'unstage') { await handleStageFiles([file.raw], false) }
 }
 
-async function handleStageFiles(raws: string[], stage: boolean) {
-  if (!displayRepoPath.value) return
-  const paths = raws
-    .map(raw => allFiles.value.find(file => file.raw === raw))
-    .filter((file): file is GitAssistantFileView => Boolean(file && (stage ? file.unstaged : file.staged)))
-    .map(file => file.path)
-  if (!paths.length) return
-
-  error.value = ''
-  startGitCommand(stage ? t('gitAssistant.files.stageVisible') : t('gitAssistant.files.unstageVisible'), stage ? 'Staging files' : 'Unstaging files')
-  try {
-    const result = stage
-      ? await stageGitFiles(displayRepoPath.value, paths)
-      : await unstageGitFiles(displayRepoPath.value, paths)
-    finishGitCommand(result)
-    await loadSnapshotByPath(displayRepoPath.value)
-  } catch (err) {
-    console.error(err)
-    failGitCommand(err)
-  }
-}
-
-function openBranchSelector() {
-  branchSelectionValue.value = currentBranchValue.value
-  newBranchDraft.value = ''
-  branchSelectorOpen.value = true
-}
-
-async function handleCreateBranch() {
-  const branch = newBranchDraft.value.trim()
-  if (!displayRepoPath.value || !branch) return
-  branchSelectorOpen.value = false
-  await runBranchAction(t('gitAssistant.repo.createBranch'), branch, () => createGitBranch(displayRepoPath.value, branch))
-  newBranchDraft.value = ''
-}
-
-function openMergeDialog() {
-  mergeSourceValue.value = null
-  mergeMode.value = 'default'
-  mergeDialogOpen.value = true
-}
-
-async function handleMergeBranch() {
-  if (!displayRepoPath.value || !mergeSourceValue.value) return
-  mergeLoading.value = true
-  error.value = ''
-  startGitCommand(t('gitAssistant.repo.mergeBranch'), 'Merging branch')
-  try {
-    const result = await mergeGitBranch(displayRepoPath.value, mergeSourceValue.value, mergeMode.value === 'no-ff')
-    finishGitCommand(result)
-    mergeDialogOpen.value = false
-    await loadSnapshotByPath(displayRepoPath.value, true)
-  } catch (err) {
-    console.error(err)
-    failGitCommand(err)
-    error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
-    await loadSnapshotByPath(displayRepoPath.value, true)
-  } finally {
-    mergeLoading.value = false
-  }
-}
-
-async function handleBranchSelection(value: string) {
-  const [kind, ...nameParts] = value.split(':')
-  const branch = nameParts.join(':')
-  if (!displayRepoPath.value || !branch) return
-  branchSelectorOpen.value = false
-  if (kind === 'local') {
-    await runBranchAction('Switching branch', branch, () => switchGitBranch(displayRepoPath.value, branch))
-    return
-  }
-  if (kind === 'remote') {
-    const localBranch = branch.split('/').slice(1).join('/')
-    if (!localBranch) return
-    await runBranchAction('Checking out remote branch', localBranch, () => checkoutGitRemoteBranch(displayRepoPath.value, branch, localBranch))
-  }
-}
-
-async function runBranchAction(phase: string, nextBranch: string, action: () => ReturnType<typeof switchGitBranch>) {
-  branchLoading.value = true
-  error.value = ''
-  startGitCommand(t('gitAssistant.repo.branch'), phase)
-  try {
-    const result = await action()
-    finishGitCommand(result)
-    if (snapshot.value) {
-      snapshot.value = {
-        ...snapshot.value,
-        branch: nextBranch,
-        branches: (snapshot.value.branches ?? []).map(branch => ({ ...branch, current: branch.name === nextBranch && branch.kind === 'local' })),
-      }
-    }
-    void loadSnapshotByPath(displayRepoPath.value, true)
-  } catch (err) {
-    console.error(err)
-    failGitCommand(err)
-    error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
-  } finally {
-    branchLoading.value = false
-  }
-}
-
-function openRepositorySetup(mode: 'init' | 'clone') {
-  repositorySetupMode.value = mode
-  repositoryPathDraft.value = ''
-  cloneUrlDraft.value = ''
-  repositorySetupOpen.value = true
-}
-
-async function pickRepositoryTarget() {
-  const selected = await open({ directory: true, multiple: false, title: t('gitAssistant.repo.chooseDirectory') })
-  if (selected && !Array.isArray(selected)) repositoryPathDraft.value = selected
-}
-
-async function handleRepositorySetup() {
-  if (!repositoryPathDraft.value) return
-  repositoryLoading.value = true
-  error.value = ''
-  try {
-    const result = repositorySetupMode.value === 'clone'
-      ? await cloneGitRepository(cloneUrlDraft.value.trim(), repositoryPathDraft.value)
-      : await initGitRepository(repositoryPathDraft.value)
-    finishGitCommand(result)
-    repositorySetupOpen.value = false
-    repoPath.value = repositoryPathDraft.value
-    await loadSnapshotByPath(repositoryPathDraft.value)
-  } catch (err) {
-    console.error(err)
-    error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
-  } finally {
-    repositoryLoading.value = false
-  }
-}
-
 async function handleOpenExternalFile(filePath: string) {
   if (!displayRepoPath.value) return
   try { await openGitFileExternal(displayRepoPath.value, filePath) } catch (err) {
     console.error(err); error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
   }
-}
-
-function openConflictDialog() {
-  conflictSelectedPaths.value = conflictedFiles.value.map(file => file.path)
-  conflictDialogOpen.value = true
-}
-
-function toggleConflictSelection(filePath: string, checked: boolean) {
-  conflictSelectedPaths.value = checked
-    ? [...new Set([...conflictSelectedPaths.value, filePath])]
-    : conflictSelectedPaths.value.filter(path => path !== filePath)
-}
-
-async function handleMarkConflictPathsResolved() {
-  await handleMarkResolved(conflictSelectedPaths.value)
 }
 
 async function handleRevertFile(filePath: string) {
@@ -1400,74 +1005,6 @@ async function handleOpenLog(filePath = '') {
   await openGitLogWindow(displayRepoPath.value, filePath, snapshot.value?.branch || '')
 }
 
-function toggleReviewSelection(payload: { raw: string; checked: boolean }) {
-  if (payload.checked) { if (!reviewSelectedRaws.value.includes(payload.raw)) reviewSelectedRaws.value = [...reviewSelectedRaws.value, payload.raw]; return }
-  reviewSelectedRaws.value = reviewSelectedRaws.value.filter(r => r !== payload.raw)
-}
-
-function setReviewSelection(raws: string[]) {
-  const valid = new Set(allFiles.value.map(f => f.raw))
-  reviewSelectedRaws.value = [...new Set(raws.filter(r => valid.has(r)))]
-}
-
-async function loadReviewScores() {
-  const repoPath = displayRepoPath.value
-  const files = parsedFiles.value.map(file => file.path)
-  const requestId = ++reviewScoreRequestId
-  reviewScores.value = new Map()
-  if (!repoPath || !files.length) return
-  reviewScoring.value = true
-  reviewScoreProgress.value = { completed: 0, total: files.length, phase: 'preparing', filePath: '' }
-
-  try {
-    const result = await scoreGitReviewFiles(repoPath, files)
-    if (requestId !== reviewScoreRequestId) return
-    reviewScores.value = new Map(result.files.map(file => [normalizePath(file.path), file]))
-    reviewScoreProgress.value = { completed: files.length, total: files.length, phase: 'complete', filePath: '' }
-  } catch (err) {
-    console.error(err)
-    if (requestId === reviewScoreRequestId) {
-      error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
-    }
-  } finally {
-    if (requestId === reviewScoreRequestId) reviewScoring.value = false
-  }
-}
-
-async function openReviewPanel() {
-  const preferNewReview = selectedFileViews.value.length > 0
-  const root = snapshot.value?.repoRoot || displayRepoPath.value
-  await Promise.allSettled([reviewStore.loadHistory(root), reviewStore.loadRules()])
-  if (!preferNewReview) {
-    const latest = reviewStore.history[0]
-    if (latest) await reviewStore.open(latest.id).catch(error => console.error(error))
-    else reviewStore.clearActive()
-  }
-  reviewPanelRevision.value += 1
-  reviewPanelOpen.value = true
-}
-
-async function startCodeReview(budgetMode: ReviewBudgetMode) {
-  const model = reviewModel.value
-  if (!model || !displayRepoPath.value || !selectedFileViews.value.length) return
-  try {
-    await reviewStore.start({
-      repoPath: displayRepoPath.value,
-      selectedFiles: selectedFileViews.value.map(file => file.path),
-      model: { ...model },
-      budgetMode,
-      language: 'zh-CN',
-    })
-  } catch (err) {
-    console.error(err)
-  }
-}
-
-async function openReviewFindingFile(path: string) {
-  const file = allFiles.value.find(item => normalizePath(item.path) === normalizePath(path))
-  if (file) await handleOpenDiff(file.raw)
-}
-
 function handleSwitchRecentRepoFromManager(path: string) {
   recentRepoManagerOpen.value = false
   void handleSwitchRecentRepo(path)
@@ -1484,13 +1021,6 @@ watch(allFiles, files => {
   reviewSelectedRaws.value = reviewSelectedRaws.value.filter(r => fileSet.has(r))
 }, { immediate: true })
 
-watch(() => snapshot.value?.status, () => {
-  reviewScoreRequestId += 1
-  reviewScores.value = new Map()
-  reviewScoring.value = false
-  reviewScoreProgress.value = { completed: 0, total: 0, phase: '', filePath: '' }
-}, { immediate: true })
-
 watch(showConflictTools, (active, wasActive) => {
   if (active && !wasActive) openConflictDialog()
   if (!active) conflictDialogOpen.value = false
@@ -1504,62 +1034,16 @@ watch(selectedFile, file => {
 
 watch([selectedFile, diffMode], async ([file, mode]) => {
   if (!file || !displayRepoPath.value) { currentDiff.value = ''; return }
-  if (mode === 'head') {
-    diffLoading.value = true
-    try { const r = await (await import('@/services/git/git-service')).loadGitFileHeadDiff(displayRepoPath.value, file.path); currentDiff.value = r.diff }
-    catch (err) { console.error(err); currentDiff.value = ''; error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback') }
-    finally { diffLoading.value = false }
-    return
-  }
-  const staged = mode === 'staged'
-  if ((staged && !file.staged) || (!staged && !file.unstaged)) { currentDiff.value = ''; return }
-  diffLoading.value = true
-  try { const { loadGitFileDiff } = await import('@/services/git/git-service'); const r = await loadGitFileDiff({ repoPath: displayRepoPath.value, filePath: file.path, staged }); currentDiff.value = r.diff }
-  catch (err) { console.error(err); currentDiff.value = ''; error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback') }
-  finally { diffLoading.value = false }
+  await loadDiffForFile(file, mode)
 }, { immediate: true })
 
 // MainLayout keeps this view alive. Route deactivation must not refresh the snapshot:
 // doing so invalidates in-flight scoring/AI requests and discards their results.
 onMounted(async () => {
-  unlistenLocalReview = await listenLocalCodeReview(async event => {
-    if (event.sessionId !== reviewStore.activeSessionId) return
-    if (event.revision <= reviewStore.lastRevision) return
-    reviewStore.lastRevision = event.revision
-    try {
-      await reviewStore.refreshActive()
-      if (!['running'].includes(event.status)) {
-        await reviewStore.loadHistory(snapshot.value?.repoRoot || displayRepoPath.value)
-      }
-    } catch (err) {
-      console.error(err)
-    }
-  })
-  unlistenReviewScoreProgress = await listen<{
-    repoPath: string
-    completed: number
-    total: number
-    phase: string
-    filePath?: string | null
-  }>('git-review-score-progress', event => {
-    if (!reviewScoring.value) return
-    if (normalizePath(event.payload.repoPath).toLowerCase() !== normalizePath(displayRepoPath.value).toLowerCase()) return
-    reviewScoreProgress.value = {
-      completed: event.payload.completed,
-      total: event.payload.total,
-      phase: event.payload.phase,
-      filePath: event.payload.filePath ?? '',
-    }
-  })
+  await startReviewListeners()
   loadRecentRepos()
   loadCommitMessageHistory()
-  if (workspaceBody.value) {
-    workspaceWidth.value = workspaceBody.value.clientWidth
-    workspaceResizeObserver = new ResizeObserver(entries => {
-      workspaceWidth.value = entries[0]?.contentRect.width ?? workspaceBody.value?.clientWidth ?? 0
-    })
-    workspaceResizeObserver.observe(workspaceBody.value)
-  }
+  observeWorkspaceBody()
   const saved = localStorage.getItem(GIT_REPO_STORAGE_KEY)
   if (!saved) return
   repoPath.value = saved
@@ -1567,973 +1051,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  unlistenLocalReview?.()
-  unlistenReviewScoreProgress?.()
-  workspaceResizeObserver?.disconnect()
+  stopReviewListeners()
+  disconnectWorkspaceObserver()
 })
 </script>
-<style scoped lang="scss">
-.git-assistant-page {
-  background: var(--lumina-content-bg);
-  box-sizing: border-box;
-  color: var(--lumina-text);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding: 8px;
-  position: relative;
-}
-
-.error-banner {
-  align-items: center;
-  background: color-mix(in srgb, var(--lumina-danger) 12%, var(--lumina-surface-2));
-  border: 1px solid color-mix(in srgb, var(--lumina-danger) 28%, transparent);
-  border-radius: var(--lumina-radius-md);
-  color: var(--lumina-danger);
-  display: flex;
-  flex: 0 0 auto;
-  font-size: 12px;
-  gap: 10px;
-  justify-content: space-between;
-  margin: 8px 10px 0;
-  padding: 8px 10px;
-
-  span {
-    min-width: 0;
-  }
-
-  button {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    border-radius: var(--lumina-radius-sm);
-    color: currentcolor;
-    cursor: pointer;
-    display: inline-flex;
-    flex: 0 0 auto;
-    height: 24px;
-    justify-content: center;
-    padding: 0;
-    width: 24px;
-
-    &:hover {
-      background: color-mix(in srgb, var(--lumina-danger) 10%, transparent);
-    }
-
-    .close-glyph {
-      font-size: 19px;
-      font-weight: 300;
-      line-height: 1;
-      transform: translateY(-1px);
-    }
-  }
-}
-
-.workspace-body {
-  display: grid;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.sheet-footer-split {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  width: 100%;
-
-  > div {
-    display: flex;
-    gap: 8px;
-  }
-}
-
-.inline-diff {
-  border-block: 0;
-  border-radius: 0;
-  min-width: 0;
-}
-
-.commit-inspector {
-  background: var(--lumina-sidebar-bg);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  padding: 10px;
-}
-
-.commit-workbench {
-  border: 1px solid var(--lumina-separator);
-  border-radius: var(--lumina-radius-md);
-  box-shadow: none;
-  flex: 0 0 auto;
-}
-
-.commit-side {
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0;
-}
-
-.ai-panel-title {
-  align-items: center;
-  border-bottom: 1px solid var(--lumina-card-border);
-  display: flex;
-  justify-content: space-between;
-  min-height: 30px;
-  padding: 0 2px 8px;
-
-  span {
-    color: var(--lumina-text);
-    font-size: 14px;
-    font-weight: 650;
-  }
-
-  strong {
-    color: var(--lumina-primary);
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1;
-  }
-}
-
-.ai-settings {
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-
-  summary {
-    align-items: center;
-    cursor: pointer;
-    display: grid;
-    gap: 8px;
-    grid-template-columns: auto minmax(0, 1fr) 16px;
-    min-height: 34px;
-    padding: 0 9px;
-    user-select: none;
-
-    &::marker {
-      content: '';
-    }
-
-    span {
-      color: var(--lumina-text-secondary);
-      font-size: 11px;
-    }
-
-    strong {
-      font-size: 11px;
-      font-weight: 600;
-      overflow: hidden;
-      text-align: right;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    svg {
-      color: var(--lumina-text-secondary);
-      height: 16px;
-      transition: transform 160ms ease;
-      width: 16px;
-    }
-  }
-
-  &[open] summary svg {
-    transform: rotate(180deg);
-  }
-
-  .ai-tool-section {
-    border: 0;
-    border-top: 1px solid var(--lumina-card-border);
-    border-radius: 0 0 var(--lumina-radius-md) var(--lumina-radius-md);
-  }
-}
-
-.ai-tool-section {
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-  display: grid;
-  gap: 8px;
-  padding: 9px;
-}
-
-.ai-tool-section--actions {
-  background: color-mix(in srgb, var(--lumina-surface-2) 76%, var(--lumina-surface-1));
-}
-
-.model-field {
-  display: grid;
-  gap: 6px;
-
-  span {
-    color: var(--lumina-text-secondary);
-    font-size: 11px;
-  }
-
-  :deep(.model-select .n-base-selection) {
-    background: color-mix(in srgb, var(--lumina-input-bg) 92%, transparent);
-    border-radius: 7px;
-    min-height: 32px;
-  }
-
-  :deep(.model-select .n-base-selection-label) {
-    color: var(--lumina-text);
-  }
-}
-
-.remote-tools {
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-  display: grid;
-  gap: 9px;
-  padding: 10px;
-
-  p {
-    color: var(--lumina-text-secondary);
-    font-size: 11px;
-    line-height: 1.45;
-    margin: 0;
-  }
-}
-
-.remote-tools__header {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-
-  span {
-    color: var(--lumina-text);
-    font-size: 12px;
-    font-weight: 650;
-  }
-
-  strong {
-    color: var(--lumina-warning);
-    font-size: 11px;
-    font-weight: 650;
-  }
-}
-
-.remote-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.conflict-tools {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--lumina-danger) 7%, transparent), transparent),
-    color-mix(in srgb, var(--lumina-surface-2) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lumina-danger) 28%, var(--lumina-card-border));
-  border-radius: var(--lumina-radius-md);
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-  padding: 10px;
-}
-
-.conflict-tools__header {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-
-  span {
-    color: var(--lumina-text);
-    font-size: 12px;
-    font-weight: 650;
-  }
-
-  strong {
-    color: var(--lumina-danger);
-    font-size: 11px;
-    font-weight: 650;
-  }
-}
-
-.ai-toggle {
-  color: var(--lumina-text-secondary);
-  font-size: 12px;
-  min-height: 24px;
-}
-
-:deep(.ai-toggle .n-checkbox__label) {
-  color: var(--lumina-text-secondary);
-  font-size: 12px;
-}
-
-.ai-action-grid {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.ai-action,
-.secondary-btn {
-  background: var(--lumina-button-secondary-bg);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  min-height: 30px;
-  padding: 0 10px;
-  width: 100%;
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-}
-
-.ai-progress {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 11px;
-  gap: 7px;
-  min-height: 18px;
-}
-
-.ai-progress__dot {
-  animation: ai-progress-pulse 1s ease-in-out infinite;
-  background: var(--lumina-primary);
-  border-radius: 999px;
-  height: 7px;
-  width: 7px;
-}
-
-@keyframes ai-progress-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.primary-action {
-  background: var(--lumina-primary);
-  border-color: var(--lumina-primary);
-  box-shadow: none;
-  color: var(--lumina-on-accent);
-  font-size: 13px;
-  min-height: 34px;
-}
-
-.change-table {
-  border-block: 0;
-  border-left: 0;
-  border-radius: 0;
-  min-height: 0;
-  min-width: 0;
-}
-
-.diff-window {
-  height: 100%;
-  width: 100%;
-}
-
-:deep(.diff-window.diff-viewer) {
-  border: 0;
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: none;
-  height: 100%;
-  width: 100%;
-}
-
-:deep(.diff-window .diff-header) {
-  padding-right: 56px;
-}
-
-.recent-repo-dialog {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-md);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  max-height: min(640px, calc(100vh - 96px));
-  overflow: hidden;
-  position: relative;
-  width: min(760px, calc(100vw - 72px));
-}
-
-.modal-close-button {
-  align-items: center;
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text-secondary);
-  cursor: pointer;
-  display: flex;
-  height: 30px;
-  justify-content: center;
-  padding: 0;
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  width: 30px;
-  z-index: 3;
-
-  &:hover {
-    background: var(--lumina-button-secondary-hover);
-    color: var(--lumina-text);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 3px var(--lumina-accent-ring);
-    outline: none;
-  }
-
-  svg {
-    height: 16px;
-    width: 16px;
-  }
-}
-
-.recent-repo-dialog__header {
-  align-items: flex-start;
-  border-bottom: 1px solid var(--lumina-card-border);
-  display: flex;
-  gap: 14px;
-  justify-content: space-between;
-  padding: 16px 56px 16px 16px;
-
-  h3 {
-    font-size: 16px;
-    margin: 0 0 4px;
-  }
-
-  p {
-    color: var(--lumina-text-secondary);
-    font-size: 12px;
-    line-height: 1.5;
-    margin: 0;
-  }
-}
-
-.recent-repo-list {
-  display: grid;
-  gap: 10px;
-  min-height: 0;
-  overflow: auto;
-  padding: 14px;
-}
-
-.recent-repo-item {
-  align-items: center;
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 12px;
-}
-
-.recent-repo-item__main {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-
-  strong {
-    color: var(--lumina-text);
-    font-size: 13px;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.recent-repo-alias-text {
-  color: var(--lumina-text);
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-repo-alias-edit {
-  min-width: 0;
-  width: 100%;
-}
-
-.recent-repo-alias-input {
-  background: var(--lumina-input-bg);
-  border: 1px solid var(--lumina-input-border);
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text);
-  font: inherit;
-  font-size: 13px;
-  height: 28px;
-  min-width: 0;
-  padding: 0 10px;
-  width: 100%;
-
-  &::placeholder {
-    color: var(--lumina-text-secondary);
-  }
-
-  &:hover {
-    border-color: var(--lumina-primary);
-  }
-
-  &:focus {
-    border-color: var(--lumina-primary);
-    box-shadow: 0 0 0 2px var(--lumina-accent-ring);
-    outline: none;
-  }
-}
-
-.recent-repo-path {
-  color: var(--lumina-text-secondary);
-  font-size: 11px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-repo-item__actions {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  min-width: 112px;
-}
-
-.recent-repo-empty {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 12px;
-  justify-content: center;
-  min-height: 180px;
-  padding: 20px;
-}
-
-.repository-action-dialog {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-lg);
-  color: var(--lumina-text);
-  display: grid;
-  gap: 14px;
-  min-width: 480px;
-  padding: 16px;
-}
-
-.repository-action-dialog header,
-.repository-path-picker,
-.repository-action-footer,
-.repository-action-create {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-}
-
-.repository-action-dialog header {
-  justify-content: space-between;
-
-  h3,
-  p {
-    margin: 0;
-  }
-
-  h3 {
-    font-size: 15px;
-  }
-
-  p {
-    color: var(--lumina-text-secondary);
-    font-size: 12px;
-    margin-top: 4px;
-  }
-}
-
-.repository-action-create > :first-child,
-.repository-path-picker > :first-child {
-  flex: 1 1 auto;
-}
-
-.repository-action-footer {
-  justify-content: flex-end;
-}
-
-.conflict-dialog {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-lg);
-  box-shadow: var(--lumina-shadow-lg);
-  color: var(--lumina-text);
-  display: grid;
-  grid-template-rows: auto minmax(140px, 1fr) auto;
-  max-height: min(680px, calc(100vh - 96px));
-  overflow: hidden;
-  position: relative;
-  width: min(760px, calc(100vw - 72px));
-}
-
-.conflict-dialog__header {
-  border-bottom: 1px solid var(--lumina-card-border);
-  padding: 16px 56px 16px 16px;
-
-  h3 {
-    font-size: 16px;
-    margin: 0 0 4px;
-  }
-
-  p {
-    color: var(--lumina-text-secondary);
-    font-size: 12px;
-    line-height: 1.5;
-    margin: 0;
-  }
-}
-
-.conflict-file-list {
-  display: grid;
-  gap: 8px;
-  overflow: auto;
-  padding: 14px;
-}
-
-.conflict-file-row {
-  align-items: center;
-  background: var(--lumina-surface-2);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-md);
-  cursor: default;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 42px;
-  padding: 0 12px;
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--lumina-primary) 55%, var(--lumina-card-border));
-  }
-
-  span {
-    font-family: var(--lumina-font-mono);
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  small {
-    color: var(--lumina-text-secondary);
-    font-size: 11px;
-  }
-}
-
-.conflict-dialog__empty {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  justify-content: center;
-  min-height: 140px;
-}
-
-.conflict-dialog__footer {
-  align-items: center;
-  border-top: 0.5px solid var(--lumina-separator);
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  padding: 12px 14px;
-
-  > div {
-    display: flex;
-    gap: 8px;
-  }
-}
-
-.repository-action-field {
-  display: grid;
-  gap: 6px;
-
-  > span {
-    color: var(--lumina-text-secondary);
-    font-size: 12px;
-  }
-}
-
-.repository-action-hint {
-  color: var(--lumina-text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0;
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 0;
-}
-
-.history-item {
-  background: transparent;
-  border: 0;
-  border-bottom: 0.5px solid var(--lumina-separator);
-  border-radius: 0;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) 54px;
-  padding: 10px 12px;
-
-  &:hover {
-    background: var(--lumina-button-secondary-hover);
-  }
-
-  button {
-    align-self: start;
-    background: var(--lumina-primary);
-    border: 0.5px solid var(--lumina-primary);
-    border-radius: var(--lumina-radius-sm);
-    color: var(--lumina-on-accent);
-    cursor: pointer;
-    font-size: 12px;
-    height: 28px;
-    padding: 0 10px;
-  }
-}
-
-.history-item__main {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-
-  span,
-  small {
-    color: var(--lumina-text-secondary);
-    font-size: 11px;
-  }
-
-  strong {
-    color: var(--lumina-text);
-    font-size: 13px;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  p {
-    color: var(--lumina-text-secondary);
-    display: -webkit-box;
-    font-size: 12px;
-    line-height: 1.45;
-    margin: 0;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-}
-
-.history-empty {
-  align-items: center;
-  border: 0.5px dashed var(--lumina-separator);
-  border-radius: 9px;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 12px;
-  justify-content: center;
-  min-height: 120px;
-  padding: 16px;
-  text-align: center;
-}
-
-.prompt-drawer__body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  overflow: auto;
-  padding: 10px;
-}
-
-.prompt-section {
-  border: 0.5px solid var(--lumina-separator);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--lumina-surface-2) 88%, transparent);
-  overflow: hidden;
-
-  summary {
-    align-items: center;
-    background: color-mix(in srgb, var(--lumina-surface-2) 70%, var(--lumina-surface-1));
-    border-bottom: 0.5px solid var(--lumina-separator);
-    cursor: pointer;
-    display: flex;
-    font-size: 13px;
-    font-weight: 600;
-    min-height: 34px;
-    padding: 0 10px;
-  }
-}
-
-.prompt-stats {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-
-  div {
-    background: var(--lumina-surface-1);
-    border: 0.5px solid var(--lumina-separator);
-    border-radius: 7px;
-    padding: 8px;
-  }
-
-  span {
-    color: var(--lumina-text-secondary);
-    display: block;
-    font-size: 11px;
-  }
-
-  strong {
-    display: block;
-    font-size: 15px;
-    margin-top: 4px;
-  }
-}
-
-.prompt-files,
-.prompt-text {
-  min-width: 0;
-}
-
-.prompt-rules {
-  color: var(--lumina-text-secondary);
-  font-size: 12px;
-  padding: 0 12px 12px;
-
-  p {
-    margin: 0 0 8px;
-  }
-
-  ol {
-    margin: 0;
-    padding-left: 18px;
-  }
-
-  li + li {
-    margin-top: 5px;
-  }
-}
-
-.prompt-files {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 10px 10px;
-}
-
-.prompt-file-group {
-  border: 1px solid var(--lumina-card-border);
-  border-radius: var(--lumina-radius-sm);
-  overflow: hidden;
-}
-
-.prompt-file-group__title {
-  align-items: center;
-  background: var(--lumina-surface-2);
-  border-bottom: 1px solid var(--lumina-card-border);
-  display: flex;
-  justify-content: space-between;
-  min-height: 30px;
-  padding: 0 10px;
-
-  strong {
-    font-size: 13px;
-  }
-
-  span {
-    color: var(--lumina-text-secondary);
-    font-size: 12px;
-  }
-}
-
-.prompt-file-table {
-  overflow: auto;
-  width: 100%;
-}
-
-.prompt-file-table__head,
-.prompt-file-table__row {
-  align-items: center;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(260px, 2fr) 86px 86px minmax(150px, 1fr) 70px 96px minmax(180px, 1.2fr);
-  min-width: 920px;
-  min-height: 29px;
-  padding: 0 10px;
-}
-
-.prompt-file-table__head {
-  color: var(--lumina-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.prompt-file-table__row {
-  border-top: 1px solid var(--lumina-card-border);
-  font-size: 12px;
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  span:not(.mono) {
-    color: var(--lumina-text-secondary);
-  }
-}
-
-.prompt-text {
-  padding: 0 10px 10px;
-
-  textarea {
-    background: var(--lumina-diff-bg);
-    border: 1px solid var(--lumina-card-border);
-    border-radius: var(--lumina-radius-sm);
-    color: var(--lumina-text);
-    font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-    font-size: 12px;
-    line-height: 1.6;
-    min-height: 380px;
-    padding: 10px;
-    resize: none;
-    width: 100%;
-  }
-}
-
-</style>
+<style scoped lang="scss" src="./GitAssistantView.scss"></style>

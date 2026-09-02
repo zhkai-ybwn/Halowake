@@ -33,13 +33,13 @@ pub fn run() {
             }
 
             let menu = MenuBuilder::new(app)
-                .text("show", "显示 Lumina")
+                .text("show", "显示 Halowake")
                 .separator()
                 .text("exit", "退出并停止全部进程")
                 .build()?;
-            TrayIconBuilder::with_id("lumina-tray")
+            TrayIconBuilder::with_id("halowake-tray")
                 .icon(tauri::include_image!("icons/window-icon.png"))
-                .tooltip("Lumina")
+                .tooltip("Halowake")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {

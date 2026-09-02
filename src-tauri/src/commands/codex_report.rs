@@ -1020,7 +1020,7 @@ mod tests {
 
     #[test]
     fn test_parse_codex_session_and_directory_pruning() {
-        let temp_dir = std::env::temp_dir().join(format!("lumina_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!("halowake_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let session_dir = temp_dir.join("2026").join("08").join("21");
         fs::create_dir_all(&session_dir).expect("create temp dir");
 
