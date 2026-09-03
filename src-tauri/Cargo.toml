@@ -1,6 +1,6 @@
 [package]
 name = "halowake"
-version = "1.2.1"
+version = "1.2.2"
 description = "Halowake - A local-first companion for AI coding workflows"
 authors = ["Halowake contributors"]
 license = "MIT"

@@ -1,49 +1,59 @@
 ; Halowake Windows NSIS Installer Hooks
-; Comprehensive lifecycle & shortcut management:
-; 1. Terminates orphan dev server processes & main processes before replacing binaries.
+; Comprehensive lifecycle, legacy migration & shortcut management:
+; 1. Migrates legacy Lumina installation (cleans up obsolete Lumina directory, registry, shortcuts).
 ; 2. Enforces single-instance desktop shortcut and cleans up duplicate/stale/cross-context shortcuts.
-; 3. Correctly handles silent update detection.
+; 3. Ensures desktop shortcut is always created/updated properly during both clean install and update.
 
 !macro NSIS_HOOK_PREINSTALL
-  ; 1. Detect if this is an update/reinstall (even if /UPDATE was omitted by silent updater)
-  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
-    StrCpy $UpdateMode 1
-  ${Else}
-    ReadRegStr $0 SHCTX "${UNINSTKEY}" "UninstallString"
-    ${If} $0 != ""
-      StrCpy $UpdateMode 1
+  ; 1. Clean up legacy Lumina desktop and start menu shortcuts
+  SetShellVarContext all
+  Delete "$DESKTOP\Lumina.lnk"
+  Delete "$DESKTOP\Lumina (1).lnk"
+  Delete "$DESKTOP\Lumina - 副本.lnk"
+  Delete "$DESKTOP\Lumina - 快捷方式.lnk"
+  Delete "$SMPROGRAMS\Lumina.lnk"
+  RMDir /r "$SMPROGRAMS\Lumina"
+
+  SetShellVarContext current
+  Delete "$DESKTOP\Lumina.lnk"
+  Delete "$DESKTOP\Lumina (1).lnk"
+  Delete "$DESKTOP\Lumina - 副本.lnk"
+  Delete "$DESKTOP\Lumina - 快捷方式.lnk"
+  Delete "$SMPROGRAMS\Lumina.lnk"
+  RMDir /r "$SMPROGRAMS\Lumina"
+
+  ; 2. Clean up duplicate Halowake desktop shortcuts from previous contexts/runs
+  SetShellVarContext all
+  Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+  Delete "$DESKTOP\${PRODUCTNAME} (1).lnk"
+  Delete "$DESKTOP\${PRODUCTNAME} - 副本.lnk"
+  Delete "$DESKTOP\${PRODUCTNAME} - 快捷方式.lnk"
+
+  SetShellVarContext current
+  Delete "$DESKTOP\${PRODUCTNAME} (1).lnk"
+  Delete "$DESKTOP\${PRODUCTNAME} - 副本.lnk"
+  Delete "$DESKTOP\${PRODUCTNAME} - 快捷方式.lnk"
+
+  ; 3. Clean up legacy Lumina installation directory & registry if it is separate from current $INSTDIR
+  ${If} ${FileExists} "$LOCALAPPDATA\Programs\Lumina\Lumina.exe"
+    ${If} "$INSTDIR" != "$LOCALAPPDATA\Programs\Lumina"
+      RMDir /r "$LOCALAPPDATA\Programs\Lumina"
     ${EndIf}
   ${EndIf}
 
-  ; 2. In update mode, prevent NSIS from creating new shortcuts by setting NoShortcutMode
-  ; Standard Tauri installer template respects $NoShortcutMode and skips CreateOrUpdateDesktopShortcut
-  ${If} $UpdateMode = 1
-    StrCpy $NoShortcutMode 1
-  ${EndIf}
-
-  ; 3. Clean up duplicate public desktop shortcuts & duplicate aliases
-  SetShellVarContext all
-  Delete "$DESKTOP\${PRODUCTNAME}.lnk"
-  Delete "$DESKTOP\${PRODUCTNAME} (1).lnk"
-  Delete "$DESKTOP\${PRODUCTNAME} - 副本.lnk"
-  Delete "$DESKTOP\${PRODUCTNAME} - 快捷方式.lnk"
-
-  SetShellVarContext current
-  Delete "$DESKTOP\${PRODUCTNAME} (1).lnk"
-  Delete "$DESKTOP\${PRODUCTNAME} - 副本.lnk"
-  Delete "$DESKTOP\${PRODUCTNAME} - 快捷方式.lnk"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; 4. If an existing user desktop shortcut exists, ensure its target and AppUserModelId are updated
+  ; 4. Always ensure current user desktop shortcut points to Halowake.exe
   SetShellVarContext current
-  ${If} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
-    CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-    !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
-  ${EndIf}
+  CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
 
-  ; Ensure no duplicate on all-users desktop
+  ; 5. Ensure no duplicate on all-users desktop
   SetShellVarContext all
   Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+  Delete "$DESKTOP\Lumina.lnk"
   SetShellVarContext current
 !macroend
