@@ -222,6 +222,11 @@ where
             &mut on_progress,
         );
 
+        let staged_diff_raw = run_git_raw(&payload.repo_path, &["diff", "--cached", "--name-only"])?;
+        if staged_diff_raw.trim().is_empty() {
+            return Ok(None);
+        }
+
         emit_manual_git_progress(
             &payload.repo_path,
             "git commit",
@@ -230,19 +235,40 @@ where
             None,
             &mut on_progress,
         );
-        if body.is_empty() {
-            run_git_capture_streaming(&payload.repo_path, &["commit", "-m", title], &mut on_progress)
+        let commit_output = if body.is_empty() {
+            run_git_capture_streaming(&payload.repo_path, &["commit", "-m", title], &mut on_progress)?
         } else {
-            run_git_capture_streaming(&payload.repo_path, &["commit", "-m", title, "-m", body], &mut on_progress)
-        }
+            run_git_capture_streaming(&payload.repo_path, &["commit", "-m", title, "-m", body], &mut on_progress)?
+        };
+        Ok(Some(commit_output))
     })();
 
-    let commit = match commit_result {
+    let commit_opt = match commit_result {
         Ok(commit) => commit,
         Err(error) => {
             index_backup.restore()?;
             return Err(error);
         }
+    };
+
+    let Some(commit) = commit_opt else {
+        index_backup.restore().map_err(|error| format!("恢复暂存区失败: {}", error))?;
+        let _ = stage_selected_files_for_commit(&payload.repo_path, &selected_files);
+        emit_manual_git_progress(
+            &payload.repo_path,
+            "git status",
+            "Index synchronized",
+            Some(100),
+            None,
+            &mut on_progress,
+        );
+        return Ok(GitCommandResult {
+            command: commands.join("\n"),
+            message: "选中的文件与 HEAD 无代码差异，已自动校准索引并同步文件状态。".to_string(),
+            stdout,
+            stderr,
+            suggestion: Some("所选文件未检测到实际代码修改（通常由换行符规范化或元数据差异引起），暂存区索引已自动校准更新。".to_string()),
+        });
     };
 
     index_backup.restore().map_err(|error| format!("提交已经完成，但{}", error))?;
@@ -673,7 +699,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn commit_removes_tracked_files_that_are_now_ignored() {
         let repo = temp_repo("ignored-tracked-file");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
 
         let lumina_file = repo.join(".lumina").join("commit-prompt-debug.json");
@@ -714,7 +740,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn revert_file_restores_tracked_file() {
         let repo = temp_repo("revert-tracked-file");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("tracked.txt"), "initial\n");
         git(&repo, &["add", "--", "tracked.txt"]);
@@ -757,7 +783,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn selected_commit_preserves_unselected_staged_files() {
         let repo = temp_repo("preserve-index");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("selected.txt"), "initial\n");
         write_file(&repo.join("staged.txt"), "initial\n");
@@ -785,7 +811,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn failed_selected_commit_restores_index() {
         let repo = temp_repo("restore-index");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("selected.txt"), "initial\n");
         write_file(&repo.join("staged.txt"), "initial\n");
@@ -818,7 +844,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn stages_and_unstages_selected_file() {
         let repo = temp_repo("stage-unstage");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("file.txt"), "initial\n");
         git(&repo, &["add", "--", "file.txt"]);
@@ -841,7 +867,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn manages_branches_and_protects_current_branch() {
         let repo = temp_repo("branch-management");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("file.txt"), "initial\n");
         git(&repo, &["add", "--", "file.txt"]);
@@ -869,7 +895,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn merges_selected_branch_and_rejects_dirty_worktree() {
         let repo = temp_repo("merge-branch");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("file.txt"), "initial\n");
         git(&repo, &["add", "--", "file.txt"]);
@@ -925,7 +951,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn lists_remote_branches_and_checks_them_out_with_tracking() {
         let repo = temp_repo("remote-branch-checkout");
         git(&repo, &["init"]);
-        git(&repo, &["config", "user.name", "Lumina Test"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
         git(&repo, &["config", "user.email", "lumina@example.test"]);
         write_file(&repo.join("file.txt"), "initial\n");
         git(&repo, &["add", "--", "file.txt"]);
@@ -947,6 +973,37 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.remote"]).unwrap(), "origin");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.merge"]).unwrap(), "refs/heads/release");
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn commit_phantom_diff_calibrates_index_and_succeeds() {
+        let repo = temp_repo("phantom-diff-commit");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
+        git(&repo, &["config", "user.email", "halowake@example.test"]);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        write_file(&repo.join(".gitattributes"), "*.ts text eol=crlf\n");
+        let ts_file = repo.join("file.ts");
+        write_file(&ts_file, "export const a = 1;\r\n");
+        git(&repo, &["add", "--", "."]);
+        git(&repo, &["commit", "-m", "initial"]);
+
+        // Simulate editor saving with LF line endings
+        fs::write(&ts_file, b"export const a = 1;\n").unwrap();
+        assert!(run_git(&repo.to_string_lossy(), &["status", "--porcelain"]).unwrap().contains("file.ts"));
+
+        let result = commit_changes(&GitCommitPayload {
+            repo_path: repo.to_string_lossy().to_string(),
+            title: "try phantom commit".to_string(),
+            body: String::new(),
+            selected_files: vec!["file.ts".to_string()],
+        });
+
+        assert!(result.is_ok());
+        let command_result = result.unwrap();
+        assert!(command_result.message.contains("无代码差异"));
+        assert!(run_git(&repo.to_string_lossy(), &["status", "--porcelain"]).unwrap().trim().is_empty());
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 }

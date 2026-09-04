@@ -23,7 +23,7 @@ export async function openGitLogWindow(repoPath: string, filePath: string, branc
 
   try {
     logWindow = new WebviewWindow('git-log', {
-      title: 'Lumina - Git Log',
+      title: 'Halowake - Git Log',
       url: '/#/log',
       width: 1200,
       height: 800,

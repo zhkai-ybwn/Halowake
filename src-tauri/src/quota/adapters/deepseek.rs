@@ -13,6 +13,7 @@ pub async fn fetch_deepseek_quota(account: &AccountConfig) -> ProviderQuota {
         plan: Some("Pay-as-you-go".to_string()),
         quotas: Vec::new(),
         pace: None,
+        reset_credits: None,
         last_updated: chrono_now_ms(),
         is_healthy: false,
         error_message: None,

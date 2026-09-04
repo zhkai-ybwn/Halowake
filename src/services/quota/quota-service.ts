@@ -42,6 +42,24 @@ export interface PaceStatus {
   message: string
 }
 
+export interface ResetCreditItem {
+  id: string
+  status: string
+  title?: string
+  grantedAt?: string
+  expiresAt?: string
+  expiresAtTimestamp?: number
+  expiresInSeconds?: number
+}
+
+export interface ResetCredits {
+  availableCount: number
+  applicableAvailableCount?: number
+  nearestExpiresAt?: number
+  nearestExpiresInSeconds?: number
+  items?: ResetCreditItem[]
+}
+
 export interface ProviderQuota {
   id: string
   accountId: string
@@ -50,6 +68,7 @@ export interface ProviderQuota {
   plan?: string
   quotas: QuotaKind[]
   pace?: PaceStatus
+  resetCredits?: ResetCredits
   lastUpdated: number
   isHealthy: boolean
   errorMessage?: string

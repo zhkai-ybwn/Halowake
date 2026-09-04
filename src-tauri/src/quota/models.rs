@@ -88,6 +88,28 @@ pub struct PaceStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResetCreditItem {
+    pub id: String,
+    pub status: String,
+    pub title: Option<String>,
+    pub granted_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub expires_at_timestamp: Option<i64>,
+    pub expires_in_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetCredits {
+    pub available_count: i64,
+    pub applicable_available_count: Option<i64>,
+    pub nearest_expires_at: Option<i64>,
+    pub nearest_expires_in_seconds: Option<i64>,
+    pub items: Vec<ResetCreditItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderQuota {
     pub id: String,
     pub account_id: String,
@@ -96,6 +118,7 @@ pub struct ProviderQuota {
     pub plan: Option<String>,
     pub quotas: Vec<QuotaKind>,
     pub pace: Option<PaceStatus>,
+    pub reset_credits: Option<ResetCredits>,
     pub last_updated: i64,
     pub is_healthy: bool,
     pub error_message: Option<String>,

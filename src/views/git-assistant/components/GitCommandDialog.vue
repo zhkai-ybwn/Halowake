@@ -12,7 +12,7 @@
       </button>
       <header class="dialog-header">
         <div>
-          <span class="dialog-kicker">Lumina Git Operation</span>
+          <span class="dialog-kicker">Halowake Git Operation</span>
           <h3>{{ title }}</h3>
           <p>{{ repoPath }}</p>
         </div>

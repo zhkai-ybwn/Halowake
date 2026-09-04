@@ -27,7 +27,7 @@ Budget mode: {mode:?}. Return at most {max_findings} findings.
 For every finding:
 - filePath must be one of the supplied FILE paths.
 - existingCode must be the smallest exact code snippet from an added line that proves the finding. Do not include source line-number prefixes.
-- startLine/endLine are hints only; Lumina will deterministically relocate existingCode against the current source file.
+- startLine/endLine are hints only; Halowake will deterministically relocate existingCode against the current source file.
 - problem, impact, triggerScenario, and evidence must be specific.
 - critical/major require a concrete failure scenario and direct evidence.
 - Check CURRENT SOURCE before claiming cleanup, reset, validation, or error handling is missing. If the source is partial and the claim cannot be proven, do not report it.

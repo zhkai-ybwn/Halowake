@@ -274,7 +274,7 @@ fn added_lines(diff: &str) -> Vec<(usize, String)> {
 
 fn clip_chars(value: &str, limit: usize) -> (String, bool) {
     if value.chars().count() <= limit { return (value.to_string(), false); }
-    let marker = "\n...<middle of diff clipped by Lumina review budget>...\n";
+    let marker = "\n...<middle of diff clipped by Halowake review budget>...\n";
     let available = limit.saturating_sub(marker.chars().count());
     let head_limit = available * 3 / 5;
     let tail_limit = available.saturating_sub(head_limit);
@@ -325,7 +325,7 @@ fn build_source_context(source: &str, changed_lines: &[usize], limit: usize) -> 
     }
     let contextual = render(Some(&selected));
     if contextual.chars().count() <= limit { return (contextual, false); }
-    let marker = "\n...<source context clipped by Lumina review budget>...\n";
+    let marker = "\n...<source context clipped by Halowake review budget>...\n";
     let available = limit.saturating_sub(marker.chars().count());
     let head_limit = available * 3 / 5;
     let tail_limit = available.saturating_sub(head_limit);

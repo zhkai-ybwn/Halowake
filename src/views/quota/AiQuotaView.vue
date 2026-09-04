@@ -255,7 +255,7 @@ function handleCopyShareSummary() {
   }
 
   const lines = [
-    '📊 我的 AI 算力与额度看板 (via Lumina)',
+    '📊 我的 AI 算力与额度看板 (via Halowake)',
     `💰 资产总览: ¥${summary.value.totalCnyBalance.toFixed(2)} CNY | $${summary.value.totalUsdBalance.toFixed(2)} USD`,
   ]
 
@@ -269,6 +269,9 @@ function handleCopyShareSummary() {
         const rem = Math.max(0, 100 - item.usedPercent).toFixed(0)
         parts.push(`${item.periodLabel} 剩余 ${rem}%`)
       }
+    }
+    if (q.resetCredits && q.resetCredits.availableCount > 0) {
+      parts.push(`重置次数 ${q.resetCredits.availableCount}次`)
     }
     const paceStr = q.pace ? ` [${q.pace.level === 'onPace' ? '🟢 节奏健康' : q.pace.level === 'overPace' ? '🔴 预计超标' : '🟡 用量偏紧'}]` : ''
     lines.push(`• ${q.name}: ${parts.join(' · ')}${paceStr}`)

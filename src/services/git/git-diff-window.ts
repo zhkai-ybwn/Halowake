@@ -33,7 +33,7 @@ export async function openGitDiffWindow(request: GitDiffRequest) {
   }
 
   diffWindow = new WebviewWindow('git-diff', {
-    title: 'Lumina - Git Diff',
+    title: 'Halowake - Git Diff',
     url: '/#/diff',
     width: 1200,
     height: 800,

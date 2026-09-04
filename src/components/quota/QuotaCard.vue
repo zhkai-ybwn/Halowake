@@ -10,6 +10,14 @@
           <div class="title-row">
             <h3 class="account-name" :title="quota.name">{{ quota.name }}</h3>
             <span v-if="quota.plan" class="plan-tag">{{ quota.plan }}</span>
+            <span
+              v-if="quota.resetCredits && quota.resetCredits.availableCount > 0"
+              class="reset-credits-tag"
+              :title="formatResetCreditsTooltip(quota.resetCredits)"
+            >
+              <Icon icon="solar:restart-circle-linear" />
+              {{ quota.resetCredits.availableCount }} {{ t('quota.resetCreditsUnit') }}{{ t('quota.resetCreditsShort') }}
+            </span>
           </div>
           <span class="provider-type-label">{{ providerDisplayName }}</span>
         </div>
@@ -72,6 +80,62 @@
               <Icon icon="solar:clock-circle-linear" />
               <span>{{ formatResetDetailed(item.resetsAt, item.resetsInSeconds) }}</span>
             </div>
+          </div>
+
+          <!-- 限额重置次数卡片 (Codex rate_limit_reset_credits) -->
+          <div v-if="quota.resetCredits" class="reset-credits-panel">
+            <div class="reset-credits-left">
+              <div class="reset-icon-pill">
+                <Icon icon="solar:restart-square-linear" />
+              </div>
+              <div class="reset-info">
+                <div class="reset-title-row">
+                  <span class="reset-label">{{ t('quota.resetCredits') }}</span>
+                  <span
+                    v-if="quota.resetCredits.nearestExpiresAt || quota.resetCredits.nearestExpiresInSeconds"
+                    class="reset-expire-badge"
+                  >
+                    <Icon icon="solar:calendar-date-linear" />
+                    {{ formatExpiryTag(quota.resetCredits.nearestExpiresAt, quota.resetCredits.nearestExpiresInSeconds) }}
+                  </span>
+                </div>
+                <span class="reset-desc">
+                  {{ formatResetCreditsSubtitle(quota.resetCredits) }}
+                </span>
+              </div>
+            </div>
+            <div class="reset-credits-count">
+              <strong class="reset-number">{{ quota.resetCredits.availableCount }}</strong>
+              <span class="reset-unit">{{ t('quota.resetCreditsUnit') }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 无 RateLimit 时的独立重置次数展示兜底 -->
+        <div v-else-if="quota.resetCredits" class="reset-credits-panel">
+          <div class="reset-credits-left">
+            <div class="reset-icon-pill">
+              <Icon icon="solar:restart-square-linear" />
+            </div>
+            <div class="reset-info">
+              <div class="reset-title-row">
+                <span class="reset-label">{{ t('quota.resetCredits') }}</span>
+                <span
+                  v-if="quota.resetCredits.nearestExpiresAt || quota.resetCredits.nearestExpiresInSeconds"
+                  class="reset-expire-badge"
+                >
+                  <Icon icon="solar:calendar-date-linear" />
+                  {{ formatExpiryTag(quota.resetCredits.nearestExpiresAt, quota.resetCredits.nearestExpiresInSeconds) }}
+                </span>
+              </div>
+              <span class="reset-desc">
+                {{ formatResetCreditsSubtitle(quota.resetCredits) }}
+              </span>
+            </div>
+          </div>
+          <div class="reset-credits-count">
+            <strong class="reset-number">{{ quota.resetCredits.availableCount }}</strong>
+            <span class="reset-unit">{{ t('quota.resetCreditsUnit') }}</span>
           </div>
         </div>
 
@@ -247,6 +311,83 @@ function formatResetDetailed(resetsAt?: number, resetsInSeconds?: number): strin
   return `${t('quota.resetAt')}: ${timeDesc}${countdown}`
 }
 
+function formatExpiryTag(expiresAt?: number, expiresInSeconds?: number): string {
+  if (!expiresAt && !expiresInSeconds) return ''
+  let timeStr = ''
+  if (expiresAt) {
+    const d = new Date(expiresAt * 1000)
+    const month = d.getMonth() + 1
+    const date = d.getDate()
+    timeStr = `${month}月${date}日`
+  }
+  let remaining = ''
+  if (expiresInSeconds && expiresInSeconds > 0) {
+    const days = Math.floor(expiresInSeconds / 86400)
+    const hours = Math.floor((expiresInSeconds % 86400) / 3600)
+    if (days > 0) {
+      remaining = `${days}天后`
+    } else if (hours > 0) {
+      remaining = `${hours}h后`
+    } else {
+      remaining = '即将到期'
+    }
+  }
+  if (timeStr && remaining) {
+    return `${timeStr} · ${remaining}`
+  }
+  return timeStr || remaining
+}
+
+function formatResetCreditsSubtitle(credits: NonNullable<ProviderQuota['resetCredits']>): string {
+  if (credits.nearestExpiresAt || credits.nearestExpiresInSeconds) {
+    let timeDesc = ''
+    if (credits.nearestExpiresAt) {
+      const d = new Date(credits.nearestExpiresAt * 1000)
+      const month = d.getMonth() + 1
+      const date = d.getDate()
+      const hours = String(d.getHours()).padStart(2, '0')
+      const mins = String(d.getMinutes()).padStart(2, '0')
+      timeDesc = `${month}月${date}日 ${hours}:${mins}`
+    }
+
+    let countdown = ''
+    if (credits.nearestExpiresInSeconds && credits.nearestExpiresInSeconds > 0) {
+      const d = Math.floor(credits.nearestExpiresInSeconds / 86400)
+      const h = Math.floor((credits.nearestExpiresInSeconds % 86400) / 3600)
+      if (d > 0) {
+        countdown = ` (${d}天后过期)`
+      } else if (h > 0) {
+        countdown = ` (${h}小时后过期)`
+      } else {
+        countdown = ` (即将过期)`
+      }
+    }
+
+    return `${t('quota.resetCreditsExpiresAt', { time: timeDesc })}${countdown}`
+  }
+
+  if (credits.applicableAvailableCount && credits.applicableAvailableCount > 0) {
+    return t('quota.resetCreditsApplicableDesc')
+  }
+
+  return t('quota.resetCreditsAvailableDesc', { count: credits.availableCount })
+}
+
+function formatResetCreditsTooltip(credits: NonNullable<ProviderQuota['resetCredits']>): string {
+  const base = credits.applicableAvailableCount
+    ? t('quota.resetCreditsApplicable')
+    : t('quota.resetCreditsAvailable', { count: credits.availableCount })
+  if (credits.nearestExpiresAt) {
+    const d = new Date(credits.nearestExpiresAt * 1000)
+    const month = d.getMonth() + 1
+    const date = d.getDate()
+    const hours = String(d.getHours()).padStart(2, '0')
+    const mins = String(d.getMinutes()).padStart(2, '0')
+    return `${base} (${t('quota.resetCreditsExpiresTag', { time: `${month}月${date}日 ${hours}:${mins}` })})`
+  }
+  return base
+}
+
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp
   const mins = Math.floor(diff / 60000)
@@ -370,6 +511,25 @@ async function handleOpenExternal(url: string) {
   color: var(--lumina-text-secondary);
   border: 0.5px solid var(--lumina-separator);
   white-space: nowrap;
+}
+
+.reset-credits-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 0.5px solid rgba(16, 185, 129, 0.25);
+  white-space: nowrap;
+
+  svg {
+    width: 11px;
+    height: 11px;
+  }
 }
 
 .provider-type-label {
@@ -541,6 +701,110 @@ async function handleOpenExternal(url: string) {
     width: 11px;
     height: 11px;
   }
+}
+
+.reset-credits-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.06);
+  border: 0.5px solid rgba(16, 185, 129, 0.2);
+  margin-top: 2px;
+}
+
+.reset-credits-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reset-icon-pill {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.reset-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reset-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reset-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lumina-text);
+  line-height: 1.2;
+}
+
+.reset-expire-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  font-weight: 500;
+  padding: 0.5px 5px;
+  border-radius: 3px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 0.5px solid rgba(16, 185, 129, 0.25);
+  white-space: nowrap;
+
+  svg {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+.reset-desc {
+  font-size: 10px;
+  color: var(--lumina-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reset-credits-count {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.reset-number {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--lumina-font-mono);
+  color: #10b981;
+  line-height: 1;
+}
+
+.reset-unit {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--lumina-text-secondary);
 }
 
 .credits-container {

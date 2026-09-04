@@ -134,7 +134,7 @@ async fn call_openai(client: &Client, model: &AiModelConfig, prompt: &str) -> Re
     let mut body = json!({
         "model": model.model,
         "messages": [
-            {"role":"system","content":"You are Lumina local code reviewer. Return valid JSON only."},
+            {"role":"system","content":"You are Halowake local code reviewer. Return valid JSON only."},
             {"role":"user","content":prompt}
         ],
         "temperature": 0.1,

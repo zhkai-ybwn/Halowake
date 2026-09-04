@@ -3,7 +3,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 use crate::quota::adapters::deepseek::chrono_now_ms;
-use crate::quota::models::{AccountConfig, QuotaKind, ProviderQuota, ProviderType};
+use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType, QuotaKind, ResetCreditItem, ResetCredits};
 use crate::quota::pace::calculate_pace;
 
 pub async fn fetch_codex_quota(account: &AccountConfig) -> ProviderQuota {
@@ -15,6 +15,7 @@ pub async fn fetch_codex_quota(account: &AccountConfig) -> ProviderQuota {
         plan: Some("Plus / Pro".to_string()),
         quotas: Vec::new(),
         pace: None,
+        reset_credits: None,
         last_updated: chrono_now_ms(),
         is_healthy: false,
         error_message: None,
@@ -50,19 +51,28 @@ pub async fn fetch_codex_quota(account: &AccountConfig) -> ProviderQuota {
         }
     };
 
-    let mut request = client
+    let mut usage_req = client
         .get("https://chatgpt.com/backend-api/wham/usage")
+        .header("Authorization", format!("Bearer {}", token_str))
+        .header("Accept", "application/json")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+    let mut credits_req = client
+        .get("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")
         .header("Authorization", format!("Bearer {}", token_str))
         .header("Accept", "application/json")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 
     if let Some(acc_id) = &account_id {
         if !acc_id.is_empty() {
-            request = request.header("chatgpt-account-id", acc_id);
+            usage_req = usage_req.header("chatgpt-account-id", acc_id);
+            credits_req = credits_req.header("chatgpt-account-id", acc_id);
         }
     }
 
-    let response = match request.send().await {
+    let (usage_res, credits_res) = tokio::join!(usage_req.send(), credits_req.send());
+
+    let response = match usage_res {
         Ok(res) => res,
         Err(e) => {
             quota.error_message = Some(format!("连接 Codex 官方服务超时或失败: {}", e));
@@ -117,9 +127,10 @@ pub async fn fetch_codex_quota(account: &AccountConfig) -> ProviderQuota {
         }
     }
 
+    let now_sec = chrono_now_ms() / 1000;
+
     // 3.3 限额与使用周期 (rate_limit)
     if let Some(rate_limit) = json_val.get("rate_limit") {
-        let now_sec = chrono_now_ms() / 1000;
 
         if let Some(primary) = rate_limit.get("primary_window") {
             let used_percent = primary.get("used_percent").and_then(Value::as_f64).unwrap_or(0.0);
@@ -150,16 +161,96 @@ pub async fn fetch_codex_quota(account: &AccountConfig) -> ProviderQuota {
         if let Some(secondary) = rate_limit.get("secondary_window") {
             if !secondary.is_null() {
                 let used_percent = secondary.get("used_percent").and_then(Value::as_f64).unwrap_or(0.0);
+                let limit_window_seconds = secondary.get("limit_window_seconds").and_then(Value::as_i64).unwrap_or(604800);
                 let reset_after_seconds = secondary.get("reset_after_seconds").and_then(Value::as_i64);
                 let reset_at = secondary.get("reset_at").and_then(Value::as_i64);
 
+                let label = if limit_window_seconds <= 18000 {
+                    "5 小时限额".to_string()
+                } else if limit_window_seconds <= 604800 {
+                    "每周限额".to_string()
+                } else {
+                    "短期使用限额".to_string()
+                };
+
                 quota.quotas.push(QuotaKind::RateLimit {
-                    period_label: "短期使用限额".to_string(),
+                    period_label: label,
                     used_percent,
                     resets_at: reset_at.or_else(|| reset_after_seconds.map(|s| now_sec + s)),
                     resets_in_seconds: reset_after_seconds,
                 });
             }
+        }
+    }
+
+    // 3.4 限额重置次数与过期时间 (rate_limit_reset_credits)
+    let mut items = Vec::new();
+    let mut nearest_expires_at: Option<i64> = None;
+
+    if let Ok(c_res) = credits_res {
+        if c_res.status().is_success() {
+            if let Ok(c_json) = c_res.json::<Value>().await {
+                if let Some(credits_arr) = c_json.get("credits").and_then(Value::as_array) {
+                    for c in credits_arr {
+                        let id = c.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let status = c.get("status").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let title = c.get("title").and_then(Value::as_str).map(String::from);
+                        let granted_at = c.get("granted_at").and_then(Value::as_str).map(String::from);
+                        let expires_at = c.get("expires_at").and_then(Value::as_str).map(String::from);
+                        let expires_at_timestamp = expires_at.as_deref().and_then(super::parse_rfc3339_seconds);
+                        let expires_in_seconds = expires_at_timestamp.map(|ts| (ts - now_sec).max(0));
+
+                        if status == "available" {
+                            if let Some(ts) = expires_at_timestamp {
+                                nearest_expires_at = match nearest_expires_at {
+                                    Some(curr) => Some(curr.min(ts)),
+                                    None => Some(ts),
+                                };
+                            }
+                        }
+
+                        items.push(ResetCreditItem {
+                            id,
+                            status,
+                            title,
+                            granted_at,
+                            expires_at,
+                            expires_at_timestamp,
+                            expires_in_seconds,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let available_count = json_val
+        .get("rate_limit_reset_credits")
+        .and_then(|rc| rc.get("available_count"))
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            if !items.is_empty() {
+                Some(items.iter().filter(|i| i.status == "available").count() as i64)
+            } else {
+                None
+            }
+        });
+
+    let applicable_available_count = json_val
+        .get("rate_limit_reset_credits")
+        .and_then(|rc| rc.get("applicable_available_count"))
+        .and_then(Value::as_i64);
+
+    if let Some(count) = available_count {
+        if count > 0 || !items.is_empty() {
+            let nearest_expires_in_seconds = nearest_expires_at.map(|ts| (ts - now_sec).max(0));
+            quota.reset_credits = Some(ResetCredits {
+                available_count: count,
+                applicable_available_count,
+                nearest_expires_at,
+                nearest_expires_in_seconds,
+                items,
+            });
         }
     }
 
