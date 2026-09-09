@@ -24,7 +24,7 @@ use crate::storage::{
 
 use super::super::project::read_project_manifest;
 use super::super::project_executor::{build_process_command, resolve_executable, ResolvedCommand};
-use super::log_parser::{append_detected_ports, append_detected_urls};
+use super::log_parser::{append_detected_ports, append_detected_urls, MAX_DETECTED_PORTS};
 use super::{
     ProjectProcessLogLine, ProjectProcessLogs, ProjectProcessSnapshot, ProjectProcessStatus,
     StartProjectCommandPayload, StartProjectProcessPayload,
@@ -589,11 +589,53 @@ pub(super) fn stop_process(process: &ManagedProcess) -> Result<(), String> {
     Err(format!("STOP_FAILED: PID {pid} 仍未结束"))
 }
 
+fn extract_port_from_url(url: &str) -> Option<u16> {
+    let without_protocol = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host_and_port = without_protocol.split('/').next()?;
+    let index = host_and_port.rfind(':')?;
+    host_and_port[index + 1..].parse::<u16>().ok()
+}
+
 pub(super) fn snapshot_process(process: &ManagedProcess) -> ProjectProcessSnapshot {
     let logs = process.logs.lock().ok();
-    let ports = process.detected_ports.lock().map(|ports| ports.clone()).unwrap_or_default();
+    let mut ports = process.detected_ports.lock().map(|ports| ports.clone()).unwrap_or_default();
     let urls = process.detected_urls.lock().map(|urls| urls.clone()).unwrap_or_default();
     let status = process_status(process);
+
+    // If ports is empty but urls contains a port, sync it
+    if ports.is_empty() {
+        for url in &urls {
+            if let Some(port) = extract_port_from_url(url) {
+                if !ports.contains(&port) {
+                    ports.push(port);
+                }
+            }
+        }
+        if !ports.is_empty() {
+            if let Ok(mut lock) = process.detected_ports.lock() {
+                *lock = ports.clone();
+            }
+        }
+    }
+
+    // When process is running and multiple ports were detected, prune non-listening ports
+    // if at least one port is actively listening on the host.
+    if status.state == "running" && ports.len() > 1 {
+        let listening: Vec<u16> = ports.iter().copied().filter(|port| is_port_listening(*port)).collect();
+        if !listening.is_empty() && listening.len() < ports.len() {
+            ports = listening;
+            if let Ok(mut lock) = process.detected_ports.lock() {
+                *lock = ports.clone();
+            }
+        }
+    }
+
+    if ports.len() > MAX_DETECTED_PORTS {
+        ports.truncate(MAX_DETECTED_PORTS);
+    }
+
     let occupied_ports = if status.state == "stopped" {
         ports.iter().copied().filter(|port| is_port_listening(*port)).collect::<Vec<_>>()
     } else {

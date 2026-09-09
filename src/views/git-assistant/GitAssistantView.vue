@@ -657,7 +657,7 @@
 </template>
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NModal, NSelect, useDialog } from 'naive-ui'
 import { useLocale } from '@/hooks/useLocale'
 import {
   openGitFileExternal,
@@ -690,6 +690,7 @@ import type { GitFileStatus } from '@/types/git'
 const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffViewer.vue'))
 
 const { t } = useLocale()
+const dialog = useDialog()
 const aiSettings = useAiSettingsStore()
 
 // ── Composables ──
@@ -969,7 +970,10 @@ async function handleFileAction(payload: { action: 'open-diff' | 'diff-previous'
   if (payload.action === 'file-history') { await handleOpenLog(file.path); return }
   if (payload.action === 'open-external') { await handleOpenExternalFile(file.path); return }
   if (payload.action === 'mark-resolved') { await handleMarkResolved([file.path]) }
-  if (payload.action === 'revert') { await handleRevertFile(file.path) }
+  if (payload.action === 'revert') {
+    confirmRevertFile(file.path, file.type === 'untracked')
+    return
+  }
   if (payload.action === 'stage') { await handleStageFiles([file.raw], true) }
   if (payload.action === 'unstage') { await handleStageFiles([file.raw], false) }
 }
@@ -979,6 +983,29 @@ async function handleOpenExternalFile(filePath: string) {
   try { await openGitFileExternal(displayRepoPath.value, filePath) } catch (err) {
     console.error(err); error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
   }
+}
+
+function confirmRevertFile(filePath: string, isUntracked: boolean) {
+  dialog.warning({
+    title: t(
+      isUntracked
+        ? 'gitAssistant.files.menu.deleteUntrackedTitle'
+        : 'gitAssistant.files.menu.discardChangesTitle'
+    ),
+    content: t(
+      isUntracked
+        ? 'gitAssistant.files.menu.deleteUntrackedConfirm'
+        : 'gitAssistant.files.menu.discardChangesConfirm',
+      { file: filePath }
+    ),
+    positiveText: t(
+      isUntracked
+        ? 'gitAssistant.files.menu.deleteUntracked'
+        : 'gitAssistant.files.menu.discardChanges'
+    ),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => handleRevertFile(filePath),
+  })
 }
 
 async function handleRevertFile(filePath: string) {

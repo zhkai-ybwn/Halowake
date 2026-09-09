@@ -4,9 +4,17 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderType {
     Codex,
+    Claude,
+    Gemini,
     Deepseek,
     Openrouter,
-    Gemini,
+    Opencode,
+    Workbuddy,
+    Siliconflow,
+    Moonshot,
+    Zhipu,
+    Qwen,
+    Minimax,
     Custom,
 }
 
@@ -14,9 +22,17 @@ impl ProviderType {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Codex => "Codex",
+            Self::Claude => "Claude Code",
+            Self::Gemini => "Gemini",
             Self::Deepseek => "DeepSeek",
             Self::Openrouter => "OpenRouter",
-            Self::Gemini => "Gemini",
+            Self::Opencode => "OpenCode",
+            Self::Workbuddy => "WorkBuddy",
+            Self::Siliconflow => "SiliconFlow",
+            Self::Moonshot => "Moonshot",
+            Self::Zhipu => "智谱 GLM",
+            Self::Qwen => "通义千问",
+            Self::Minimax => "MiniMax",
             Self::Custom => "Custom Provider",
         }
     }
@@ -24,9 +40,17 @@ impl ProviderType {
     pub fn default_dashboard_url(&self) -> Option<&'static str> {
         match self {
             Self::Codex => Some("https://chatgpt.com/"),
+            Self::Claude => Some("https://console.anthropic.com/settings/usage"),
+            Self::Gemini => Some("https://aistudio.google.com/"),
             Self::Deepseek => Some("https://platform.deepseek.com/usage"),
             Self::Openrouter => Some("https://openrouter.ai/credits"),
-            Self::Gemini => Some("https://aistudio.google.com/"),
+            Self::Opencode => Some("https://opencode.ai/console"),
+            Self::Workbuddy => Some("https://workbuddy.ai/"),
+            Self::Siliconflow => Some("https://cloud.siliconflow.cn/account/ak"),
+            Self::Moonshot => Some("https://platform.moonshot.cn/console/info"),
+            Self::Zhipu => Some("https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys"),
+            Self::Qwen => Some("https://bailian.console.aliyun.com/"),
+            Self::Minimax => Some("https://platform.minimaxi.com/user-center/basic-information"),
             Self::Custom => None,
         }
     }
@@ -130,6 +154,7 @@ pub struct ProviderQuota {
 pub struct QuotaSummary {
     pub total_cny_balance: f64,
     pub total_usd_balance: f64,
+    pub total_credits: f64,
     pub active_accounts_count: usize,
     pub warning_accounts_count: usize,
 }

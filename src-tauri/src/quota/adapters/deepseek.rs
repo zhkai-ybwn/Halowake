@@ -111,7 +111,7 @@ pub async fn fetch_deepseek_quota(account: &AccountConfig) -> ProviderQuota {
     quota
 }
 
-fn parse_amount(val: Option<&Value>) -> f64 {
+pub fn parse_amount(val: Option<&Value>) -> f64 {
     match val {
         Some(Value::String(s)) => s.parse::<f64>().unwrap_or(0.0),
         Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0),

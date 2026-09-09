@@ -186,8 +186,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
-import { NDropdown } from 'naive-ui'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
+import { NDropdown, type DropdownOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { useLocale } from '@/hooks/useLocale'
 import { STATUS_FILTER_OPTIONS, STATUS_META } from '../git-assistant.config'
@@ -323,65 +323,93 @@ const gridStyle = computed(() => ({
   gridTemplateColumns: `34px ${columnWidths.path}px ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px ${columnWidths.reason}px`,
 }))
 const contextFile = computed(() => visibleFiles.value.find(file => file.raw === contextFileRaw.value) ?? null)
-const contextMenuOptions = computed(() => [
-  {
-    label: t('gitAssistant.files.menu.stage'),
-    key: 'stage',
-    disabled: !contextFile.value?.unstaged,
-  },
-  {
-    label: t('gitAssistant.files.menu.unstage'),
-    key: 'unstage',
-    disabled: !contextFile.value?.staged,
-  },
-  {
-    type: 'divider',
-    key: 'divider-stage',
-  },
-  {
-    label: t('gitAssistant.files.menu.openDiff'),
-    key: 'open-diff',
-  },
-  {
-    label: t('gitAssistant.files.menu.diffPrevious'),
-    key: 'diff-previous',
-    disabled: contextFile.value?.type === 'untracked',
-  },
-  {
-    label: t('gitAssistant.files.menu.fileHistory'),
-    key: 'file-history',
-  },
-  {
-    label: t('gitAssistant.files.menu.openExternal'),
-    key: 'open-external',
-    disabled: contextFile.value?.type === 'deleted',
-  },
-  {
-    type: 'divider',
-    key: 'divider-danger',
-  },
-  {
-    label: t('gitAssistant.files.menu.revert'),
-    key: 'revert',
-  },
-  {
-    type: 'divider',
-    key: 'divider-conflict',
-  },
-  {
-    label: t('gitAssistant.files.menu.markResolved'),
-    key: 'mark-resolved',
-    disabled: contextFile.value?.type !== 'updated-but-unmerged',
-  },
-  {
-    type: 'divider',
-    key: 'divider-path',
-  },
-  {
-    label: t('gitAssistant.files.menu.copyPath'),
-    key: 'copy-path',
-  },
-])
+
+function menuIcon(icon: string) {
+  return () => h(Icon, { icon, size: 16 })
+}
+
+const contextMenuOptions = computed<DropdownOption[]>(() => {
+  const file = contextFile.value
+  if (!file) return []
+
+  const options: DropdownOption[] = [
+    {
+      label: t('gitAssistant.files.menu.openDiff'),
+      key: 'open-diff',
+      icon: menuIcon('solar:code-file-linear'),
+    },
+    {
+      label: t('gitAssistant.files.menu.openExternal'),
+      key: 'open-external',
+      icon: menuIcon('solar:square-arrow-right-up-linear'),
+      disabled: file.type === 'deleted',
+    },
+  ]
+
+  const workingTreeActions: DropdownOption[] = []
+  if (file.unstaged) {
+    workingTreeActions.push({
+      label: t('gitAssistant.files.menu.stage'),
+      key: 'stage',
+      icon: menuIcon('solar:add-square-linear'),
+    })
+  }
+  if (file.staged) {
+    workingTreeActions.push({
+      label: t('gitAssistant.files.menu.unstage'),
+      key: 'unstage',
+      icon: menuIcon('solar:minus-square-linear'),
+    })
+  }
+  if (file.type === 'updated-but-unmerged') {
+    workingTreeActions.push({
+      label: t('gitAssistant.files.menu.markResolved'),
+      key: 'mark-resolved',
+      icon: menuIcon('solar:check-circle-linear'),
+    })
+  }
+  if (workingTreeActions.length) {
+    options.push({ type: 'divider', key: 'divider-working-tree' }, ...workingTreeActions)
+  }
+
+  if (file.type !== 'untracked') {
+    options.push(
+      { type: 'divider', key: 'divider-history' },
+      {
+        label: t('gitAssistant.files.menu.diffPrevious'),
+        key: 'diff-previous',
+        icon: menuIcon('solar:history-2-linear'),
+      },
+      {
+        label: t('gitAssistant.files.menu.fileHistory'),
+        key: 'file-history',
+        icon: menuIcon('solar:history-linear'),
+      }
+    )
+  }
+
+  options.push(
+    { type: 'divider', key: 'divider-copy' },
+    {
+      label: t('gitAssistant.files.menu.copyPath'),
+      key: 'copy-path',
+      icon: menuIcon('solar:copy-linear'),
+    },
+    { type: 'divider', key: 'divider-danger' },
+    {
+      label: t(
+        file.type === 'untracked'
+          ? 'gitAssistant.files.menu.deleteUntracked'
+          : 'gitAssistant.files.menu.discardChanges'
+      ),
+      key: 'revert',
+      icon: menuIcon(file.type === 'untracked' ? 'solar:trash-bin-trash-linear' : 'solar:undo-left-linear'),
+      props: { class: 'git-context-menu-danger' },
+    }
+  )
+
+  return options
+})
 
 watchEffect(() => {
   if (headerCheckbox.value) {
@@ -941,5 +969,14 @@ onUnmounted(() => {
 
 .mono {
   font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+:global(.git-context-menu-danger .n-dropdown-option-body__label),
+:global(.git-context-menu-danger .n-dropdown-option-body__prefix) {
+  color: var(--lumina-danger);
+}
+
+:global(.git-context-menu-danger .n-dropdown-option-body:hover) {
+  background: color-mix(in srgb, var(--lumina-danger) 10%, transparent);
 }
 </style>

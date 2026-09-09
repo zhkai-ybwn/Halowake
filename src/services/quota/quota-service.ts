@@ -1,6 +1,19 @@
 import { invoke } from '@tauri-apps/api/core'
 
-export type ProviderType = 'codex' | 'deepseek' | 'openrouter' | 'gemini' | 'custom'
+export type ProviderType =
+  | 'codex'
+  | 'claude'
+  | 'gemini'
+  | 'deepseek'
+  | 'openrouter'
+  | 'opencode'
+  | 'workbuddy'
+  | 'siliconflow'
+  | 'moonshot'
+  | 'zhipu'
+  | 'qwen'
+  | 'minimax'
+  | 'custom'
 
 export interface AccountConfig {
   id: string
@@ -78,6 +91,7 @@ export interface ProviderQuota {
 export interface QuotaSummary {
   totalCnyBalance: number
   totalUsdBalance: number
+  totalCredits: number
   activeAccountsCount: number
   warningAccountsCount: number
 }

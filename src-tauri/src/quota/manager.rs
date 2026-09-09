@@ -2,17 +2,41 @@ use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::quota::adapters::{
+    claude::fetch_claude_quota,
     codex::fetch_codex_quota,
-    deepseek::fetch_deepseek_quota,
+    deepseek::{chrono_now_ms, fetch_deepseek_quota},
     gemini::fetch_gemini_quota,
+    moonshot::fetch_moonshot_quota,
+    opencode::fetch_opencode_quota,
     openrouter::fetch_openrouter_quota,
+    siliconflow::fetch_siliconflow_quota,
+    workbuddy::fetch_workbuddy_quota,
+    zhipu::fetch_zhipu_quota,
 };
 use crate::quota::discovery::discover_local_accounts;
-use crate::quota::models::{
-    AccountConfig, ProviderQuota, ProviderType, QuotaKind, QuotaSummary,
-};
+use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType, QuotaKind, QuotaSummary};
 
 const QUOTA_ACCOUNTS_FILE: &str = "ai-quota-accounts.json";
+
+fn unsupported_provider_quota(account: &AccountConfig, message: &str) -> ProviderQuota {
+    ProviderQuota {
+        id: account.id.clone(),
+        account_id: account.id.clone(),
+        provider_type: account.provider_type.clone(),
+        name: account.name.clone(),
+        plan: Some(account.provider_type.display_name().to_string()),
+        quotas: Vec::new(),
+        pace: None,
+        reset_credits: None,
+        last_updated: chrono_now_ms(),
+        is_healthy: false,
+        error_message: Some(message.to_string()),
+        official_dashboard_url: account
+            .provider_type
+            .default_dashboard_url()
+            .map(String::from),
+    }
+}
 
 fn accounts_file_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
@@ -75,7 +99,9 @@ pub fn save_accounts_config(app: &AppHandle, accounts: &[AccountConfig]) -> Resu
     Ok(())
 }
 
-pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, QuotaSummary), String> {
+pub async fn fetch_all_quotas(
+    app: &AppHandle,
+) -> Result<(Vec<ProviderQuota>, QuotaSummary), String> {
     let accounts = load_accounts_config(app)?;
     let mut tasks = Vec::new();
 
@@ -86,9 +112,23 @@ pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, Qu
         tasks.push(tokio::spawn(async move {
             match account.provider_type {
                 ProviderType::Codex => fetch_codex_quota(&account).await,
+                ProviderType::Claude => fetch_claude_quota(&account).await,
                 ProviderType::Deepseek => fetch_deepseek_quota(&account).await,
                 ProviderType::Openrouter => fetch_openrouter_quota(&account).await,
                 ProviderType::Gemini => fetch_gemini_quota(&account).await,
+                ProviderType::Opencode => fetch_opencode_quota(&account).await,
+                ProviderType::Workbuddy => fetch_workbuddy_quota(&account).await,
+                ProviderType::Siliconflow => fetch_siliconflow_quota(&account).await,
+                ProviderType::Moonshot => fetch_moonshot_quota(&account).await,
+                ProviderType::Zhipu => fetch_zhipu_quota(&account).await,
+                ProviderType::Qwen => unsupported_provider_quota(
+                    &account,
+                    "通义千问暂不支持自动查询额度，请前往官方控制台查看",
+                ),
+                ProviderType::Minimax => unsupported_provider_quota(
+                    &account,
+                    "MiniMax 暂不支持自动查询额度，请前往官方控制台查看",
+                ),
                 ProviderType::Custom => fetch_deepseek_quota(&account).await,
             }
         }));
@@ -101,9 +141,10 @@ pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, Qu
         }
     }
 
-    // 计算汇总信息
+    // 计算汇总信息 (法定货币 CNY/USD + 算力积分 Credits)
     let mut total_cny = 0.0;
     let mut total_usd = 0.0;
+    let mut total_credits = 0.0;
     let mut warnings = 0;
 
     for q in &quotas {
@@ -112,12 +153,22 @@ pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, Qu
         }
 
         for item in &q.quotas {
-            if let QuotaKind::Balance { currency, total_remaining, .. } = item {
-                if currency.eq_ignore_ascii_case("CNY") {
-                    total_cny += total_remaining;
-                } else if currency.eq_ignore_ascii_case("USD") {
-                    total_usd += total_remaining;
+            match item {
+                QuotaKind::Balance {
+                    currency,
+                    total_remaining,
+                    ..
+                } => {
+                    if currency.eq_ignore_ascii_case("CNY") {
+                        total_cny += total_remaining;
+                    } else if currency.eq_ignore_ascii_case("USD") {
+                        total_usd += total_remaining;
+                    }
                 }
+                QuotaKind::Credits { remaining, .. } => {
+                    total_credits += remaining;
+                }
+                _ => {}
             }
         }
     }
@@ -125,6 +176,7 @@ pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, Qu
     let summary = QuotaSummary {
         total_cny_balance: total_cny,
         total_usd_balance: total_usd,
+        total_credits,
         active_accounts_count: quotas.len(),
         warning_accounts_count: warnings,
     };
@@ -135,9 +187,23 @@ pub async fn fetch_all_quotas(app: &AppHandle) -> Result<(Vec<ProviderQuota>, Qu
 pub async fn fetch_single_quota(account: AccountConfig) -> ProviderQuota {
     match account.provider_type {
         ProviderType::Codex => fetch_codex_quota(&account).await,
+        ProviderType::Claude => fetch_claude_quota(&account).await,
         ProviderType::Deepseek => fetch_deepseek_quota(&account).await,
         ProviderType::Openrouter => fetch_openrouter_quota(&account).await,
         ProviderType::Gemini => fetch_gemini_quota(&account).await,
+        ProviderType::Opencode => fetch_opencode_quota(&account).await,
+        ProviderType::Workbuddy => fetch_workbuddy_quota(&account).await,
+        ProviderType::Siliconflow => fetch_siliconflow_quota(&account).await,
+        ProviderType::Moonshot => fetch_moonshot_quota(&account).await,
+        ProviderType::Zhipu => fetch_zhipu_quota(&account).await,
+        ProviderType::Qwen => unsupported_provider_quota(
+            &account,
+            "通义千问暂不支持自动查询额度，请前往官方控制台查看",
+        ),
+        ProviderType::Minimax => unsupported_provider_quota(
+            &account,
+            "MiniMax 暂不支持自动查询额度，请前往官方控制台查看",
+        ),
         ProviderType::Custom => fetch_deepseek_quota(&account).await,
     }
 }

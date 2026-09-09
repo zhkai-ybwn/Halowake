@@ -13,15 +13,30 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { darkTheme, type GlobalThemeOverrides, NConfigProvider } from 'naive-ui'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useUpdaterStore } from '@/stores/updater'
+import { getInitialMarkdownFile } from '@/services/markdown/markdown-service'
 import UpdateModal from '@/components/updater/UpdateModal.vue'
 
+const router = useRouter()
 const preferencesStore = usePreferencesStore()
 const updaterStore = useUpdaterStore()
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    const initialFile = await getInitialMarkdownFile()
+    if (initialFile) {
+      void router.replace({
+        name: 'markdown-preview',
+        query: { file: initialFile },
+      })
+    }
+  } catch (err) {
+    console.error('Failed to get initial markdown file:', err)
+  }
+
   // Silent lightweight check on app startup (3s delay)
   setTimeout(() => {
     updaterStore.checkForUpdates({ silent: true, openModalIfAvailable: true }).catch(() => {

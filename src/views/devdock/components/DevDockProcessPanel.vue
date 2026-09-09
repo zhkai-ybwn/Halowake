@@ -83,7 +83,7 @@
               </div>
               <span class="process-meta">
                 {{ t('devdock.processes.pid', { pid: process.pid }) }}
-                <template v-if="process.ports.length"> · {{ t('devdock.processes.ports', { ports: process.ports.join(', ') }) }}</template>
+                <template v-if="process.ports.length"> · {{ t('devdock.processes.ports', { ports: formatPorts(process.ports) }) }}</template>
               </span>
             </div>
 
@@ -222,6 +222,13 @@ const runGroups = computed(() => {
   }
   return groups
 })
+
+function formatPorts(ports: number[]): string {
+  if (ports.length <= 4) {
+    return ports.join(', ')
+  }
+  return `${ports.slice(0, 4).join(', ')}...`
+}
 </script>
 
 <style scoped lang="scss">

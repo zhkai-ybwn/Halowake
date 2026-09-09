@@ -308,6 +308,86 @@ mod tests {
     }
 
     #[test]
+    fn ignores_http_access_logs_and_outbound_connection_ports() {
+        let mut ports = Vec::new();
+
+        // 1. Uvicorn / FastAPI access logs (the bug reported by user)
+        append_detected_ports("INFO:     127.0.0.1:51318 - \"GET /api/v1/auth HTTP/1.1\" 200 OK", &mut ports);
+        append_detected_ports("INFO:     127.0.0.1:52094 - \"POST /api/v1/projects HTTP/1.1\" 201 Created", &mut ports);
+        append_detected_ports("INFO:     ('127.0.0.1', 52312) - \"WebSocket /ws\" [accepted]", &mut ports);
+
+        // 2. Common Log Format access logs
+        append_detected_ports("127.0.0.1:54602 - - [08/Sep/2026:11:35:55 +0800] \"GET /index.html HTTP/1.1\" 200 4523", &mut ports);
+        append_detected_ports("127.0.0.1:54939 - \"GET /favicon.ico HTTP/1.1\" 404", &mut ports);
+
+        // 3. Outbound client connections to database / cache / upstream
+        append_detected_ports("Connected to Redis at 127.0.0.1:6379", &mut ports);
+        append_detected_ports("Connecting to postgresql://user:pass@127.0.0.1:5432/db", &mut ports);
+        append_detected_ports("Proxying request to http://localhost:8081/api", &mut ports);
+        append_detected_ports("Forwarding to 127.0.0.1:9000", &mut ports);
+
+        // None of the client ephemeral ports or upstream ports should be captured
+        assert!(ports.is_empty(), "Expected no ports detected from access or outbound logs, got: {:?}", ports);
+
+        // Genuine server startup output should still be captured properly
+        append_detected_ports("INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)", &mut ports);
+        append_detected_ports("服务启动成功，监听端口: 8080", &mut ports);
+        ports.sort_unstable();
+        assert_eq!(ports, vec![8000, 8080]);
+    }
+
+    #[test]
+    fn caps_maximum_detected_ports_at_four() {
+        let mut ports = Vec::new();
+        for port in 3000..3010 {
+            append_detected_ports(&format!("Server listening on port {port}"), &mut ports);
+        }
+        assert_eq!(ports.len(), 4);
+    }
+
+    #[test]
+    fn snapshot_process_prunes_ghost_ports_when_active_port_is_listening() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test port");
+        let active_port = listener.local_addr().expect("read test address").port();
+
+        // 51318 is a ghost port that is not bound/listening
+        let ghost_port = 51318;
+
+        let process = ManagedProcess {
+            child: Arc::new(Mutex::new(silent_command("cmd").spawn().unwrap_or_else(|_| {
+                Command::new("sh").arg("-c").arg("true").spawn().unwrap()
+            }))),
+            logs: Arc::new(Mutex::new(VecDeque::new())),
+            detected_ports: Arc::new(Mutex::new(vec![active_port, ghost_port])),
+            detected_urls: Arc::new(Mutex::new(vec![format!("http://127.0.0.1:{active_port}")])),
+            status: Arc::new(Mutex::new(ProjectProcessStatus {
+                state: "running".to_string(),
+                exit_code: None,
+                exited_at: None,
+            })),
+            meta: ProjectProcessMeta {
+                id: "test-ghost-prune".to_string(),
+                project_path: ".".to_string(),
+                project_name: "test".to_string(),
+                script_name: "test".to_string(),
+                command: "test".to_string(),
+                package_manager: "none".to_string(),
+                pid: 1,
+                started_at: now_millis(),
+                command_id: None,
+                command_name: None,
+                executor: None,
+                working_directory: None,
+                config_revision: None,
+            },
+        };
+
+        let snapshot = snapshot_process(&process);
+        assert_eq!(snapshot.ports, vec![active_port]);
+        drop(listener);
+    }
+
+    #[test]
     fn package_manager_command_uses_hidden_shell_on_windows() {
         let command = package_manager_process_command("corepack pnpm", "dev");
 

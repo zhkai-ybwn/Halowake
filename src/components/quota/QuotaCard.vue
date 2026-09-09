@@ -4,7 +4,7 @@
     <header class="card-header">
       <div class="header-main">
         <div class="provider-badge" :data-provider="quota.providerType">
-          <Icon :icon="providerIcon" />
+          <ProviderBrandLogo :provider="quota.providerType" :size="20" />
         </div>
         <div class="provider-info">
           <div class="title-row">
@@ -205,6 +205,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ProviderBrandLogo from './ProviderBrandLogo.vue'
 import { openExternalUrl } from '@/services/app-service'
 import type { ProviderQuota, QuotaKind, PaceLevel } from '@/services/quota/quota-service'
 
@@ -224,29 +225,30 @@ const providerDisplayName = computed(() => {
   switch (props.quota.providerType) {
     case 'codex':
       return 'OpenAI / Codex'
+    case 'claude':
+      return 'Anthropic / Claude Code'
+    case 'gemini':
+      return 'Google Gemini / Antigravity'
     case 'deepseek':
       return 'DeepSeek'
     case 'openrouter':
       return 'OpenRouter'
-    case 'gemini':
-      return 'Google Gemini / Antigravity'
+    case 'opencode':
+      return 'OpenCode'
+    case 'workbuddy':
+      return 'Tencent WorkBuddy (企业助手)'
+    case 'siliconflow':
+      return 'SiliconFlow (硅基流动)'
+    case 'moonshot':
+      return 'Moonshot (月之暗面 / Kimi)'
+    case 'zhipu':
+      return '智谱 GLM (BigModel)'
+    case 'qwen':
+      return '通义千问 (阿里云百炼)'
+    case 'minimax':
+      return 'MiniMax (稀宇科技)'
     default:
       return 'OpenAI-Compatible'
-  }
-})
-
-const providerIcon = computed(() => {
-  switch (props.quota.providerType) {
-    case 'codex':
-      return 'solar:code-square-linear'
-    case 'deepseek':
-      return 'solar:bolt-circle-linear'
-    case 'openrouter':
-      return 'solar:routing-2-linear'
-    case 'gemini':
-      return 'solar:stars-minimalistic-linear'
-    default:
-      return 'solar:server-linear'
   }
 })
 
@@ -455,26 +457,48 @@ async function handleOpenExternal(url: string) {
   justify-content: center;
   flex-shrink: 0;
 
+  :deep(.brand-svg),
   svg {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
 
   &[data-provider='deepseek'] {
-    background: rgba(2, 132, 199, 0.12);
-    color: #0284c7;
+    background: rgba(77, 107, 254, 0.12);
   }
-  &[data-provider='codex'] {
-    background: rgba(16, 185, 129, 0.12);
-    color: #10b981;
+  &[data-provider='codex'],
+  &[data-provider='openai'] {
+    background: rgba(16, 163, 127, 0.12);
   }
   &[data-provider='openrouter'] {
-    background: rgba(139, 92, 246, 0.12);
-    color: #8b5cf6;
+    background: rgba(100, 102, 233, 0.12);
   }
   &[data-provider='gemini'] {
-    background: rgba(245, 158, 11, 0.12);
-    color: #f59e0b;
+    background: rgba(49, 134, 255, 0.12);
+  }
+  &[data-provider='claude'] {
+    background: rgba(217, 119, 87, 0.12);
+  }
+  &[data-provider='opencode'] {
+    background: rgba(14, 165, 233, 0.12);
+  }
+  &[data-provider='workbuddy'] {
+    background: rgba(0, 102, 255, 0.12);
+  }
+  &[data-provider='siliconflow'] {
+    background: rgba(124, 58, 237, 0.12);
+  }
+  &[data-provider='moonshot'] {
+    background: rgba(99, 102, 241, 0.12);
+  }
+  &[data-provider='zhipu'] {
+    background: rgba(48, 98, 249, 0.12);
+  }
+  &[data-provider='qwen'] {
+    background: rgba(97, 92, 237, 0.12);
+  }
+  &[data-provider='minimax'] {
+    background: rgba(255, 75, 75, 0.12);
   }
 }
 

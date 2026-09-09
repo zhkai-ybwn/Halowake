@@ -31,11 +31,14 @@
           v-model:value="formData.apiKey"
           type="password"
           show-password-on="click"
-          :placeholder="t('quota.apiKeyPlaceholder')"
+          :placeholder="apiKeyPlaceholder"
         />
+        <span v-if="isCliProvider" class="form-hint">
+          {{ t('quota.cliAutoDetectHint', '支持自动读取本地 CLI 登录态配置，亦可在此填入 Token/Key 覆盖') }}
+        </span>
       </div>
 
-      <div v-if="formData.providerType === 'deepseek' || formData.providerType === 'custom'" class="form-item">
+      <div v-if="supportsBaseUrl" class="form-item">
         <label>{{ t('quota.baseUrlOptional') }}</label>
         <NInput
           v-model:value="formData.baseUrl"
@@ -93,12 +96,37 @@ const formData = ref<AccountConfig>({
 })
 
 const providerOptions = computed(() => [
-  { label: 'DeepSeek', value: 'deepseek' },
-  { label: 'OpenRouter', value: 'openrouter' },
-  { label: 'Google AI Pro (Gemini)', value: 'gemini' },
+  { label: 'Claude Code (Anthropic / CLI)', value: 'claude' },
   { label: 'Codex (OpenAI / CLI)', value: 'codex' },
+  { label: 'OpenCode (Go / Zen)', value: 'opencode' },
+  { label: 'Tencent WorkBuddy (企业助手 / 积分)', value: 'workbuddy' },
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'SiliconFlow (硅基流动)', value: 'siliconflow' },
+  { label: 'Moonshot (月之暗面 / Kimi)', value: 'moonshot' },
+  { label: '智谱 GLM (BigModel)', value: 'zhipu' },
+  { label: '通义千问（暂不支持自动额度查询）', value: 'qwen', disabled: true },
+  { label: 'MiniMax（暂不支持自动额度查询）', value: 'minimax', disabled: true },
+  { label: 'Google AI Pro (Gemini)', value: 'gemini' },
+  { label: 'OpenRouter', value: 'openrouter' },
   { label: 'Custom OpenAI-compatible', value: 'custom' },
 ])
+
+const isCliProvider = computed(() => {
+  return ['claude', 'opencode', 'workbuddy'].includes(formData.value.providerType)
+})
+
+const supportsBaseUrl = computed(() => {
+  return ['deepseek', 'siliconflow', 'moonshot', 'zhipu', 'qwen', 'minimax', 'custom'].includes(
+    formData.value.providerType
+  )
+})
+
+const apiKeyPlaceholder = computed(() => {
+  if (formData.value.providerType === 'claude') return '可留空以自动读取 ~/.claude.json 或输入 sk-ant-...'
+  if (formData.value.providerType === 'opencode') return '可留空以读取本地配置，或输入 OpenCode API Key'
+  if (formData.value.providerType === 'workbuddy') return '可留空以读取本地 ~/.workbuddy 凭据'
+  return t('quota.apiKeyPlaceholder')
+})
 
 watch(
   () => props.show,
@@ -167,6 +195,12 @@ async function handleSave() {
   label {
     font-size: 11px;
     color: var(--lumina-text-secondary);
+  }
+
+  .form-hint {
+    font-size: 11px;
+    color: var(--lumina-text-tertiary);
+    line-height: 1.4;
   }
 }
 

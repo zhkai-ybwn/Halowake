@@ -19,6 +19,7 @@
       </button>
 
       <div class="titlebar-actions" data-tauri-drag-region>
+        <TopbarQuotaPill />
         <div v-if="!isMac" class="windows-window-controls" @mousedown.stop @dblclick.stop>
           <button class="window-button" type="button" :title="t('topbar.minimize')" @click="minimizeWindow"><span class="caption-icon caption-icon--minimize" aria-hidden="true"></span></button>
           <button class="window-button" type="button" :title="maximizeTitle" @click="toggleMaximize"><span class="caption-icon" :class="isMaximized ? 'caption-icon--restore' : 'caption-icon--maximize'" aria-hidden="true"></span></button>
@@ -29,14 +30,61 @@
 
     <div class="app-area">
       <aside class="sidebar">
-        <div class="sidebar-section-label">{{ t('workbench.navigation') }}</div>
-        <nav class="sidebar-nav" :aria-label="t('workbench.navigation')">
-          <button v-for="item in navItems" :key="item.route" class="sidebar-item" :class="{ active: route.name === item.route }" type="button" :title="sidebarCollapsed ? item.label : undefined" @click="router.push({ name: item.route })">
-            <Icon :icon="item.icon" /><span>{{ item.label }}</span>
-          </button>
-        </nav>
+        <!-- WORKSPACE Group -->
+        <div class="sidebar-group">
+          <div class="sidebar-section-header">
+            <Icon icon="solar:laptop-minimalistic-linear" class="section-icon" />
+            <span class="section-title">{{ t('workbench.groupWorkspace') }}</span>
+          </div>
+          <nav class="sidebar-nav" :aria-label="t('workbench.groupWorkspace')">
+            <button
+              v-for="item in workspaceItems"
+              :key="item.route"
+              class="sidebar-item"
+              :class="{ active: route.name === item.route }"
+              type="button"
+              :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
+              @click="router.push({ name: item.route })"
+            >
+              <Icon :icon="item.icon" />
+              <span class="item-title">{{ item.label }}</span>
+              <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Distinct Divider -->
+        <div class="sidebar-section-divider"></div>
+
+        <!-- UTILITIES Group -->
+        <div class="sidebar-group">
+          <div class="sidebar-section-header">
+            <Icon icon="solar:widget-2-linear" class="section-icon" />
+            <span class="section-title">{{ t('workbench.groupUtilities') }}</span>
+          </div>
+          <nav class="sidebar-nav" :aria-label="t('workbench.groupUtilities')">
+            <button
+              v-for="item in utilityItems"
+              :key="item.route"
+              class="sidebar-item"
+              :class="{ active: route.name === item.route }"
+              type="button"
+              :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
+              @click="router.push({ name: item.route })"
+            >
+              <Icon :icon="item.icon" />
+              <span class="item-title">{{ item.label }}</span>
+              <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
+            </button>
+          </nav>
+        </div>
+
         <footer class="sidebar-footer">
-          <button class="sidebar-item" :class="{ active: route.name === 'settings' }" type="button" :title="sidebarCollapsed ? t('topbar.settings') : undefined" @click="toggleSettings"><Icon icon="solar:settings-linear" /><span>{{ t('topbar.settings') }}</span></button>
+          <button class="sidebar-item" :class="{ active: route.name === 'settings' }" type="button" :title="sidebarCollapsed ? `${t('topbar.settings')} (${isMac ? '⌘,' : 'Ctrl+,'})` : undefined" @click="toggleSettings">
+            <Icon icon="solar:settings-linear" />
+            <span class="item-title">{{ t('topbar.settings') }}</span>
+            <kbd class="shortcut-kbd">{{ isMac ? '⌘,' : 'Ctrl+,' }}</kbd>
+          </button>
         </footer>
       </aside>
 
@@ -84,6 +132,7 @@
         </footer>
       </section>
     </n-modal>
+
   </div>
 </template>
 
@@ -97,6 +146,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIconButton from '@/components/workbench/WorkbenchIconButton.vue'
+import TopbarQuotaPill from '@/components/quota/TopbarQuotaPill.vue'
 import { listProjectProcesses, stopAllProjectProcesses, type ProjectProcessSnapshot } from '@/services/project/project-service'
 import { usePreferencesStore } from '@/stores/preferences'
 import { hasPrimaryModifier, isMacPlatform } from '@/utils/platform-shortcuts'
@@ -124,20 +174,50 @@ let unlistenCloseRequested: UnlistenFn | null = null
 let unlistenTrayExit: UnlistenFn | null = null
 let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-const navItems = computed(() => [
-  { route: 'devdock', label: t('workbench.devdock'), icon: 'solar:folder-with-files-linear', description: t('workbench.devdockDescription') },
-  { route: 'git-assistant', label: t('workbench.git'), icon: 'solar:code-square-linear', description: t('workbench.gitDescription') },
-  { route: 'codex-report', label: t('workbench.codexReport'), icon: 'solar:notes-linear', description: t('workbench.codexReportDescription') },
-  { route: 'ai-quota', label: t('workbench.aiQuota'), icon: 'solar:wallet-money-linear', description: t('workbench.aiQuotaDescription') },
+interface ShellNavItem {
+  route: string
+  label: string
+  icon: string
+  description: string
+  shortcut: string
+}
+
+const workspaceItems = computed<ShellNavItem[]>(() => [
+  { route: 'devdock', label: t('workbench.devdock'), icon: 'solar:folder-with-files-linear', description: t('workbench.devdockDescription'), shortcut: '1' },
+  { route: 'git-assistant', label: t('workbench.git'), icon: 'solar:code-square-linear', description: t('workbench.gitDescription'), shortcut: '2' },
 ])
+
+const utilityItems = computed<ShellNavItem[]>(() => [
+  { route: 'markdown-preview', label: t('workbench.markdownPreview'), icon: 'solar:document-text-linear', description: t('workbench.markdownPreviewDescription'), shortcut: '3' },
+  { route: 'codex-report', label: t('workbench.codexReport'), icon: 'solar:notes-linear', description: t('workbench.codexReportDescription'), shortcut: '4' },
+  { route: 'ai-quota', label: t('workbench.aiQuota'), icon: 'solar:wallet-money-linear', description: t('workbench.aiQuotaDescription'), shortcut: '5' },
+])
+
+const navItems = computed(() => [...workspaceItems.value, ...utilityItems.value])
 const commands = computed(() => [...navItems.value, { route: 'settings', label: t('topbar.settings'), icon: 'solar:settings-linear', description: t('workbench.settingsDescription') }])
 const filteredCommands = computed(() => {
   const query = commandQuery.value.trim().toLocaleLowerCase()
   return query ? commands.value.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query)) : commands.value
 })
 const currentModuleLabel = computed(() => commands.value.find(item => item.route === route.name)?.label ?? t('workbench.git'))
-const windowTitle = computed(() => route.name === 'devdock' ? t('topbar.titleDevDock') : route.name === 'codex-report' ? t('topbar.titleCodexReport') : route.name === 'ai-quota' ? t('topbar.titleAiQuota') : route.name === 'settings' ? t('topbar.titleSettings') : t('topbar.titleGit'))
+const windowTitle = computed(() =>
+  route.name === 'devdock'
+    ? t('topbar.titleDevDock')
+    : route.name === 'codex-report'
+      ? t('topbar.titleCodexReport')
+      : route.name === 'ai-quota'
+        ? t('topbar.titleAiQuota')
+        : route.name === 'markdown-preview'
+          ? t('topbar.titleMarkdownPreview')
+          : route.name === 'settings'
+            ? t('topbar.titleSettings')
+            : t('topbar.titleGit')
+)
 const maximizeTitle = computed(() => isMaximized.value ? t('topbar.restore') : t('topbar.maximize'))
+
+function shortcutLabel(num: string) {
+  return isMac ? `⌘${num}` : `Alt+${num}`
+}
 
 watch(windowTitle, title => { document.title = title }, { immediate: true })
 watch(filteredCommands, () => { selectedCommandIndex.value = 0 })
@@ -170,9 +250,27 @@ function handleWindowResized() {
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   const mod = hasPrimaryModifier(event)
-  if (mod && event.key.toLowerCase() === 'k') { event.preventDefault(); openCommandPalette() }
-  if (mod && event.key === ',') { event.preventDefault(); void router.push({ name: 'settings' }) }
-  if (event.key === 'Escape' && commandPaletteOpen.value) commandPaletteOpen.value = false
+  if (mod && event.key.toLowerCase() === 'k') { event.preventDefault(); openCommandPalette(); return }
+  if (mod && event.key === ',') { event.preventDefault(); void router.push({ name: 'settings' }); return }
+  if (event.key === 'Escape' && commandPaletteOpen.value) { commandPaletteOpen.value = false; return }
+
+  // Quick switch 1~5 via Cmd+1~5 (Mac) / Alt+1~5 or Ctrl+1~5 (Windows/Linux)
+  const isAltNumber = event.altKey && ['1', '2', '3', '4', '5'].includes(event.key)
+  const isModNumber = mod && ['1', '2', '3', '4', '5'].includes(event.key)
+  if (isAltNumber || isModNumber) {
+    const shortcutMap: Record<string, string> = {
+      '1': 'devdock',
+      '2': 'git-assistant',
+      '3': 'markdown-preview',
+      '4': 'codex-report',
+      '5': 'ai-quota',
+    }
+    const dest = shortcutMap[event.key]
+    if (dest) {
+      event.preventDefault()
+      void router.push({ name: dest })
+    }
+  }
 }
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0') }
 function openCommandPalette() { commandPaletteOpen.value = true }
@@ -218,10 +316,26 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 .caption-icon--close::before, .caption-icon--close::after { background: currentcolor; content: ''; height: 1.2px; left: 0; position: absolute; top: 5px; width: 12px; }.caption-icon--close::before { transform: rotate(45deg); }.caption-icon--close::after { transform: rotate(-45deg); }
 .app-area { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .sidebar { background: var(--lumina-sidebar-bg); border-right: 0.5px solid var(--lumina-separator); display: flex; flex: 0 0 var(--lumina-sidebar-width); flex-direction: column; min-width: 0; overflow: hidden; padding: 14px 10px 10px; transition: flex-basis var(--lumina-duration-normal) var(--lumina-ease-out); user-select: none; backdrop-filter: var(--lumina-vibrancy); }
-.sidebar-section-label { color: var(--lumina-text-tertiary); font-size: 10px; font-weight: 600; letter-spacing: 0.05em; padding: 0 9px 7px; text-transform: uppercase; }.sidebar-nav { display: flex; flex: 1; flex-direction: column; gap: 3px; }.sidebar-footer { border-top: 0.5px solid var(--lumina-separator); display: flex; flex-direction: column; gap: 3px; padding-top: 8px; }
-.sidebar-item { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-sm); color: var(--lumina-text-secondary); cursor: pointer; display: flex; gap: 9px; height: 32px; padding: 0 9px; text-align: left; transition: background var(--lumina-duration-fast) var(--lumina-ease-out), color var(--lumina-duration-fast) var(--lumina-ease-out); width: 100%; }
-.sidebar-item:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }.sidebar-item:active { transform: scale(0.98); }.sidebar-item.active { background: var(--lumina-control-active); color: var(--lumina-text); font-weight: 500; }.sidebar-item svg { flex: 0 0 auto; height: 17px; width: 17px; }.sidebar-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-is-collapsed .sidebar { flex-basis: var(--lumina-sidebar-collapsed-width); padding-inline: 10px; }.sidebar-is-collapsed .sidebar-section-label, .sidebar-is-collapsed .sidebar-item span { display: none; }.sidebar-is-collapsed .sidebar-item { justify-content: center; padding: 0; }
+.sidebar-group { display: flex; flex-direction: column; }
+.sidebar-section-header { align-items: center; color: var(--lumina-text-secondary); display: flex; font-size: 11px; font-weight: 650; gap: 6px; letter-spacing: 0.04em; padding: 4px 8px 7px; user-select: none; }
+.sidebar-section-header .section-icon { color: var(--lumina-primary); flex-shrink: 0; font-size: 13px; opacity: 0.85; }
+.sidebar-section-header .section-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-section-divider { background: var(--lumina-separator); height: 1px; margin: 14px 6px 12px; opacity: 0.85; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 3px; }
+.sidebar-footer { border-top: 0.5px solid var(--lumina-separator); display: flex; flex-direction: column; gap: 3px; margin-top: auto; padding-top: 8px; }
+.sidebar-item { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-sm); color: var(--lumina-text-secondary); cursor: pointer; display: flex; gap: 9px; height: 32px; padding: 0 9px; position: relative; text-align: left; transition: background var(--lumina-duration-fast) var(--lumina-ease-out), color var(--lumina-duration-fast) var(--lumina-ease-out); width: 100%; }
+.sidebar-item:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }
+.sidebar-item:active { transform: scale(0.98); }
+.sidebar-item.active { background: var(--lumina-control-active); color: var(--lumina-text); font-weight: 500; }
+.sidebar-item svg { flex: 0 0 auto; height: 17px; width: 17px; }
+.sidebar-item .item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-item .shortcut-kbd { align-items: center; background: color-mix(in srgb, var(--lumina-text) 6%, transparent); border-radius: 4px; color: var(--lumina-text-tertiary); display: inline-flex; font-family: var(--lumina-font-mono); font-size: 10px; font-weight: 500; height: 17px; justify-content: center; line-height: 1; margin-left: auto; min-width: 18px; padding: 0 4px; transition: color var(--lumina-duration-fast) var(--lumina-ease-out), background var(--lumina-duration-fast) var(--lumina-ease-out); }
+.sidebar-item:hover .shortcut-kbd { background: color-mix(in srgb, var(--lumina-text) 10%, transparent); color: var(--lumina-text-secondary); }
+.sidebar-item.active .shortcut-kbd { background: color-mix(in srgb, var(--lumina-text) 12%, transparent); color: var(--lumina-text); font-weight: 600; }
+.sidebar-is-collapsed .sidebar { flex-basis: var(--lumina-sidebar-collapsed-width); padding-inline: 10px; }
+.sidebar-is-collapsed .sidebar-section-header, .sidebar-is-collapsed .sidebar-item .item-title, .sidebar-is-collapsed .shortcut-kbd { display: none; }
+.sidebar-is-collapsed .sidebar-section-divider { margin: 10px 4px; }
+.sidebar-is-collapsed .sidebar-item { justify-content: center; padding: 0; }
 .view-host { background: var(--lumina-content-bg); flex: 1; min-height: 0; min-width: 0; overflow: hidden; position: relative; }.route-fade-enter-active { transition: opacity 0.1s ease-out; }.route-fade-enter-from { opacity: 0.85; }
 .command-palette { background: color-mix(in srgb, var(--lumina-surface-elevated) 92%, transparent); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); overflow: hidden; width: min(620px, calc(100vw - 48px)); backdrop-filter: var(--lumina-vibrancy); }.command-palette > header { align-items: center; border-bottom: 0.5px solid var(--lumina-separator); display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 54px; padding: 8px 12px; }.command-palette > header > svg { color: var(--lumina-text-secondary); height: 19px; width: 19px; }.command-palette :deep(.n-input) { --n-border: 0; --n-border-hover: 0; --n-border-focus: 0; --n-box-shadow-focus: none; --n-color: transparent; --n-color-focus: transparent; font-size: 15px; }
 .command-results { max-height: 360px; overflow: auto; padding: 8px; }.command-group-label { color: var(--lumina-text-tertiary); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; margin: 4px 8px 6px; text-transform: uppercase; }.command-results button { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-md); color: var(--lumina-text); cursor: pointer; display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 48px; padding: 6px 9px; text-align: left; width: 100%; }.command-results button.selected { background: var(--lumina-primary-soft); }.command-results button > svg { color: var(--lumina-text-tertiary); height: 15px; width: 15px; }.command-icon { align-items: center; background: var(--lumina-control-bg); border-radius: var(--lumina-radius-sm); display: flex; height: 30px; justify-content: center; width: 30px; }.command-icon svg { height: 17px; width: 17px; }.command-results button > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }.command-results strong { font-size: 13px; font-weight: 550; }.command-results small { color: var(--lumina-text-secondary); font-size: 11px; }.command-empty { color: var(--lumina-text-secondary); padding: 32px; text-align: center; }

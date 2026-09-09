@@ -9,7 +9,26 @@ pub mod storage;
 use tauri::{menu::MenuBuilder, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, Emitter, Manager};
 
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut initial_file: Option<String> = None;
+    for arg in args.into_iter().skip(1) {
+        if !arg.starts_with('-') {
+            let p = std::path::Path::new(&arg);
+            if p.exists() && p.is_file() {
+                let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+                let raw = canonical.to_string_lossy().to_string();
+                let clean = raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string();
+                initial_file = Some(clean);
+                break;
+            }
+        }
+    }
+    let launch_state = commands::markdown::AppLaunchState {
+        initial_file: std::sync::Mutex::new(initial_file),
+    };
+
     tauri::Builder::default()
+        .manage(launch_state)
         .manage(commands::project_process::ProjectProcessState::default())
         .manage(review::ReviewTaskRegistry::default())
         .plugin(tauri_plugin_dialog::init())
@@ -145,6 +164,10 @@ pub fn run() {
             commands::review::list_review_rules,
             commands::review::save_review_rule,
             commands::review::delete_review_rule,
+            commands::markdown::read_markdown_file,
+            commands::markdown::get_markdown_file_metadata,
+            commands::markdown::get_initial_markdown_file,
+            commands::markdown::open_markdown_in_editor,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

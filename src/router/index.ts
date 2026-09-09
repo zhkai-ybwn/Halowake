@@ -36,6 +36,11 @@ const routes: RouteRecordRaw[] = [
         component: AiQuotaView,
       },
       {
+        path: 'markdown',
+        name: 'markdown-preview',
+        component: () => import('@/views/markdown-preview/MarkdownPreviewView.vue'),
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: SettingsView,
@@ -51,6 +56,11 @@ const routes: RouteRecordRaw[] = [
     path: '/diff',
     name: 'git-diff',
     component: () => import('@/views/git-diff/GitDiffView.vue')
+  },
+  {
+    path: '/preview',
+    name: 'markdown-window',
+    component: () => import('@/views/markdown-preview/MarkdownWindowView.vue')
   }
 ]
 

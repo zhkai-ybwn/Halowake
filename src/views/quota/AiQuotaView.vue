@@ -76,6 +76,19 @@
       </div>
 
       <div class="metric-card">
+        <div class="metric-icon-wrap credits">
+          <Icon icon="solar:stars-minimalistic-linear" />
+        </div>
+        <div class="metric-content">
+          <span class="metric-label">{{ t('quota.totalCredits') }}</span>
+          <div class="metric-value-row">
+            <strong class="metric-value">{{ (summary.totalCredits || 0).toLocaleString() }}</strong>
+            <span class="metric-unit">{{ t('quota.creditsUnit') }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="metric-card">
         <div class="metric-icon-wrap active">
           <Icon icon="solar:check-circle-linear" />
         </div>
@@ -102,6 +115,21 @@
       </div>
     </section>
 
+    <!-- 分类筛选 Tab 栏 -->
+    <div v-if="quotas.length > 0" class="category-filter-bar">
+      <button
+        v-for="tab in categoryTabs"
+        :key="tab.id"
+        type="button"
+        class="category-tab-btn"
+        :class="{ active: activeCategory === tab.id }"
+        @click="activeCategory = tab.id"
+      >
+        <span>{{ tab.label }}</span>
+        <span class="tab-count">{{ tab.count }}</span>
+      </button>
+    </div>
+
     <!-- 额度卡片列表 -->
     <main class="cards-viewport">
       <div v-if="loading && quotas.length === 0" class="loading-state">
@@ -127,9 +155,14 @@
         </div>
       </div>
 
+      <div v-else-if="filteredQuotas.length === 0" class="empty-filtered-state">
+        <Icon icon="solar:filter-linear" />
+        <p>{{ t('quota.noMatchingQuotas') }}</p>
+      </div>
+
       <div v-else class="cards-grid">
         <QuotaCard
-          v-for="item in quotas"
+          v-for="item in filteredQuotas"
           :key="item.id"
           :quota="item"
           :refreshing="refreshingId === item.accountId"
@@ -180,12 +213,56 @@ const quotas = ref<ProviderQuota[]>([])
 const summary = ref<QuotaSummary>({
   totalCnyBalance: 0,
   totalUsdBalance: 0,
+  totalCredits: 0,
   activeAccountsCount: 0,
   warningAccountsCount: 0,
 })
 const loading = ref(false)
 const discovering = ref(false)
 const refreshingId = ref<string | null>(null)
+
+type CategoryType = 'all' | 'coding' | 'domestic' | 'credits'
+const activeCategory = ref<CategoryType>('all')
+
+const categoryTabs = computed(() => {
+  const allCount = quotas.value.length
+  const codingCount = quotas.value.filter(q =>
+    ['codex', 'claude', 'gemini', 'openrouter'].includes(q.providerType)
+  ).length
+  const domesticCount = quotas.value.filter(q =>
+    ['deepseek', 'siliconflow', 'moonshot', 'zhipu', 'qwen', 'minimax'].includes(q.providerType)
+  ).length
+  const creditsCount = quotas.value.filter(q =>
+    ['workbuddy', 'opencode'].includes(q.providerType) || q.quotas.some(item => item.type === 'credits')
+  ).length
+
+  return [
+    { id: 'all' as const, label: t('quota.categoryAll'), count: allCount },
+    { id: 'coding' as const, label: t('quota.categoryGlobal'), count: codingCount },
+    { id: 'domestic' as const, label: t('quota.categoryDomestic'), count: domesticCount },
+    { id: 'credits' as const, label: t('quota.categoryCredits'), count: creditsCount },
+  ]
+})
+
+const filteredQuotas = computed(() => {
+  if (activeCategory.value === 'all') return quotas.value
+  if (activeCategory.value === 'coding') {
+    return quotas.value.filter(q =>
+      ['codex', 'claude', 'gemini', 'openrouter'].includes(q.providerType)
+    )
+  }
+  if (activeCategory.value === 'domestic') {
+    return quotas.value.filter(q =>
+      ['deepseek', 'siliconflow', 'moonshot', 'zhipu', 'qwen', 'minimax'].includes(q.providerType)
+    )
+  }
+  if (activeCategory.value === 'credits') {
+    return quotas.value.filter(q =>
+      ['workbuddy', 'opencode'].includes(q.providerType) || q.quotas.some(item => item.type === 'credits')
+    )
+  }
+  return quotas.value
+})
 
 const editModalOpen = ref(false)
 const manageModalOpen = ref(false)
@@ -256,7 +333,9 @@ function handleCopyShareSummary() {
 
   const lines = [
     '📊 我的 AI 算力与额度看板 (via Halowake)',
-    `💰 资产总览: ¥${summary.value.totalCnyBalance.toFixed(2)} CNY | $${summary.value.totalUsdBalance.toFixed(2)} USD`,
+    `💰 资产总览: ¥${summary.value.totalCnyBalance.toFixed(2)} CNY | $${summary.value.totalUsdBalance.toFixed(2)} USD${
+      summary.value.totalCredits > 0 ? ` | 🌟 积分: ${summary.value.totalCredits.toLocaleString()} 点` : ''
+    }`,
   ]
 
   for (const q of quotas.value) {
@@ -268,6 +347,8 @@ function handleCopyShareSummary() {
       } else if (item.type === 'rateLimit') {
         const rem = Math.max(0, 100 - item.usedPercent).toFixed(0)
         parts.push(`${item.periodLabel} 剩余 ${rem}%`)
+      } else if (item.type === 'credits') {
+        parts.push(`${item.label || '积分'} 剩余 ${item.remaining.toLocaleString()}${item.total ? ` / ${item.total.toLocaleString()}` : ''}`)
       }
     }
     if (q.resetCredits && q.resetCredits.availableCount > 0) {
@@ -461,6 +542,11 @@ async function handleRefreshSingle(accountId: string) {
     color: #10b981;
   }
 
+  &.credits {
+    background: rgba(236, 72, 153, 0.1);
+    color: #ec4899;
+  }
+
   &.active {
     background: rgba(99, 102, 241, 0.1);
     color: #6366f1;
@@ -511,9 +597,77 @@ async function handleRefreshSingle(accountId: string) {
   margin-left: 2px;
 }
 
+.category-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--lumina-surface-elevated);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-md);
+  width: fit-content;
+}
+
+.category-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lumina-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--lumina-radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--lumina-text);
+    background: var(--lumina-control-hover);
+  }
+
+  &.active {
+    color: var(--lumina-text);
+    background: var(--lumina-control-bg);
+    font-weight: 600;
+    box-shadow: var(--lumina-shadow-sm);
+  }
+
+  .tab-count {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--lumina-separator);
+    color: var(--lumina-text-secondary);
+  }
+
+  &.active .tab-count {
+    background: color-mix(in srgb, var(--lumina-accent) 20%, transparent);
+    color: var(--lumina-accent);
+  }
+}
+
 .cards-viewport {
   flex: 1;
   min-height: 0;
+}
+
+.empty-filtered-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px;
+  color: var(--lumina-text-tertiary);
+  font-size: 13px;
+
+  svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.5;
+  }
 }
 
 .cards-grid {

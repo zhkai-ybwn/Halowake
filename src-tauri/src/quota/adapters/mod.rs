@@ -1,7 +1,13 @@
+pub mod claude;
 pub mod codex;
 pub mod deepseek;
 pub mod gemini;
+pub mod moonshot;
+pub mod opencode;
 pub mod openrouter;
+pub mod siliconflow;
+pub mod workbuddy;
+pub mod zhipu;
 
 pub(crate) fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
     let s = s.trim_end_matches('Z');

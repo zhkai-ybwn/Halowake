@@ -187,11 +187,18 @@ const ansiUp = new AnsiUp()
 ansiUp.use_classes = true
 ansiUp.escape_html = true
 
+function formatPorts(ports: number[]): string {
+  if (ports.length <= 4) {
+    return ports.join(', ')
+  }
+  return `${ports.slice(0, 4).join(', ')}...`
+}
+
 const description = computed(() => {
   if (!props.logs) return ''
   const ports = props.logs.process.ports
   return ports.length
-    ? `${props.logs.process.commandPreview || props.logs.process.command} · ${t('devdock.processes.ports', { ports: ports.join(', ') })}`
+    ? `${props.logs.process.commandPreview || props.logs.process.command} · ${t('devdock.processes.ports', { ports: formatPorts(ports) })}`
     : props.logs.process.commandPreview || props.logs.process.command
 })
 
