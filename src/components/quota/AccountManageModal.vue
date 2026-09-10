@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NSwitch, useMessage } from 'naive-ui'
+import { NSwitch, useDialog, useMessage } from 'naive-ui'
 import {
   loadQuotaAccounts,
   saveQuotaAccounts,
@@ -76,6 +76,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
+const dialog = useDialog()
 
 const accounts = ref<AccountConfig[]>([])
 
@@ -106,27 +107,66 @@ function formatProviderName(provider: ProviderType) {
       return 'OpenRouter'
     case 'gemini':
       return 'Google AI Pro'
+    case 'claude':
+      return 'Claude Code'
+    case 'opencode':
+      return 'OpenCode'
+    case 'workbuddy':
+      return 'WorkBuddy'
+    case 'siliconflow':
+      return 'SiliconFlow'
+    case 'moonshot':
+      return 'Moonshot'
+    case 'zhipu':
+      return '智谱 GLM'
+    case 'qwen':
+      return '通义千问'
+    case 'minimax':
+      return 'MiniMax'
+    case 'cursor':
+      return 'Cursor'
+    case 'qcode':
+      return '阿里灵码'
+    case 'trae':
+      return 'Trae'
+    case 'zcode':
+      return 'Z-Code'
     default:
       return 'Custom'
   }
 }
 
-async function deleteAccount(index: number) {
-  accounts.value.splice(index, 1)
-  await persistAccounts()
+function deleteAccount(index: number) {
+  const account = accounts.value[index]
+  if (!account) return
+  dialog.warning({
+    title: t('common.confirm'),
+    content: t('quota.deleteAccountConfirm', { name: account.name }),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const previous = [...accounts.value]
+      accounts.value.splice(index, 1)
+      if (!(await persistAccounts())) accounts.value = previous
+    },
+  })
 }
 
 async function toggleAccountEnabled(index: number, val: boolean) {
+  const previous = accounts.value[index]?.enabled
+  if (previous === undefined) return
   accounts.value[index].enabled = val
-  await persistAccounts()
+  if (!(await persistAccounts())) accounts.value[index].enabled = previous
 }
 
-async function persistAccounts() {
+async function persistAccounts(): Promise<boolean> {
   try {
     await saveQuotaAccounts(accounts.value)
     emit('saved')
+    return true
   } catch (err) {
     message.error(String(err))
+    return false
   }
 }
 </script>

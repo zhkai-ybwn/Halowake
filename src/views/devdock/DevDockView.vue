@@ -161,6 +161,7 @@ const processLogs = ref<ProjectProcessLogs | null>(null)
 const logModalOpen = ref(false)
 const editingAliasPath = ref<string | null>(null)
 const aliasInputRefs = new Map<string, HTMLInputElement>()
+const aliasOriginalNames = new Map<string, string>()
 const scriptSearch = ref('')
 const scriptSort = ref<ScriptSort>(loadScriptSort())
 const pinEditing = ref(false)
@@ -256,6 +257,7 @@ async function handleAddProject() {
   })
   projects.value = [project, ...projects.value]
 
+  let persisted = false
   try {
     await saveDevDockProject({
       path: project.path,
@@ -265,6 +267,7 @@ async function handleAddProject() {
       createdAt: Date.now(),
       openedAt: project.openedAt,
     })
+    persisted = true
     await scanProject(project, { touch: true })
     if (project.manifest?.name) {
       project.name = project.manifest.name
@@ -279,6 +282,9 @@ async function handleAddProject() {
     }
     message.success(t('devdock.project.addSuccess', { name: project.name }))
   } catch (err) {
+    if (!persisted) {
+      projects.value = projects.value.filter(item => normalizePath(item.path) !== normalized)
+    }
     const rawMsg = err instanceof Error ? err.message : String(err)
     const cleanMsg = rawMsg.replace(/^加载项目配置任务异常:\s*/, '')
     message.error(reportError('devdock.add-project', cleanMsg), { duration: 6000 })
@@ -349,6 +355,8 @@ function setAliasInputRef(el: HTMLInputElement | null, path: string) {
 }
 
 function startEditAlias(path: string) {
+  const project = projects.value.find(item => normalizePath(item.path) === normalizePath(path))
+  if (project) aliasOriginalNames.set(normalizePath(path), project.name)
   editingAliasPath.value = path
   nextTick(() => {
     const input = aliasInputRefs.get(path)
@@ -359,12 +367,29 @@ function startEditAlias(path: string) {
   })
 }
 
-function finishEditAlias(project: DevDockProject) {
-  void normalizeProjectAlias(project)
+async function finishEditAlias(project: DevDockProject) {
+  const key = normalizePath(project.path)
   editingAliasPath.value = null
+  try {
+    await normalizeProjectAlias(project)
+    aliasOriginalNames.delete(key)
+  } catch (err) {
+    const originalName = aliasOriginalNames.get(key)
+    if (originalName !== undefined) project.name = originalName
+    aliasOriginalNames.delete(key)
+    message.error(reportError('devdock.rename-project', err))
+  }
 }
 
 function cancelEditAlias() {
+  const path = editingAliasPath.value
+  if (path) {
+    const key = normalizePath(path)
+    const project = projects.value.find(item => normalizePath(item.path) === key)
+    const originalName = aliasOriginalNames.get(key)
+    if (project && originalName !== undefined) project.name = originalName
+    aliasOriginalNames.delete(key)
+  }
   editingAliasPath.value = null
 }
 
@@ -374,11 +399,13 @@ function dismissProjectError(project: DevDockProject) {
 
 async function removeProject(path: string) {
   const normalized = normalizePath(path)
+  const previous = [...projects.value]
   projects.value = projects.value.filter(project => normalizePath(project.path) !== normalized)
   try {
     await invokeRemoveDevDockProject(path)
   } catch (err) {
-    reportError('devdock.remove-project', err)
+    projects.value = previous
+    message.error(reportError('devdock.remove-project', err))
   }
 }
 

@@ -10,22 +10,22 @@ mod quota_repository;
 pub use ai_settings_repository::{load_ai_settings_from_db, save_ai_settings_to_db};
 pub use codex_report_template_repository::{
     default_builtin_report_templates, delete_codex_report_template, list_codex_report_templates,
-    reset_builtin_codex_report_templates, save_codex_report_template,
-    CodexReportPromptTemplate, DEFAULT_STANDARD_REPORT_PROMPT, DEFAULT_STANDUP_PROMPT,
-    DEFAULT_TECH_SUMMARY_PROMPT,
+    reset_builtin_codex_report_templates, save_codex_report_template, CodexReportPromptTemplate,
+    DEFAULT_STANDARD_REPORT_PROMPT, DEFAULT_STANDUP_PROMPT, DEFAULT_TECH_SUMMARY_PROMPT,
 };
 
 pub use devdock_repository::{
-    clear_devdock_run_history_records, delete_expired_devdock_run_history,
-    list_devdock_projects, list_devdock_run_history_records, remove_devdock_project_record,
-    save_devdock_project_record, save_devdock_run_history_record, DevDockProjectRecord,
-    DevDockRunHistoryRecord,
+    clear_devdock_run_history_records, delete_expired_devdock_run_history, list_devdock_projects,
+    list_devdock_run_history_records, remove_devdock_project_record, save_devdock_project_record,
+    save_devdock_run_history_record, DevDockProjectRecord, DevDockRunHistoryRecord,
 };
 pub use git_history_repository::{
     clear_git_commit_history_entries, delete_expired_git_commit_history,
     list_git_commit_history_entries, save_git_commit_history_entry, GitCommitHistoryRecord,
 };
-pub use quota_repository::{load_quota_accounts_from_db, save_quota_accounts_to_db};
+pub use quota_repository::{
+    load_quota_accounts_from_db, quota_accounts_initialized, save_quota_accounts_to_db,
+};
 
 #[cfg(test)]
 mod tests {
@@ -86,7 +86,8 @@ mod tests {
             expires_at: None,
         };
         save_git_commit_history_entry(&db, &entry_no_expiry).expect("save entry");
-        let cleaned_by_cutoff = delete_expired_git_commit_history(&db, 5000, 2000).expect("clean by cutoff");
+        let cleaned_by_cutoff =
+            delete_expired_git_commit_history(&db, 5000, 2000).expect("clean by cutoff");
         assert_eq!(cleaned_by_cutoff, 1);
     }
 
@@ -133,7 +134,8 @@ mod tests {
         };
         save_devdock_run_history_record(&db, &record).expect("save run history");
 
-        let runs = list_devdock_run_history_records(&db, Some("C:/projects/app"), 10).expect("list");
+        let runs =
+            list_devdock_run_history_records(&db, Some("C:/projects/app"), 10).expect("list");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].command_name, "Build App");
         assert_eq!(runs[0].status, "succeeded");
@@ -161,7 +163,8 @@ mod tests {
             expires_at: None,
         };
         save_devdock_run_history_record(&db, &record_no_expiry).expect("save run");
-        let cleaned_run_by_cutoff = delete_expired_devdock_run_history(&db, 5000, 2000).expect("clean run by cutoff");
+        let cleaned_run_by_cutoff =
+            delete_expired_devdock_run_history(&db, 5000, 2000).expect("clean run by cutoff");
         assert_eq!(cleaned_run_by_cutoff, 1);
     }
 
@@ -186,12 +189,26 @@ mod tests {
         };
 
         save_ai_settings_to_db(&db, &settings).expect("save ai settings");
+        #[cfg(target_os = "windows")]
+        {
+            let connection = db.connect().expect("inspect stored settings");
+            let stored: String = connection
+                .query_row(
+                    "SELECT settings_json FROM app_ai_settings WHERE key='main'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read stored settings");
+            assert!(!stored.contains("sk-test"));
+            assert!(stored.contains("dpapi:v1:"));
+        }
         let loaded = load_ai_settings_from_db(&db).expect("load ai settings");
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.default_model_id, "m-1");
         assert_eq!(loaded.models.len(), 1);
         assert_eq!(loaded.models[0].name, "GPT-4o");
+        assert_eq!(loaded.models[0].api_key.as_deref(), Some("sk-test"));
     }
 
     #[test]
@@ -199,22 +216,40 @@ mod tests {
         use crate::quota::models::{AccountConfig, ProviderType};
 
         let db = setup_test_db();
-        let accounts = vec![
-            AccountConfig {
-                id: "acc-1".to_string(),
-                provider_type: ProviderType::Deepseek,
-                name: "DeepSeek Primary".to_string(),
-                api_key: Some("sk-ds".to_string()),
-                base_url: None,
-                enabled: true,
-                auto_discovered: false,
-            }
-        ];
+        assert!(!quota_accounts_initialized(&db).expect("read initial state"));
+        save_quota_accounts_to_db(&db, &[]).expect("save explicit empty account list");
+        assert!(quota_accounts_initialized(&db).expect("read saved state"));
+        assert!(load_quota_accounts_from_db(&db)
+            .expect("load empty accounts")
+            .is_empty());
+        let accounts = vec![AccountConfig {
+            id: "acc-1".to_string(),
+            provider_type: ProviderType::Deepseek,
+            name: "DeepSeek Primary".to_string(),
+            api_key: Some("sk-ds".to_string()),
+            base_url: None,
+            enabled: true,
+            auto_discovered: false,
+        }];
 
         save_quota_accounts_to_db(&db, &accounts).expect("save quota accounts");
+        #[cfg(target_os = "windows")]
+        {
+            let connection = db.connect().expect("inspect stored quota account");
+            let stored: String = connection
+                .query_row(
+                    "SELECT account_json FROM app_quota_accounts WHERE id='acc-1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read stored quota account");
+            assert!(!stored.contains("sk-ds"));
+            assert!(stored.contains("dpapi:v1:"));
+        }
         let loaded = load_quota_accounts_from_db(&db).expect("load quota accounts");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].name, "DeepSeek Primary");
+        assert_eq!(loaded[0].api_key.as_deref(), Some("sk-ds"));
     }
 
     #[test]
@@ -252,4 +287,3 @@ mod tests {
         assert_eq!(reset.len(), 3);
     }
 }
-

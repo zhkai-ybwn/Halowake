@@ -99,32 +99,20 @@
     </svg>
 
     <!-- 6. OpenCode -->
-    <svg
+    <img
       v-else-if="normalizedProvider === 'opencode'"
-      viewBox="0 0 24 24"
-      class="brand-svg opencode-svg"
-      aria-label="OpenCode"
-    >
-      <rect x="2" y="3" width="20" height="18" rx="4" fill="#0EA5E9" fill-opacity="0.12" stroke="#0EA5E9" stroke-width="1.8" />
-      <path d="M7 8.5L10.5 12L7 15.5" stroke="#0EA5E9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      <line x1="12.5" y1="15.5" x2="16.5" y2="15.5" stroke="#0EA5E9" stroke-width="2" stroke-linecap="round" />
-    </svg>
+      :src="opencodeIcon"
+      class="brand-img opencode-img"
+      alt="OpenCode"
+    />
 
     <!-- 7. WorkBuddy -->
-    <svg
+    <img
       v-else-if="normalizedProvider === 'workbuddy'"
-      viewBox="0 0 24 24"
-      class="brand-svg workbuddy-svg"
-      aria-label="WorkBuddy"
-    >
-      <path
-        d="M12 2C6.48 2 2 6.04 2 11.02c0 2.87 1.48 5.43 3.79 7.04l-.84 3.09c-.14.51.35.95.82.74l3.69-1.63c.81.25 1.66.38 2.54.38 5.52 0 10-4.04 10-9.02S17.52 2 12 2z"
-        fill="#0066FF"
-      />
-      <circle cx="8.5" cy="10.5" r="1.5" fill="#FFFFFF" />
-      <circle cx="15.5" cy="10.5" r="1.5" fill="#FFFFFF" />
-      <path d="M8.5 14c1.1 1.2 2.4 1.8 3.5 1.8s2.4-.6 3.5-1.8" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" />
-    </svg>
+      :src="workbuddyIcon"
+      class="brand-img workbuddy-img"
+      alt="WorkBuddy"
+    />
 
     <!-- 8. SiliconFlow (硅基流动) -->
     <svg
@@ -207,6 +195,38 @@
       />
     </svg>
 
+    <!-- 13. Cursor -->
+    <img
+      v-else-if="normalizedProvider === 'cursor'"
+      :src="cursorIcon"
+      class="brand-img cursor-img"
+      alt="Cursor"
+    />
+
+    <!-- 14. 阿里灵码 (Qcode / Qoder CN) -->
+    <img
+      v-else-if="normalizedProvider === 'qcode' || normalizedProvider === 'qoder'"
+      :src="qcodeIcon"
+      class="brand-img qcode-img"
+      alt="阿里灵码"
+    />
+
+    <!-- 15. Trae (字节跳动 AI IDE) -->
+    <img
+      v-else-if="normalizedProvider === 'trae'"
+      :src="traeIcon"
+      class="brand-img trae-img"
+      alt="Trae"
+    />
+
+    <!-- 16. Z-Code (智谱清言 / GLM) -->
+    <img
+      v-else-if="normalizedProvider === 'zcode'"
+      :src="zcodeIcon"
+      class="brand-img zcode-img"
+      alt="Z-Code"
+    />
+
     <!-- Fallback AI Core -->
     <svg
       v-else
@@ -228,6 +248,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import cursorIcon from '@/assets/icons/cursor.png'
+import qcodeIcon from '@/assets/icons/qcode.png'
+import opencodeIcon from '@/assets/icons/opencode.png'
+import traeIcon from '@/assets/icons/trae.png'
+import workbuddyIcon from '@/assets/icons/workbuddy.png'
+import zcodeIcon from '@/assets/icons/zcode.png'
 
 const props = withDefaults(
   defineProps<{
@@ -281,8 +307,17 @@ const normalizedProvider = computed(() => {
   if (p.includes('qwen') || p.includes('tongyi') || p.includes('bailian')) {
     return 'qwen'
   }
-  if (p.includes('minimax')) {
-    return 'minimax'
+  if (p.includes('cursor')) {
+    return 'cursor'
+  }
+  if (p.includes('qcode') || p.includes('qoder')) {
+    return 'qcode'
+  }
+  if (p.includes('trae')) {
+    return 'trae'
+  }
+  if (p.includes('zcode') || p.includes('z-code')) {
+    return 'zcode'
   }
   return 'default'
 })
@@ -318,6 +353,15 @@ const containerStyle = computed(() => {
   flex-shrink: 0;
   height: 100%;
   width: 100%;
+}
+
+.brand-img {
+  display: block;
+  flex-shrink: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .openai-svg {

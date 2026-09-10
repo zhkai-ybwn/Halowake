@@ -15,6 +15,10 @@ pub enum ProviderType {
     Zhipu,
     Qwen,
     Minimax,
+    Cursor,
+    Qcode,
+    Trae,
+    Zcode,
     Custom,
 }
 
@@ -33,6 +37,10 @@ impl ProviderType {
             Self::Zhipu => "智谱 GLM",
             Self::Qwen => "通义千问",
             Self::Minimax => "MiniMax",
+            Self::Cursor => "Cursor",
+            Self::Qcode => "阿里灵码 (Qoder CN)",
+            Self::Trae => "Trae (字节跳动)",
+            Self::Zcode => "Z-Code (智谱 GLM)",
             Self::Custom => "Custom Provider",
         }
     }
@@ -45,12 +53,16 @@ impl ProviderType {
             Self::Deepseek => Some("https://platform.deepseek.com/usage"),
             Self::Openrouter => Some("https://openrouter.ai/credits"),
             Self::Opencode => Some("https://opencode.ai/console"),
-            Self::Workbuddy => Some("https://workbuddy.ai/"),
+            Self::Workbuddy => Some("https://www.workbuddy.cn/"),
             Self::Siliconflow => Some("https://cloud.siliconflow.cn/account/ak"),
             Self::Moonshot => Some("https://platform.moonshot.cn/console/info"),
             Self::Zhipu => Some("https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys"),
             Self::Qwen => Some("https://bailian.console.aliyun.com/"),
             Self::Minimax => Some("https://platform.minimaxi.com/user-center/basic-information"),
+            Self::Cursor => Some("https://www.cursor.com/settings"),
+            Self::Qcode => Some("https://qoder.com.cn/account/usage"),
+            Self::Trae => Some("https://www.trae.com.cn/"),
+            Self::Zcode => Some("https://zcode.z.ai/"),
             Self::Custom => None,
         }
     }
@@ -80,8 +92,8 @@ pub enum QuotaKind {
     },
     #[serde(rename_all = "camelCase")]
     RateLimit {
-        period_label: String, // "5h", "Weekly", "RPM"
-        used_percent: f64,    // 0.0 - 100.0
+        period_label: String,   // "5h", "Weekly", "RPM"
+        used_percent: f64,      // 0.0 - 100.0
         resets_at: Option<i64>, // Unix timestamp in seconds
         resets_in_seconds: Option<i64>,
     },
@@ -90,6 +102,12 @@ pub enum QuotaKind {
         label: Option<String>,
         remaining: f64,
         total: Option<f64>,
+        expires_at: Option<String>,
+        expires_at_timestamp: Option<i64>,
+        remaining_days: Option<i64>,
+        cycle_type: Option<String>,
+        #[serde(default)]
+        unit: Option<String>,
     },
 }
 

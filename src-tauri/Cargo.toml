@@ -1,6 +1,6 @@
 [package]
 name = "halowake"
-version = "1.3.1"
+version = "1.3.2"
 description = "Halowake - A local-first companion for AI coding workflows"
 authors = ["Halowake contributors"]
 license = "MIT"
@@ -30,3 +30,4 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 libc = "0.2"
+ring = "0.17"

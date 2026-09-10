@@ -1,10 +1,32 @@
-use std::time::Duration;
 use reqwest::Client;
 use serde_json::Value;
+use std::{env, path::PathBuf, time::Duration};
 
 use crate::quota::adapters::deepseek::chrono_now_ms;
-use crate::quota::models::{AccountConfig, QuotaKind, ProviderQuota, ProviderType};
+use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType, QuotaKind};
 use crate::quota::pace::calculate_pace;
+
+pub fn has_gemini_installation() -> bool {
+    let home = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_default();
+    if !home.is_empty() && PathBuf::from(&home).join(".gemini").exists() {
+        return true;
+    }
+    if let Ok(app_data) = env::var("APPDATA") {
+        let root = PathBuf::from(app_data);
+        if root.join("Antigravity").exists() || root.join("Google").join("Antigravity").exists() {
+            return true;
+        }
+    }
+    if let Ok(local_data) = env::var("LOCALAPPDATA") {
+        let root = PathBuf::from(local_data);
+        if root.join("Antigravity").exists() || root.join("Programs").join("Antigravity").exists() {
+            return true;
+        }
+    }
+    false
+}
 
 pub async fn fetch_gemini_quota(account: &AccountConfig) -> ProviderQuota {
     let mut quota = ProviderQuota {
@@ -19,7 +41,9 @@ pub async fn fetch_gemini_quota(account: &AccountConfig) -> ProviderQuota {
         last_updated: chrono_now_ms(),
         is_healthy: false,
         error_message: None,
-        official_dashboard_url: ProviderType::Gemini.default_dashboard_url().map(String::from),
+        official_dashboard_url: ProviderType::Gemini
+            .default_dashboard_url()
+            .map(String::from),
     };
 
     // 1. 优先尝试连接本地运行中的 Google AI Pro (Antigravity) 语言服务
@@ -40,10 +64,7 @@ pub async fn fetch_gemini_quota(account: &AccountConfig) -> ProviderQuota {
         }
     };
 
-    let client = match Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
+    let client = match Client::builder().timeout(Duration::from_secs(10)).build() {
         Ok(c) => c,
         Err(e) => {
             quota.error_message = Some(format!("初始化 HTTP 客户端失败: {}", e));
@@ -154,7 +175,14 @@ async fn probe_single_port(
     (summary_data, status_data)
 }
 
-async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Option<crate::quota::models::PaceStatus>), String> {
+async fn fetch_antigravity_local_status() -> Result<
+    (
+        String,
+        Vec<QuotaKind>,
+        Option<crate::quota::models::PaceStatus>,
+    ),
+    String,
+> {
     let targets = discover_antigravity_targets().await;
     if targets.is_empty() {
         return Err("未找到运行中的 Antigravity language_server 进程".to_string());
@@ -177,9 +205,7 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
         for &port in &target.ports {
             let cl = client.clone();
             let token = target.csrf_token.clone();
-            set.spawn(async move {
-                probe_single_port(&cl, port, &token).await
-            });
+            set.spawn(async move { probe_single_port(&cl, port, &token).await });
         }
 
         while let Some(res) = set.join_next().await {
@@ -204,9 +230,15 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
 
     let mut plan_name = "Google AI Pro".to_string();
     if let Some(val) = &user_status_data {
-        if let Some(name) = val.pointer("/userStatus/planStatus/planInfo/planName").and_then(Value::as_str) {
+        if let Some(name) = val
+            .pointer("/userStatus/planStatus/planInfo/planName")
+            .and_then(Value::as_str)
+        {
             plan_name = format!("Google AI {}", name);
-        } else if let Some(tier) = val.pointer("/userStatus/userTier/name").and_then(Value::as_str) {
+        } else if let Some(tier) = val
+            .pointer("/userStatus/userTier/name")
+            .and_then(Value::as_str)
+        {
             plan_name = tier.to_string();
         }
     }
@@ -217,12 +249,20 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
 
     // 优先从 RetrieveUserQuotaSummary 解析精准周额度与5小时额度
     if let Some(summary) = &quota_summary_data {
-        if let Some(groups) = summary.pointer("/response/groups").and_then(Value::as_array) {
+        if let Some(groups) = summary
+            .pointer("/response/groups")
+            .and_then(Value::as_array)
+        {
             for g in groups {
-                let display_name = g.get("displayName").and_then(Value::as_str).unwrap_or_default();
+                let display_name = g
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let group_prefix = if display_name.to_lowercase().contains("gemini") {
                     "Gemini 模型"
-                } else if display_name.to_lowercase().contains("claude") || display_name.to_lowercase().contains("gpt") {
+                } else if display_name.to_lowercase().contains("claude")
+                    || display_name.to_lowercase().contains("gpt")
+                {
                     "Claude 和 GPT 模型"
                 } else {
                     display_name
@@ -231,7 +271,10 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
                 if let Some(buckets) = g.get("buckets").and_then(Value::as_array) {
                     for b in buckets {
                         let window = b.get("window").and_then(Value::as_str).unwrap_or_default();
-                        let remaining_fraction = b.get("remainingFraction").and_then(Value::as_f64).unwrap_or(1.0);
+                        let remaining_fraction = b
+                            .get("remainingFraction")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(1.0);
                         let used_percent = ((1.0 - remaining_fraction) * 100.0).clamp(0.0, 100.0);
                         let reset_time_str = b.get("resetTime").and_then(Value::as_str);
                         let resets_at = reset_time_str.and_then(parse_rfc3339_seconds);
@@ -240,7 +283,10 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
                         let window_label = match window {
                             "weekly" => "每周限额",
                             "5h" => "5小时限额",
-                            _ => b.get("displayName").and_then(Value::as_str).unwrap_or("周期限额"),
+                            _ => b
+                                .get("displayName")
+                                .and_then(Value::as_str)
+                                .unwrap_or("周期限额"),
                         };
 
                         let period_label = format!("{} ({})", group_prefix, window_label);
@@ -267,7 +313,10 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
     // 降级：如果 RetrieveUserQuotaSummary 为空，从 GetUserStatus clientModelConfigs 解析
     if quotas.is_empty() {
         if let Some(val) = &user_status_data {
-            if let Some(models) = val.pointer("/userStatus/cascadeModelConfigData/clientModelConfigs").and_then(Value::as_array) {
+            if let Some(models) = val
+                .pointer("/userStatus/cascadeModelConfigData/clientModelConfigs")
+                .and_then(Value::as_array)
+            {
                 let mut gemini_found = false;
                 let mut claude_found = false;
 
@@ -278,7 +327,10 @@ async fn fetch_antigravity_local_status() -> Result<(String, Vec<QuotaKind>, Opt
                         _ => continue,
                     };
 
-                    let remaining_frac = quota_info.get("remainingFraction").and_then(Value::as_f64).unwrap_or(1.0);
+                    let remaining_frac = quota_info
+                        .get("remainingFraction")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.0);
                     let used_percent = ((1.0 - remaining_frac) * 100.0).clamp(0.0, 100.0);
                     let reset_time_str = quota_info.get("resetTime").and_then(Value::as_str);
 
@@ -480,10 +532,21 @@ fn extract_csrf_token(cmd: &str) -> Option<String> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     for i in 0..parts.len() {
         if parts[i] == "--csrf_token" && i + 1 < parts.len() {
-            return Some(parts[i + 1].trim_matches('"').trim_matches('\'').to_string());
+            return Some(
+                parts[i + 1]
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string(),
+            );
         }
         if parts[i].starts_with("--csrf_token=") {
-            return Some(parts[i].trim_start_matches("--csrf_token=").trim_matches('"').trim_matches('\'').to_string());
+            return Some(
+                parts[i]
+                    .trim_start_matches("--csrf_token=")
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string(),
+            );
         }
     }
     None
@@ -498,7 +561,10 @@ mod tests {
     #[test]
     fn test_extract_csrf_token() {
         let cmd1 = r#""C:\bin\language_server.exe" --csrf_token be67ca93-8574-4156-a4ee-e31eb9b2caf2 --port 0"#;
-        assert_eq!(extract_csrf_token(cmd1), Some("be67ca93-8574-4156-a4ee-e31eb9b2caf2".to_string()));
+        assert_eq!(
+            extract_csrf_token(cmd1),
+            Some("be67ca93-8574-4156-a4ee-e31eb9b2caf2".to_string())
+        );
 
         let cmd2 = r#""D:\Program Files\Antigravity\language_server.exe" --csrf_token=xyz_123-abc"#;
         assert_eq!(extract_csrf_token(cmd2), Some("xyz_123-abc".to_string()));
@@ -508,7 +574,10 @@ mod tests {
     async fn test_fetch_antigravity_local_status_if_running() {
         let res = fetch_antigravity_local_status().await;
         if let Ok((plan, quotas, pace)) = res {
-            println!("Detected plan: {}, quotas: {:?}, pace: {:?}", plan, quotas, pace);
+            println!(
+                "Detected plan: {}, quotas: {:?}, pace: {:?}",
+                plan, quotas, pace
+            );
             assert!(!quotas.is_empty());
         }
     }

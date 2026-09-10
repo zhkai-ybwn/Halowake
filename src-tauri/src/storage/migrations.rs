@@ -194,6 +194,13 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_codex_report_templates_sort
       ON codex_report_templates(sort_order ASC, updated_at DESC);
     "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS app_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
@@ -247,5 +254,14 @@ mod tests {
             )
             .expect("history table count");
         assert_eq!(history_exists, 6);
+
+        let metadata_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'app_metadata'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("metadata table count");
+        assert_eq!(metadata_exists, 1);
     }
 }

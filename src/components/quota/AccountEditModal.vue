@@ -100,6 +100,10 @@ const providerOptions = computed(() => [
   { label: 'Codex (OpenAI / CLI)', value: 'codex' },
   { label: 'OpenCode (Go / Zen)', value: 'opencode' },
   { label: 'Tencent WorkBuddy (企业助手 / 积分)', value: 'workbuddy' },
+  { label: 'Cursor IDE', value: 'cursor' },
+  { label: '阿里灵码 (Qoder CN)', value: 'qcode' },
+  { label: 'Trae (字节跳动 AI IDE)', value: 'trae' },
+  { label: 'Z-Code (智谱 GLM)', value: 'zcode' },
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'SiliconFlow (硅基流动)', value: 'siliconflow' },
   { label: 'Moonshot (月之暗面 / Kimi)', value: 'moonshot' },
@@ -112,7 +116,9 @@ const providerOptions = computed(() => [
 ])
 
 const isCliProvider = computed(() => {
-  return ['claude', 'opencode', 'workbuddy'].includes(formData.value.providerType)
+  return ['claude', 'opencode', 'workbuddy', 'cursor', 'qcode', 'trae', 'zcode'].includes(
+    formData.value.providerType
+  )
 })
 
 const supportsBaseUrl = computed(() => {
@@ -125,6 +131,10 @@ const apiKeyPlaceholder = computed(() => {
   if (formData.value.providerType === 'claude') return '可留空以自动读取 ~/.claude.json 或输入 sk-ant-...'
   if (formData.value.providerType === 'opencode') return '可留空以读取本地配置，或输入 OpenCode API Key'
   if (formData.value.providerType === 'workbuddy') return '可留空以读取本地 ~/.workbuddy 凭据'
+  if (formData.value.providerType === 'cursor') return '可留空以读取 Cursor 登录态，或输入 Access Token'
+  if (formData.value.providerType === 'qcode') return '可留空读取 Qoder 登录态，或输入 dt- / jt- / pt- Token'
+  if (formData.value.providerType === 'trae') return 'Trae 当前仅支持读取本地登录状态'
+  if (formData.value.providerType === 'zcode') return '可留空以读取 ~/.zcode/v2/credentials.json'
   return t('quota.apiKeyPlaceholder')
 })
 

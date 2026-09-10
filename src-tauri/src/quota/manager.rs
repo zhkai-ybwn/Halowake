@@ -4,19 +4,33 @@ use tauri::{AppHandle, Manager};
 use crate::quota::adapters::{
     claude::fetch_claude_quota,
     codex::fetch_codex_quota,
+    cursor::fetch_cursor_quota,
     deepseek::{chrono_now_ms, fetch_deepseek_quota},
     gemini::fetch_gemini_quota,
     moonshot::fetch_moonshot_quota,
     opencode::fetch_opencode_quota,
     openrouter::fetch_openrouter_quota,
+    qcode::fetch_qcode_quota,
     siliconflow::fetch_siliconflow_quota,
+    trae::fetch_trae_quota,
     workbuddy::fetch_workbuddy_quota,
+    zcode::fetch_zcode_quota,
     zhipu::fetch_zhipu_quota,
 };
 use crate::quota::discovery::discover_local_accounts;
 use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType, QuotaKind, QuotaSummary};
 
 const QUOTA_ACCOUNTS_FILE: &str = "ai-quota-accounts.json";
+
+fn is_aggregate_credit_unit(unit: Option<&str>) -> bool {
+    let Some(unit) = unit.map(str::trim).filter(|unit| !unit.is_empty()) else {
+        return true;
+    };
+    matches!(
+        unit.to_ascii_lowercase().as_str(),
+        "点" | "积分" | "credit" | "credits" | "point" | "points"
+    )
+}
 
 fn unsupported_provider_quota(account: &AccountConfig, message: &str) -> ProviderQuota {
     ProviderQuota {
@@ -47,16 +61,17 @@ fn accounts_file_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 use crate::storage::{
-    history_repository::{load_quota_accounts_from_db, save_quota_accounts_to_db},
+    history_repository::{
+        load_quota_accounts_from_db, quota_accounts_initialized, save_quota_accounts_to_db,
+    },
     AppDatabase,
 };
 
 pub fn load_accounts_config(app: &AppHandle) -> Result<Vec<AccountConfig>, String> {
     if let Some(db) = app.try_state::<AppDatabase>() {
-        if let Ok(accounts) = load_quota_accounts_from_db(&db) {
-            if !accounts.is_empty() {
-                return Ok(accounts);
-            }
+        let accounts = load_quota_accounts_from_db(&db)?;
+        if quota_accounts_initialized(&db)? || !accounts.is_empty() {
+            return Ok(accounts);
         }
     }
 
@@ -77,17 +92,19 @@ pub fn load_accounts_config(app: &AppHandle) -> Result<Vec<AccountConfig>, Strin
         .map_err(|e| format!("账号配置文件解析失败: {}", e))?;
 
     if let Some(db) = app.try_state::<AppDatabase>() {
-        let _ = save_quota_accounts_to_db(&db, &accounts);
-        let _ = fs::remove_file(&path);
+        save_quota_accounts_to_db(&db, &accounts)?;
+        fs::remove_file(&path)
+            .map_err(|error| format!("清理旧账号配置文件失败 {}: {error}", path.display()))?;
     }
 
     Ok(accounts)
 }
 
 pub fn save_accounts_config(app: &AppHandle, accounts: &[AccountConfig]) -> Result<(), String> {
-    if let Some(db) = app.try_state::<AppDatabase>() {
-        save_quota_accounts_to_db(&db, accounts)?;
-    }
+    let db = app
+        .try_state::<AppDatabase>()
+        .ok_or_else(|| "应用数据库未初始化，账号配置未保存".to_string())?;
+    save_quota_accounts_to_db(&db, accounts)?;
 
     // 移除旧明文 JSON 文件，统一收口至 SQLite 数据库
     if let Ok(path) = accounts_file_path(app) {
@@ -129,6 +146,10 @@ pub async fn fetch_all_quotas(
                     &account,
                     "MiniMax 暂不支持自动查询额度，请前往官方控制台查看",
                 ),
+                ProviderType::Cursor => fetch_cursor_quota(&account).await,
+                ProviderType::Qcode => fetch_qcode_quota(&account).await,
+                ProviderType::Trae => fetch_trae_quota(&account).await,
+                ProviderType::Zcode => fetch_zcode_quota(&account).await,
                 ProviderType::Custom => fetch_deepseek_quota(&account).await,
             }
         }));
@@ -165,7 +186,9 @@ pub async fn fetch_all_quotas(
                         total_usd += total_remaining;
                     }
                 }
-                QuotaKind::Credits { remaining, .. } => {
+                QuotaKind::Credits {
+                    remaining, unit, ..
+                } if is_aggregate_credit_unit(unit.as_deref()) => {
                     total_credits += remaining;
                 }
                 _ => {}
@@ -174,10 +197,10 @@ pub async fn fetch_all_quotas(
     }
 
     let summary = QuotaSummary {
-        total_cny_balance: total_cny,
-        total_usd_balance: total_usd,
-        total_credits,
-        active_accounts_count: quotas.len(),
+        total_cny_balance: (total_cny * 100.0).round() / 100.0,
+        total_usd_balance: (total_usd * 100.0).round() / 100.0,
+        total_credits: (total_credits * 100.0).round() / 100.0,
+        active_accounts_count: quotas.iter().filter(|q| q.is_healthy).count(),
         warning_accounts_count: warnings,
     };
 
@@ -204,6 +227,25 @@ pub async fn fetch_single_quota(account: AccountConfig) -> ProviderQuota {
             &account,
             "MiniMax 暂不支持自动查询额度，请前往官方控制台查看",
         ),
+        ProviderType::Cursor => fetch_cursor_quota(&account).await,
+        ProviderType::Qcode => fetch_qcode_quota(&account).await,
+        ProviderType::Trae => fetch_trae_quota(&account).await,
+        ProviderType::Zcode => fetch_zcode_quota(&account).await,
         ProviderType::Custom => fetch_deepseek_quota(&account).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_aggregate_credit_unit;
+
+    #[test]
+    fn only_point_like_units_are_aggregate_credits() {
+        assert!(is_aggregate_credit_unit(None));
+        assert!(is_aggregate_credit_unit(Some("点")));
+        assert!(is_aggregate_credit_unit(Some("Credits")));
+        assert!(!is_aggregate_credit_unit(Some("Tokens / 日")));
+        assert!(!is_aggregate_credit_unit(Some("次")));
+        assert!(!is_aggregate_credit_unit(Some("个模型")));
     }
 }

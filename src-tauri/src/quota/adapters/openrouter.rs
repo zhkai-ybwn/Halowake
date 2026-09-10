@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::quota::adapters::deepseek::chrono_now_ms;
-use crate::quota::models::{AccountConfig, QuotaKind, ProviderQuota, ProviderType};
+use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType, QuotaKind};
 
 pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
     let mut quota = ProviderQuota {
@@ -18,7 +18,9 @@ pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
         last_updated: chrono_now_ms(),
         is_healthy: false,
         error_message: None,
-        official_dashboard_url: ProviderType::Openrouter.default_dashboard_url().map(String::from),
+        official_dashboard_url: ProviderType::Openrouter
+            .default_dashboard_url()
+            .map(String::from),
     };
 
     let api_key = match &account.api_key {
@@ -29,10 +31,7 @@ pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
         }
     };
 
-    let client = match Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
+    let client = match Client::builder().timeout(Duration::from_secs(10)).build() {
         Ok(c) => c,
         Err(e) => {
             quota.error_message = Some(format!("初始化 HTTP 客户端失败: {}", e));
@@ -74,7 +73,10 @@ pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
     if let Some(data) = json_val.get("data") {
         let usage = data.get("usage").and_then(Value::as_f64).unwrap_or(0.0);
         let limit = data.get("limit").and_then(Value::as_f64);
-        let is_free_tier = data.get("is_free_tier").and_then(Value::as_bool).unwrap_or(false);
+        let is_free_tier = data
+            .get("is_free_tier")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         if is_free_tier {
             quota.plan = Some("Free Tier".to_string());
@@ -91,9 +93,14 @@ pub async fn fetch_openrouter_quota(account: &AccountConfig) -> ProviderQuota {
         } else {
             // 没有 limit 时，说明无固定限额或按充值扣费
             quota.quotas.push(QuotaKind::Credits {
-                label: Some("已消耗积分".to_string()),
+                label: Some("已消耗金额".to_string()),
                 remaining: usage,
                 total: None,
+                expires_at: None,
+                expires_at_timestamp: None,
+                remaining_days: None,
+                cycle_type: None,
+                unit: Some("USD".to_string()),
             });
         }
 

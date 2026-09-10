@@ -13,6 +13,10 @@ export type ProviderType =
   | 'zhipu'
   | 'qwen'
   | 'minimax'
+  | 'cursor'
+  | 'qcode'
+  | 'trae'
+  | 'zcode'
   | 'custom'
 
 export interface AccountConfig {
@@ -45,6 +49,11 @@ export type QuotaKind =
       label?: string
       remaining: number
       total?: number
+      expiresAt?: string
+      expiresAtTimestamp?: number
+      remainingDays?: number
+      cycleType?: string
+      unit?: string
     }
 
 export type PaceLevel = 'onPace' | 'tight' | 'overPace' | 'unknown'
@@ -96,6 +105,12 @@ export interface QuotaSummary {
   warningAccountsCount: number
 }
 
+export interface ClientLaunchResult {
+  providerType: ProviderType
+  appName: string
+  launched: boolean
+}
+
 export async function loadAllQuotas(): Promise<[ProviderQuota[], QuotaSummary]> {
   return await invoke<[ProviderQuota[], QuotaSummary]>('load_all_quotas')
 }
@@ -114,4 +129,8 @@ export async function saveQuotaAccounts(accounts: AccountConfig[]): Promise<void
 
 export async function discoverLocalAiAccounts(): Promise<AccountConfig[]> {
   return await invoke<AccountConfig[]>('discover_local_ai_accounts')
+}
+
+export async function launchAiClient(providerType: ProviderType): Promise<ClientLaunchResult> {
+  return await invoke<ClientLaunchResult>('launch_ai_client', { providerType })
 }

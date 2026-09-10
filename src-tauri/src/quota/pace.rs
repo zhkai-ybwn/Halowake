@@ -21,19 +21,19 @@ pub fn calculate_pace(
     // 计算每秒消耗百分比 (Burn rate)
     let burn_rate = used_percent / (elapsed_seconds as f64);
     let projected_remaining = burn_rate * (resets_in_seconds as f64);
-    let projected_total = (used_percent + projected_remaining).round();
+    let projected_total = (used_percent + projected_remaining).round() as i64;
 
     let (level, message) = if used_percent >= 99.0 {
         (
             PaceLevel::OverPace,
             "配额已耗尽，请等待重置或切换模型".to_string(),
         )
-    } else if projected_total <= 90.0 {
+    } else if projected_total <= 90 {
         (
             PaceLevel::OnPace,
             format!("使用节奏健康，预计周期结束时用量 {}%，可平稳过渡", projected_total),
         )
-    } else if projected_total <= 105.0 {
+    } else if projected_total <= 105 {
         (
             PaceLevel::Tight,
             format!("用量较为紧凑，预计周期结束时用量 {}%，建议适当控制", projected_total),
@@ -47,7 +47,7 @@ pub fn calculate_pace(
 
     PaceStatus {
         level,
-        projected_usage_percent: Some(projected_total),
+        projected_usage_percent: Some(projected_total as f64),
         message,
     }
 }

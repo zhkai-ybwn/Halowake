@@ -1,5 +1,5 @@
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -66,8 +66,9 @@ pub fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
         .map_err(|e| format!("AI 设置文件不是合法 JSON {}: {}", path.display(), e))?;
 
     if let Some(db) = app.try_state::<AppDatabase>() {
-        let _ = save_ai_settings_to_db(&db, &settings);
-        let _ = fs::remove_file(&path);
+        save_ai_settings_to_db(&db, &settings)?;
+        fs::remove_file(&path)
+            .map_err(|error| format!("清理旧 AI 设置文件失败 {}: {error}", path.display()))?;
     }
 
     Ok(Some(settings))
@@ -75,9 +76,10 @@ pub fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
 
 #[tauri::command]
 pub fn save_ai_settings(app: AppHandle, settings: AiSettings) -> Result<(), String> {
-    if let Some(db) = app.try_state::<AppDatabase>() {
-        save_ai_settings_to_db(&db, &settings)?;
-    }
+    let db = app
+        .try_state::<AppDatabase>()
+        .ok_or_else(|| "应用数据库未初始化，AI 设置未保存".to_string())?;
+    save_ai_settings_to_db(&db, &settings)?;
 
     // 移除旧明文 JSON 文件，统一收口至 SQLite 数据库
     if let Ok(path) = ai_settings_path(&app) {

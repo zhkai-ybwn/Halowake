@@ -1,6 +1,7 @@
 pub mod ai_settings;
 pub mod codex_report;
 pub mod codex_report_template;
+pub mod client_launcher;
 pub mod git;
 pub mod markdown;
 pub mod project;

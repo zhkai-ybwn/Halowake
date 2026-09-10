@@ -147,9 +147,17 @@ function getProviderAmount(provider: ProviderQuota): string {
     const sym = balanceQuota.currency === 'USD' ? '$' : '¥'
     return `${sym}${balanceQuota.totalRemaining.toFixed(2)}`
   }
-  const creditsQuota = provider.quotas.find(q => q.type === 'credits')
-  if (creditsQuota && creditsQuota.type === 'credits') {
-    return `${creditsQuota.remaining} 点`
+  const creditsQuotas = provider.quotas.filter((q): q is Extract<QuotaKind, { type: 'credits' }> => q.type === 'credits')
+  if (creditsQuotas.length > 0) {
+    const firstUnit = creditsQuotas[0].unit?.trim() || t('quota.creditsUnit')
+    const sameUnit = creditsQuotas.every(q => (q.unit?.trim() || t('quota.creditsUnit')) === firstUnit)
+    if (sameUnit) {
+      const totalRemaining = creditsQuotas.reduce((acc, q) => acc + q.remaining, 0)
+      const rounded = Math.round(totalRemaining * 100) / 100
+      return `${rounded.toLocaleString()} ${firstUnit}`
+    }
+    const first = Math.round(creditsQuotas[0].remaining * 100) / 100
+    return `${first.toLocaleString()} ${firstUnit} +${creditsQuotas.length - 1}`
   }
   if (provider.plan) {
     return provider.plan.replace(/ChatGPT\s*/i, '').trim() || provider.plan

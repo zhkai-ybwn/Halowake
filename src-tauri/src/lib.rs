@@ -156,6 +156,7 @@ pub fn run() {
             commands::quota::load_quota_accounts,
             commands::quota::save_quota_accounts,
             commands::quota::discover_local_ai_accounts,
+            commands::client_launcher::launch_ai_client,
             commands::review::start_local_code_review,
             commands::review::get_local_code_review,
             commands::review::list_local_code_reviews,

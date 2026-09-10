@@ -8,7 +8,9 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
     let mut accounts = Vec::new();
 
     // 1. 探测本地 CLI 客户端
-    let home = env::var("USERPROFILE").or_else(|_| env::var("HOME")).unwrap_or_default();
+    let home = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_default();
     if !home.is_empty() {
         let home_path = Path::new(&home);
 
@@ -44,9 +46,10 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
             });
         }
 
-        // WorkBuddy (~/.workbuddy)
+        // WorkBuddy (~/.workbuddy 或客户端本地鉴权文件)
         let workbuddy_dir = home_path.join(".workbuddy");
-        if workbuddy_dir.exists() {
+        if workbuddy_dir.exists() || crate::quota::adapters::workbuddy::has_workbuddy_credentials()
+        {
             accounts.push(AccountConfig {
                 id: "discovered-workbuddy-local".to_string(),
                 provider_type: ProviderType::Workbuddy,
@@ -58,13 +61,12 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
             });
         }
 
-        // OpenCode (~/.opencode)
-        let opencode_dir = home_path.join(".opencode");
-        if opencode_dir.exists() {
+        // OpenCode (~/.config/opencode 或 ~/.opencode)
+        if crate::quota::adapters::opencode::has_opencode_installation() {
             accounts.push(AccountConfig {
                 id: "discovered-opencode-local".to_string(),
                 provider_type: ProviderType::Opencode,
-                name: "OpenCode 本地账号".to_string(),
+                name: "OpenCode".to_string(),
                 api_key: None,
                 base_url: None,
                 enabled: true,
@@ -72,16 +74,70 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
             });
         }
 
-        // Gemini / Antigravity 作为默认支持项提供
-        accounts.push(AccountConfig {
-            id: "discovered-gemini-antigravity".to_string(),
-            provider_type: ProviderType::Gemini,
-            name: "Google AI Pro (Antigravity / Gemini)".to_string(),
-            api_key: None,
-            base_url: None,
-            enabled: true,
-            auto_discovered: true,
-        });
+        // Cursor (state.vscdb)
+        if crate::quota::adapters::cursor::has_cursor_installation() {
+            accounts.push(AccountConfig {
+                id: "discovered-cursor-local".to_string(),
+                provider_type: ProviderType::Cursor,
+                name: "Cursor IDE".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
+
+        // 阿里灵码 (Qoder CN / 通义灵码)
+        if crate::quota::adapters::qcode::has_qcode_credentials() {
+            accounts.push(AccountConfig {
+                id: "discovered-qcode-local".to_string(),
+                provider_type: ProviderType::Qcode,
+                name: "阿里灵码 (Qoder CN)".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
+
+        // Trae (字节跳动 AI IDE)
+        if crate::quota::adapters::trae::has_trae_credentials() {
+            accounts.push(AccountConfig {
+                id: "discovered-trae-local".to_string(),
+                provider_type: ProviderType::Trae,
+                name: "Trae (字节跳动)".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
+
+        // Z-Code (智谱清言 / GLM 智能编程客户端)
+        if crate::quota::adapters::zcode::has_zcode_credentials() {
+            accounts.push(AccountConfig {
+                id: "discovered-zcode-local".to_string(),
+                provider_type: ProviderType::Zcode,
+                name: "Z-Code (智谱清言)".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
+
+        // Gemini / Antigravity 仅在发现本地安装或配置时加入
+        if crate::quota::adapters::gemini::has_gemini_installation() {
+            accounts.push(AccountConfig {
+                id: "discovered-gemini-antigravity".to_string(),
+                provider_type: ProviderType::Gemini,
+                name: "Google AI Pro (Antigravity / Gemini)".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
     }
 
     // 2. 探测 Halowake 现有的 ai-settings.json
@@ -107,7 +163,9 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                                 enabled: true,
                                 auto_discovered: true,
                             });
-                        } else if base_url.contains("openrouter") || name_lower.contains("openrouter") {
+                        } else if base_url.contains("openrouter")
+                            || name_lower.contains("openrouter")
+                        {
                             accounts.push(AccountConfig {
                                 id: format!("discovered-openrouter-{}", model.id),
                                 provider_type: ProviderType::Openrouter,
@@ -117,7 +175,10 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                                 enabled: true,
                                 auto_discovered: true,
                             });
-                        } else if base_url.contains("siliconflow") || name_lower.contains("siliconflow") || name_lower.contains("硅基流动") {
+                        } else if base_url.contains("siliconflow")
+                            || name_lower.contains("siliconflow")
+                            || name_lower.contains("硅基流动")
+                        {
                             accounts.push(AccountConfig {
                                 id: format!("discovered-siliconflow-{}", model.id),
                                 provider_type: ProviderType::Siliconflow,
@@ -127,7 +188,10 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                                 enabled: true,
                                 auto_discovered: true,
                             });
-                        } else if base_url.contains("moonshot") || name_lower.contains("moonshot") || name_lower.contains("kimi") {
+                        } else if base_url.contains("moonshot")
+                            || name_lower.contains("moonshot")
+                            || name_lower.contains("kimi")
+                        {
                             accounts.push(AccountConfig {
                                 id: format!("discovered-moonshot-{}", model.id),
                                 provider_type: ProviderType::Moonshot,
@@ -137,7 +201,11 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                                 enabled: true,
                                 auto_discovered: true,
                             });
-                        } else if base_url.contains("bigmodel") || base_url.contains("zhipu") || name_lower.contains("智谱") || name_lower.contains("glm") {
+                        } else if base_url.contains("bigmodel")
+                            || base_url.contains("zhipu")
+                            || name_lower.contains("智谱")
+                            || name_lower.contains("glm")
+                        {
                             accounts.push(AccountConfig {
                                 id: format!("discovered-zhipu-{}", model.id),
                                 provider_type: ProviderType::Zhipu,

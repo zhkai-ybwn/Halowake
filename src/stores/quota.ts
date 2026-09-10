@@ -10,6 +10,11 @@ import {
 
 export type OverallStatusTone = 'healthy' | 'warning' | 'danger' | 'idle'
 
+function isAggregateCreditUnit(unit?: string): boolean {
+  if (!unit?.trim()) return true
+  return ['点', '积分', 'credit', 'credits', 'point', 'points'].includes(unit.trim().toLowerCase())
+}
+
 function recalculateSummary(quotas: ProviderQuota[]): QuotaSummary {
   let totalCnyBalance = 0
   let totalUsdBalance = 0
@@ -31,16 +36,16 @@ function recalculateSummary(quotas: ProviderQuota[]): QuotaSummary {
         } else {
           totalCnyBalance += item.totalRemaining
         }
-      } else if (item.type === 'credits') {
+      } else if (item.type === 'credits' && isAggregateCreditUnit(item.unit)) {
         totalCredits += item.remaining
       }
     }
   }
 
   return {
-    totalCnyBalance,
-    totalUsdBalance,
-    totalCredits,
+    totalCnyBalance: Math.round(totalCnyBalance * 100) / 100,
+    totalUsdBalance: Math.round(totalUsdBalance * 100) / 100,
+    totalCredits: Math.round(totalCredits * 100) / 100,
     activeAccountsCount,
     warningAccountsCount,
   }

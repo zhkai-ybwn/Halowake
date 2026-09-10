@@ -1,12 +1,16 @@
 pub mod claude;
 pub mod codex;
+pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
 pub mod moonshot;
 pub mod opencode;
 pub mod openrouter;
+pub mod qcode;
 pub mod siliconflow;
+pub mod trae;
 pub mod workbuddy;
+pub mod zcode;
 pub mod zhipu;
 
 pub(crate) fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
@@ -25,7 +29,10 @@ pub(crate) fn parse_rfc3339_seconds(s: &str) -> Option<i64> {
     }
     let hour: i64 = raw_time_parts[0].parse().ok()?;
     let min: i64 = raw_time_parts[1].parse().ok()?;
-    let sec_str = raw_time_parts[2].split('.').next().unwrap_or(raw_time_parts[2]);
+    let sec_str = raw_time_parts[2]
+        .split('.')
+        .next()
+        .unwrap_or(raw_time_parts[2]);
     let sec: i64 = sec_str.parse().ok()?;
 
     let y = date_parts[0];

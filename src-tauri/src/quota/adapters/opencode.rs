@@ -1,9 +1,68 @@
 use reqwest::Client;
 use serde_json::Value;
-use std::{env, fs, path::Path, time::Duration};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use crate::quota::adapters::deepseek::chrono_now_ms;
 use crate::quota::models::{AccountConfig, ProviderQuota, ProviderType};
+
+pub fn has_opencode_installation() -> bool {
+    let home = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_default();
+    if !home.is_empty() {
+        let home_p = Path::new(&home);
+        if home_p.join(".opencode").exists()
+            || home_p
+                .join(".config")
+                .join("opencode")
+                .join("opencode.json")
+                .exists()
+            || home_p.join(".cache").join("opencode").exists()
+        {
+            return true;
+        }
+    }
+    if let Ok(app_data) = env::var("APPDATA") {
+        let ap = PathBuf::from(app_data);
+        if ap.join("ai.opencode.desktop").exists() || ap.join("@opencode-ai").exists() {
+            return true;
+        }
+    }
+    if let Ok(local_data) = env::var("LOCALAPPDATA") {
+        let lp = PathBuf::from(local_data);
+        if lp.join("Programs").join("@opencode-aidesktop").exists() {
+            return true;
+        }
+    }
+    false
+}
+
+fn get_candidate_opencode_config_files() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let home = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .unwrap_or_default();
+    if !home.is_empty() {
+        let home_p = PathBuf::from(home);
+        paths.push(
+            home_p
+                .join(".config")
+                .join("opencode")
+                .join("opencode.json"),
+        );
+        paths.push(home_p.join(".opencode").join("config.json"));
+        paths.push(home_p.join(".opencode").join("opencode.json"));
+    }
+    if let Ok(app_data) = env::var("APPDATA") {
+        let ap = PathBuf::from(app_data);
+        paths.push(ap.join("ai.opencode.desktop").join("opencode.settings"));
+    }
+    paths
+}
 
 pub async fn fetch_opencode_quota(account: &AccountConfig) -> ProviderQuota {
     let mut quota = ProviderQuota {
@@ -11,7 +70,7 @@ pub async fn fetch_opencode_quota(account: &AccountConfig) -> ProviderQuota {
         account_id: account.id.clone(),
         provider_type: ProviderType::Opencode,
         name: account.name.clone(),
-        plan: Some("OpenCode Go".to_string()),
+        plan: Some("OpenCode Local".to_string()),
         quotas: Vec::new(),
         pace: None,
         reset_credits: None,
@@ -25,23 +84,62 @@ pub async fn fetch_opencode_quota(account: &AccountConfig) -> ProviderQuota {
 
     let token = get_opencode_token(account);
 
+    // 如果未配置或未找到 API Token，读取本地 opencode.json 配置作为健康展示
     let token_str = match &token {
         Some(t) if !t.trim().is_empty() => t.trim(),
         _ => {
-            // 本地探测兜底
-            let home = env::var("USERPROFILE")
-                .or_else(|_| env::var("HOME"))
-                .unwrap_or_default();
-            let opencode_dir = Path::new(&home).join(".opencode");
-            if opencode_dir.exists() {
-                quota.plan = Some("OpenCode Local CLI".to_string());
+            for cfg_path in get_candidate_opencode_config_files() {
+                if cfg_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&cfg_path) {
+                        if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+                            let model = json_val
+                                .get("model")
+                                .and_then(Value::as_str)
+                                .unwrap_or("opencode/glm-5-free");
+
+                            let mut provider_names = Vec::new();
+                            if let Some(providers) =
+                                json_val.get("provider").and_then(Value::as_object)
+                            {
+                                for (k, v) in providers {
+                                    let p_name =
+                                        v.get("name").and_then(Value::as_str).unwrap_or(k.as_str());
+                                    provider_names.push(p_name.to_string());
+                                }
+                            }
+
+                            quota.is_healthy = true;
+                            quota.plan = Some(if provider_names.is_empty() {
+                                format!("OpenCode · {}", model)
+                            } else {
+                                format!(
+                                    "OpenCode · {} · {} 个上游通道",
+                                    model,
+                                    provider_names.len()
+                                )
+                            });
+                            quota.error_message = Some(
+                                "已检测到 OpenCode 本地配置，但未配置可查询实时额度的 OpenCode Token"
+                                    .to_string(),
+                            );
+
+                            return quota;
+                        }
+                    }
+                }
+            }
+
+            if has_opencode_installation() {
+                quota.is_healthy = true;
+                quota.plan = Some("OpenCode 本地客户端".to_string());
                 quota.error_message =
-                    Some("已检测到 OpenCode，但当前没有可可靠读取的本地积分数据".to_string());
+                    Some("已检测到 OpenCode 安装，但当前无法可靠读取实时额度".to_string());
                 return quota;
             }
 
-            quota.error_message =
-                Some("未配置 OpenCode API Key，且未在本地发现 ~/.opencode 客户端".to_string());
+            quota.error_message = Some(
+                "未在本地检测到 OpenCode 配置文件（~/.config/opencode/opencode.json）".to_string(),
+            );
             return quota;
         }
     };
@@ -109,24 +207,33 @@ fn get_opencode_token(account: &AccountConfig) -> Option<String> {
         }
     }
 
-    let home = env::var("USERPROFILE")
-        .or_else(|_| env::var("HOME"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return None;
-    }
+    for config_path in get_candidate_opencode_config_files() {
+        if config_path.exists() {
+            if let Ok(content) = fs::read_to_string(&config_path) {
+                if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+                    if let Some(key) = json_val
+                        .get("apiKey")
+                        .or_else(|| json_val.get("zenKey"))
+                        .and_then(Value::as_str)
+                    {
+                        if !key.is_empty() {
+                            return Some(key.to_string());
+                        }
+                    }
 
-    let config_path = Path::new(&home).join(".opencode").join("config.json");
-    if config_path.exists() {
-        if let Ok(content) = fs::read_to_string(&config_path) {
-            if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
-                if let Some(key) = json_val
-                    .get("apiKey")
-                    .or_else(|| json_val.get("zenKey"))
-                    .and_then(Value::as_str)
-                {
-                    if !key.is_empty() {
-                        return Some(key.to_string());
+                    // 检查 provider 下的 apiKey
+                    if let Some(providers) = json_val.get("provider").and_then(Value::as_object) {
+                        for (_k, p_val) in providers {
+                            if let Some(key) = p_val
+                                .pointer("/options/apiKey")
+                                .or_else(|| p_val.get("apiKey"))
+                                .and_then(Value::as_str)
+                            {
+                                if !key.is_empty() && !key.contains("API_KEY") {
+                                    return Some(key.to_string());
+                                }
+                            }
+                        }
                     }
                 }
             }
