@@ -120,7 +120,6 @@ const quotaStore = useQuotaStore()
 
 const popoverOpen = ref(false)
 const quotas = computed(() => quotaStore.quotas)
-const summary = computed(() => quotaStore.summary)
 const loading = computed(() => quotaStore.loading)
 const refreshing = computed(() => quotaStore.refreshing)
 
