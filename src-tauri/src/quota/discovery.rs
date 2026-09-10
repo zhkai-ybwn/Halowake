@@ -29,7 +29,10 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
         // Claude Code (~/.claude 或 ~/.claude.json)
         let claude_dir = home_path.join(".claude");
         let claude_json = home_path.join(".claude.json");
-        if claude_dir.exists() || claude_json.exists() {
+        let has_claude_token = claude_json.exists()
+            || claude_dir.join(".credentials.json").exists()
+            || claude_dir.join("settings.json").exists();
+        if has_claude_token {
             accounts.push(AccountConfig {
                 id: "discovered-claude-local".to_string(),
                 provider_type: ProviderType::Claude,

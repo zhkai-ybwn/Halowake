@@ -195,29 +195,21 @@ import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import QuotaCard from '@/components/quota/QuotaCard.vue'
 import AccountEditModal from '@/components/quota/AccountEditModal.vue'
 import AccountManageModal from '@/components/quota/AccountManageModal.vue'
+import { useQuotaStore } from '@/stores/quota'
 import {
-  loadAllQuotas,
-  refreshSingleQuota,
   loadQuotaAccounts,
   saveQuotaAccounts,
   discoverLocalAiAccounts,
   type AccountConfig,
-  type ProviderQuota,
-  type QuotaSummary,
 } from '@/services/quota/quota-service'
 
 const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
+const quotaStore = useQuotaStore()
 
-const quotas = ref<ProviderQuota[]>([])
-const summary = ref<QuotaSummary>({
-  totalCnyBalance: 0,
-  totalUsdBalance: 0,
-  totalCredits: 0,
-  activeAccountsCount: 0,
-  warningAccountsCount: 0,
-})
-const loading = ref(false)
+const quotas = computed(() => quotaStore.quotas)
+const summary = computed(() => quotaStore.summary)
+const loading = computed(() => quotaStore.loading)
 const discovering = ref(false)
 const refreshingId = ref<string | null>(null)
 
@@ -279,7 +271,8 @@ const autoRefreshOptions = computed(() => [
 ])
 
 onMounted(async () => {
-  await handleRefreshAll()
+  // 保证进入页面时优先复用或即时刷新最新额度
+  await quotaStore.ensureFresh(5000)
   setupAutoRefresh()
 })
 
@@ -402,36 +395,22 @@ async function handleDiscoverLocal() {
 }
 
 async function handleRefreshAll(silent = false) {
-  if (!silent) loading.value = true
   try {
-    const [fetchedQuotas, fetchedSummary] = await loadAllQuotas()
-    quotas.value = fetchedQuotas
-    summary.value = fetchedSummary
+    await quotaStore.fetchAll(silent)
   } catch (err) {
     if (!silent) {
       message.error(t('quota.refreshFailed') + ': ' + String(err))
     }
-  } finally {
-    if (!silent) loading.value = false
   }
 }
 
 async function handleRefreshSingle(accountId: string) {
   refreshingId.value = accountId
   try {
-    const accounts = await loadQuotaAccounts()
-    const target = accounts.find((a) => a.id === accountId)
-    if (!target) {
+    const updated = await quotaStore.refreshSingle(accountId)
+    if (!updated) {
       message.warning(t('quota.accountNotFound'))
       return
-    }
-
-    const updated = await refreshSingleQuota(target)
-    const idx = quotas.value.findIndex((q) => q.accountId === accountId)
-    if (idx !== -1) {
-      quotas.value[idx] = updated
-    } else {
-      quotas.value.push(updated)
     }
     message.success(t('quota.refreshSingleSuccess'))
   } catch (err) {

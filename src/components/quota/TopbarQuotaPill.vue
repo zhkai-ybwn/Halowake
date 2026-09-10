@@ -12,10 +12,14 @@
         <button
           type="button"
           class="topbar-quota-pill"
-          :class="{ active: popoverOpen, 'has-warning': summary.warningAccountsCount > 0 }"
-          :title="t('topbar.quotaPillTooltip')"
+          :class="{
+            active: popoverOpen,
+            'has-warning': quotaStore.statusTone === 'warning',
+            'has-danger': quotaStore.statusTone === 'danger',
+          }"
+          :title="statusTooltip"
         >
-          <span class="pill-dot" :class="statusDotClass"></span>
+          <span class="pill-dot" :class="quotaStore.statusDotClass"></span>
           <Icon icon="solar:wallet-money-linear" class="pill-icon" />
           <span class="pill-text">{{ pillLabel }}</span>
         </button>
@@ -99,43 +103,38 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NPopover } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import ProviderBrandLogo from './ProviderBrandLogo.vue'
-import {
-  loadAllQuotas,
-  type ProviderQuota,
-  type QuotaKind,
-  type QuotaSummary,
-} from '@/services/quota/quota-service'
+import { useQuotaStore } from '@/stores/quota'
+import type { ProviderQuota, QuotaKind } from '@/services/quota/quota-service'
 import { isMacPlatform } from '@/utils/platform-shortcuts'
 
 const router = useRouter()
 const { t } = useI18n({ useScope: 'global' })
 const isMac = isMacPlatform
+const quotaStore = useQuotaStore()
 
 const popoverOpen = ref(false)
-const loading = ref(false)
-const refreshing = ref(false)
-const quotas = ref<ProviderQuota[]>([])
-const summary = ref<QuotaSummary>({
-  totalCnyBalance: 0,
-  totalUsdBalance: 0,
-  totalCredits: 0,
-  activeAccountsCount: 0,
-  warningAccountsCount: 0,
-})
+const quotas = computed(() => quotaStore.quotas)
+const summary = computed(() => quotaStore.summary)
+const loading = computed(() => quotaStore.loading)
+const refreshing = computed(() => quotaStore.refreshing)
 
 // 展示所有已配置/已发现的厂商，支持 10+ 厂商在容器内平滑滚动
 const displayedQuotas = computed(() => quotas.value)
 
-const statusDotClass = computed(() => {
-  if (summary.value.warningAccountsCount > 0) return 'warning'
-  if (summary.value.activeAccountsCount > 0) return 'healthy'
-  return 'idle'
+const statusTooltip = computed(() => {
+  if (quotaStore.statusTone === 'danger') {
+    return `${t('workbench.aiQuota')} (${t('quota.statusDanger', '额度即将耗尽')})`
+  }
+  if (quotaStore.statusTone === 'warning') {
+    return `${t('workbench.aiQuota')} (${t('quota.statusWarning', '额度偏紧')})`
+  }
+  return `${t('workbench.aiQuota')} (${t('quota.statusHealthy', '运行正常')})`
 })
 
 const pillLabel = computed(() => {
@@ -298,27 +297,17 @@ function getProviderTooltip(provider: ProviderQuota): string {
   return parts.join(' · ')
 }
 
-async function fetchQuotas(silent = false) {
-  if (!silent) loading.value = true
-  try {
-    const [list, sum] = await loadAllQuotas()
-    quotas.value = list
-    summary.value = sum
-  } catch (e) {
-    console.warn('Failed to load quotas for topbar pill:', e)
-  } finally {
-    if (!silent) loading.value = false
+watch(popoverOpen, (open) => {
+  if (open) {
+    void quotaStore.ensureFresh(10000)
   }
-}
+})
 
 async function handleRefresh() {
-  refreshing.value = true
   try {
-    await fetchQuotas(true)
-  } finally {
-    setTimeout(() => {
-      refreshing.value = false
-    }, 400)
+    await quotaStore.fetchAll(true)
+  } catch (err) {
+    console.warn('Failed to refresh quotas from popover:', err)
   }
 }
 
@@ -328,7 +317,7 @@ function goToFullQuotaView() {
 }
 
 onMounted(() => {
-  void fetchQuotas()
+  void quotaStore.ensureFresh(30000)
 })
 </script>
 
@@ -361,6 +350,10 @@ onMounted(() => {
   &.has-warning {
     border-color: color-mix(in srgb, var(--lumina-warning) 40%, var(--lumina-separator));
   }
+
+  &.has-danger {
+    border-color: color-mix(in srgb, var(--lumina-danger) 40%, var(--lumina-separator));
+  }
 }
 
 .pill-dot {
@@ -377,6 +370,11 @@ onMounted(() => {
   &.warning {
     background: #ff9500;
     box-shadow: 0 0 6px rgba(255, 149, 0, 0.4);
+  }
+
+  &.danger {
+    background: #ff3b30;
+    box-shadow: 0 0 6px rgba(255, 59, 48, 0.4);
   }
 
   &.idle {
