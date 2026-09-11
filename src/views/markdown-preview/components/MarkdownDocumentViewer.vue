@@ -392,6 +392,10 @@ async function renderMermaidDiagrams() {
           fontSize: '13px',
         },
     securityLevel: 'strict',
+    // Mermaid otherwise renders its own error SVG in a temporary document.body node.
+    // In Mermaid 11 that node is not removed after a parse failure, so it leaks into
+    // every routed page. We already render a scoped error state in the chart card.
+    suppressErrorRendering: true,
   })
 
   let index = 0
