@@ -247,7 +247,7 @@ const emit = defineEmits<{
 const { t } = useI18n({ useScope: 'global' })
 
 const isDesktopClient = computed(() => {
-  if (['codex', 'cursor', 'qcode', 'trae', 'zcode', 'workbuddy'].includes(props.quota.providerType)) return true
+  if (['codex', 'cursor', 'qcode', 'trae', 'zcode', 'workbuddy', 'mimo'].includes(props.quota.providerType)) return true
   if (props.quota.providerType !== 'gemini') return false
   return `${props.quota.name} ${props.quota.plan ?? ''}`.toLowerCase().includes('antigravity')
 })
@@ -312,6 +312,8 @@ const providerDisplayName = computed(() => {
       return 'ByteDance Trae (AI IDE)'
     case 'zcode':
       return '智谱清言 Z-Code (GLM 智能客户端)'
+    case 'mimo':
+      return 'Xiaomi MiMo (小米大模型)'
     default:
       return 'OpenAI-Compatible'
   }
@@ -332,6 +334,8 @@ const cardSubtitle = computed(() => {
         return 'ByteDance · 字节跳动原生 AI IDE'
       case 'zcode':
         return '智谱清言 · GLM 原生代码助手'
+      case 'mimo':
+        return 'Xiaomi · 开放平台 API 与 MiMo Code'
       case 'workbuddy':
         return 'Tencent · 腾讯企微与混元助手'
       case 'deepseek':
@@ -659,6 +663,9 @@ async function handleOpenExternal(url: string) {
   }
   &[data-provider='zcode'] {
     background: rgba(37, 99, 235, 0.12);
+  }
+  &[data-provider='mimo'] {
+    background: rgba(255, 103, 0, 0.12);
   }
 }
 

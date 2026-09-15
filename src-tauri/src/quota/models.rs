@@ -19,6 +19,7 @@ pub enum ProviderType {
     Qcode,
     Trae,
     Zcode,
+    Mimo,
     Custom,
 }
 
@@ -41,6 +42,7 @@ impl ProviderType {
             Self::Qcode => "阿里灵码 (Qoder CN)",
             Self::Trae => "Trae (字节跳动)",
             Self::Zcode => "Z-Code (智谱 GLM)",
+            Self::Mimo => "Xiaomi MiMo",
             Self::Custom => "Custom Provider",
         }
     }
@@ -63,6 +65,7 @@ impl ProviderType {
             Self::Qcode => Some("https://qoder.com.cn/account/usage"),
             Self::Trae => Some("https://www.trae.com.cn/"),
             Self::Zcode => Some("https://zcode.z.ai/"),
+            Self::Mimo => Some("https://platform.xiaomimimo.com/"),
             Self::Custom => None,
         }
     }

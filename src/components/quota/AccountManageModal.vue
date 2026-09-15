@@ -131,6 +131,8 @@ function formatProviderName(provider: ProviderType) {
       return 'Trae'
     case 'zcode':
       return 'Z-Code'
+    case 'mimo':
+      return 'Xiaomi MiMo'
     default:
       return 'Custom'
   }

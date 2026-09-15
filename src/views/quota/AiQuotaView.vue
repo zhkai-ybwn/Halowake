@@ -195,7 +195,7 @@ const launchingId = ref<string | null>(null)
 type CategoryType = 'all' | 'issues' | 'local' | 'api'
 const activeCategory = ref<CategoryType>('all')
 
-const LOCAL_CLIENT_PROVIDERS: ProviderType[] = ['codex', 'cursor', 'qcode', 'trae', 'zcode', 'workbuddy']
+const LOCAL_CLIENT_PROVIDERS: ProviderType[] = ['codex', 'cursor', 'qcode', 'trae', 'zcode', 'workbuddy', 'mimo']
 
 function isLocalClientQuota(quota: ProviderQuota): boolean {
   if (LOCAL_CLIENT_PROVIDERS.includes(quota.providerType)) return true

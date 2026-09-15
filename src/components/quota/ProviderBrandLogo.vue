@@ -227,6 +227,20 @@
       alt="Z-Code"
     />
 
+    <!-- 17. Xiaomi MiMo -->
+    <svg
+      v-else-if="normalizedProvider === 'mimo'"
+      viewBox="0 0 24 24"
+      class="brand-svg mimo-svg"
+      aria-label="Xiaomi MiMo"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="6" fill="#FF6700" />
+      <path
+        d="M7 16.5V7.5h2.1l2.9 5.2 2.9-5.2H17v9h-2.2v-5.4L12.2 16.5h-1.4L7.2 11.1v5.4H7z"
+        fill="#FFFFFF"
+      />
+    </svg>
+
     <!-- Fallback AI Core -->
     <svg
       v-else
@@ -318,6 +332,9 @@ const normalizedProvider = computed(() => {
   }
   if (p.includes('zcode') || p.includes('z-code')) {
     return 'zcode'
+  }
+  if (p.includes('mimo') || p.includes('xiaomi')) {
+    return 'mimo'
   }
   return 'default'
 })

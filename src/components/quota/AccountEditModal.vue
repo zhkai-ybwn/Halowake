@@ -104,6 +104,7 @@ const providerOptions = computed(() => [
   { label: '阿里灵码 (Qoder CN)', value: 'qcode' },
   { label: 'Trae (字节跳动 AI IDE)', value: 'trae' },
   { label: 'Z-Code (智谱 GLM)', value: 'zcode' },
+  { label: 'Xiaomi MiMo (小米大模型)', value: 'mimo' },
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'SiliconFlow (硅基流动)', value: 'siliconflow' },
   { label: 'Moonshot (月之暗面 / Kimi)', value: 'moonshot' },
@@ -116,13 +117,13 @@ const providerOptions = computed(() => [
 ])
 
 const isCliProvider = computed(() => {
-  return ['claude', 'opencode', 'workbuddy', 'cursor', 'qcode', 'trae', 'zcode'].includes(
+  return ['claude', 'opencode', 'workbuddy', 'cursor', 'qcode', 'trae', 'zcode', 'mimo'].includes(
     formData.value.providerType
   )
 })
 
 const supportsBaseUrl = computed(() => {
-  return ['deepseek', 'siliconflow', 'moonshot', 'zhipu', 'qwen', 'minimax', 'custom'].includes(
+  return ['deepseek', 'siliconflow', 'moonshot', 'zhipu', 'qwen', 'minimax', 'mimo', 'custom'].includes(
     formData.value.providerType
   )
 })
@@ -135,6 +136,7 @@ const apiKeyPlaceholder = computed(() => {
   if (formData.value.providerType === 'qcode') return '可留空读取 Qoder 登录态，或输入 dt- / jt- / pt- Token'
   if (formData.value.providerType === 'trae') return 'Trae 当前仅支持读取本地登录状态'
   if (formData.value.providerType === 'zcode') return '可留空以读取 ~/.zcode/v2/credentials.json'
+  if (formData.value.providerType === 'mimo') return '可留空以读取 ~/.local/share/mimocode/auth.json，或输入 sk-... API Key'
   return t('quota.apiKeyPlaceholder')
 })
 

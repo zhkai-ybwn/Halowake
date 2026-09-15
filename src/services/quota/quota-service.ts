@@ -17,6 +17,7 @@ export type ProviderType =
   | 'qcode'
   | 'trae'
   | 'zcode'
+  | 'mimo'
   | 'custom'
 
 export interface AccountConfig {

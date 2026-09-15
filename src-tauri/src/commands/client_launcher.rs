@@ -91,6 +91,16 @@ fn client_definition(provider: &ProviderType) -> Option<ClientDefinition> {
             windows_app_ids: &[],
             mac_app_names: &["Antigravity"],
         }),
+        ProviderType::Mimo => Some(ClientDefinition {
+            app_name: "Xiaomi MiMo",
+            command_names: &["Xiaomi MiMo", "mimo", "mimocode"],
+            windows_relative_paths: &[
+                "Programs\\Xiaomi MiMo\\Xiaomi MiMo.exe",
+                "Programs\\MiMo\\MiMo.exe",
+            ],
+            windows_app_ids: &[],
+            mac_app_names: &["Xiaomi MiMo", "MiMo"],
+        }),
         _ => None,
     }
 }

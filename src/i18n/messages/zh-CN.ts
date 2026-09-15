@@ -998,7 +998,7 @@ export default {
     hoursAgo: '小时前',
     discoverLocal: '一键扫描本地凭证',
     scanningLocalTitle: '正在扫描本地开发环境与客户端凭证…',
-    scanningLocalSubtitle: '自动探测 Codex、Claude、WorkBuddy、Cursor、Qoder、OpenCode、Trae、ZCode',
+    scanningLocalSubtitle: '自动探测 Codex、Claude、WorkBuddy、Cursor、Qoder、OpenCode、Trae、ZCode、Xiaomi MiMo',
     scanningLocalBadge: '自动探测中',
     syncingDiscoveredTitle: '本地扫描已完成，正在同步额度…',
     syncingDiscoveredSubtitle: '客户端已经加入看板，正在获取各账号的最新额度',

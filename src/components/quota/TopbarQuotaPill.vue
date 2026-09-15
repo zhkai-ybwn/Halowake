@@ -643,6 +643,10 @@ onMounted(() => {
   &[data-provider='minimax'] {
     background: rgba(255, 75, 75, 0.12);
   }
+
+  &[data-provider='mimo'] {
+    background: rgba(255, 103, 0, 0.12);
+  }
 }
 
 .rate-pairs-group {

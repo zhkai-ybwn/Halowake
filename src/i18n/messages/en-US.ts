@@ -1019,7 +1019,7 @@ export default {
     hoursAgo: 'hours ago',
     discoverLocal: 'Auto-Discover Local',
     scanningLocalTitle: 'Scanning local clients and credentials…',
-    scanningLocalSubtitle: 'Detecting Codex, Claude, WorkBuddy, Cursor, Qoder, OpenCode, Trae, and ZCode',
+    scanningLocalSubtitle: 'Detecting Codex, Claude, WorkBuddy, Cursor, Qoder, OpenCode, Trae, ZCode, and Xiaomi MiMo',
     scanningLocalBadge: 'Discovering',
     syncingDiscoveredTitle: 'Local scan complete; syncing quotas…',
     syncingDiscoveredSubtitle: 'Clients are already visible while their latest quotas are fetched',

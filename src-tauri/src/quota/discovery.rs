@@ -138,6 +138,19 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                 auto_discovered: true,
             });
         }
+
+        // Xiaomi MiMo (本地 mimocode auth.json)
+        if crate::quota::adapters::mimo::has_mimo_credentials() {
+            accounts.push(AccountConfig {
+                id: "discovered-mimo-local".to_string(),
+                provider_type: ProviderType::Mimo,
+                name: "Xiaomi MiMo".to_string(),
+                api_key: None,
+                base_url: None,
+                enabled: true,
+                auto_discovered: true,
+            });
+        }
     }
 
     // 2. 探测 Halowake 现有的 ai-settings.json
@@ -210,6 +223,20 @@ pub fn discover_local_accounts(app: &AppHandle) -> Vec<AccountConfig> {
                                 id: format!("discovered-zhipu-{}", model.id),
                                 provider_type: ProviderType::Zhipu,
                                 name: format!("智谱 GLM ({})", model.name),
+                                api_key: model.api_key.clone(),
+                                base_url: Some(model.base_url.clone()),
+                                enabled: true,
+                                auto_discovered: true,
+                            });
+                        } else if base_url.contains("xiaomimimo")
+                            || base_url.contains("mimo.xiaomi")
+                            || name_lower.contains("mimo")
+                            || name_lower.contains("小米")
+                        {
+                            accounts.push(AccountConfig {
+                                id: format!("discovered-mimo-{}", model.id),
+                                provider_type: ProviderType::Mimo,
+                                name: format!("Xiaomi MiMo ({})", model.name),
                                 api_key: model.api_key.clone(),
                                 base_url: Some(model.base_url.clone()),
                                 enabled: true,

@@ -3,6 +3,7 @@ pub mod codex;
 pub mod cursor;
 pub mod deepseek;
 pub mod gemini;
+pub mod mimo;
 pub mod moonshot;
 pub mod opencode;
 pub mod openrouter;
