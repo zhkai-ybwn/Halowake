@@ -69,6 +69,7 @@ export default {
     excluded: '已排除 {count}',
     emptyLoad: '点击“读取记录”加载指定日期内的各 AI 工具会话。',
     emptyFilter: '当前分类下没有会话。',
+    showAllProjects: '显示全部项目',
     noFacts: '未提取到日报事实',
     statusIncluded: '已纳入',
     statusExcluded: '未纳入',

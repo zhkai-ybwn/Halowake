@@ -47,11 +47,12 @@
           </button>
         </div>
         <NDatePicker
-          v-model:value="dateRange"
+          :value="dateRange"
           type="daterange"
           size="small"
           clearable
           class="compact-date-picker"
+          @update:value="handleDateRangeUpdate"
         />
       </div>
 
@@ -111,6 +112,7 @@
         <button
           type="button"
           class="project-config-trigger"
+          :class="{ 'is-filtered': selectedProjects.length && selectedProjects.length < allProjectNames.length }"
           :title="t('codexReport.manageProjects')"
           @click="projectModalOpen = true"
         >
@@ -216,7 +218,17 @@
             icon="solar:filter-linear"
             :title="t('codexReport.emptyFilterTitle')"
             :description="t('codexReport.emptyFilter')"
-          />
+          >
+            <template
+              v-if="selectedProjects.length && selectedProjects.length < allProjectNames.length"
+              #actions
+            >
+              <WorkbenchButton variant="secondary" @click="selectedProjects = []">
+                <Icon icon="solar:folder-with-files-linear" />
+                {{ t('codexReport.showAllProjects') }}
+              </WorkbenchButton>
+            </template>
+          </WorkbenchEmptyState>
 
           <NCheckboxGroup v-else v-model:value="includedIds" class="session-card-list">
             <label
@@ -835,9 +847,20 @@ async function loadSessions() {
       ? ['codex', 'claude', 'antigravity', 'opencode']
       : [selectedProvider.value]
 
+    const startDate = new Date(dateRange.value[0])
+    const endDate = new Date(dateRange.value[1])
+    if (
+      endDate.getHours() === 0 &&
+      endDate.getMinutes() === 0 &&
+      endDate.getSeconds() === 0 &&
+      endDate.getMilliseconds() === 0
+    ) {
+      endDate.setHours(23, 59, 59, 999)
+    }
+
     sessions.value = await loadCodexReportSessions({
-      from: new Date(dateRange.value[0]).toISOString(),
-      to: new Date(dateRange.value[1]).toISOString(),
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
       providers,
     })
     includedIds.value = sessions.value
@@ -850,6 +873,24 @@ async function loadSessions() {
   } finally {
     loading.value = false
   }
+}
+
+function handleDateRangeUpdate(val: [number, number] | null) {
+  if (!val || !val[0] || !val[1]) {
+    dateRange.value = val
+    return
+  }
+  const start = val[0]
+  const end = new Date(val[1])
+  if (
+    end.getHours() === 0 &&
+    end.getMinutes() === 0 &&
+    end.getSeconds() === 0 &&
+    end.getMilliseconds() === 0
+  ) {
+    end.setHours(23, 59, 59, 999)
+  }
+  dateRange.value = [start, end.getTime()]
 }
 
 function generateWorkRecord() {
@@ -1193,6 +1234,15 @@ async function copyText(text: string, successMessage: string) {
   &:focus-visible {
     box-shadow: 0 0 0 3px var(--lumina-accent-ring);
     outline: none;
+  }
+
+  &.is-filtered {
+    border-color: var(--lumina-primary);
+    background: var(--lumina-primary-soft, rgba(59, 130, 246, 0.08));
+
+    .trigger-badge {
+      color: var(--lumina-primary);
+    }
   }
 }
 

@@ -69,6 +69,7 @@ export default {
     excluded: 'Excluded {count}',
     emptyLoad: 'Load AI tool sessions from the selected date range.',
     emptyFilter: 'There are no sessions in this category.',
+    showAllProjects: 'Show All Projects',
     noFacts: 'No report facts extracted',
     statusIncluded: 'Included',
     statusExcluded: 'Not included',

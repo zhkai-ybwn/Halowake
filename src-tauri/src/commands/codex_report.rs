@@ -7,6 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use rusqlite::{Connection, OpenFlags};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -262,28 +263,14 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     }
 
     // 3. Antigravity Projects
-    let agy_config_projects = home.join(".gemini").join("config").join("projects");
-    if agy_config_projects.exists() {
-        if let Ok(entries) = fs::read_dir(&agy_config_projects) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "json") {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        if let Ok(val) = serde_json::from_str::<Value>(&content) {
-                            let name = val.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                            let updated_at = val.get("updatedAt").and_then(Value::as_str).map(str::to_string);
-                            let folder_uri = val.pointer("/projectResources/resources/0/gitFolder/folderUri")
-                                .and_then(Value::as_str)
-                                .unwrap_or("");
-                            let cwd = decode_uri_to_path(folder_uri).unwrap_or_else(|| name.clone());
-                            if !name.is_empty() && name != "Outside of Project" {
-                                record_project_activity(&mut project_map, &cwd, Some(&name), updated_at, "antigravity", 1);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    let (_project_id_map, project_mappings, _conv_to_project, project_stats) = load_antigravity_metadata(&home);
+    for (name, cwd) in &project_mappings {
+        let (count, last_active) = if let Some((cnt, ts)) = project_stats.get(cwd) {
+            (*cnt, ts.clone())
+        } else {
+            (1, None)
+        };
+        record_project_activity(&mut project_map, cwd, Some(name), last_active, "antigravity", count.max(1));
     }
 
     let mut projects: Vec<CodexProjectInfo> = project_map
@@ -316,6 +303,121 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     Ok(projects)
 }
 
+fn days_from_civil(year: i64, month: u64, day: u64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let m = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * m + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe as i64 - 719468
+}
+
+pub fn parse_iso_timestamp(iso: &str) -> Option<u64> {
+    if iso.len() < 19 {
+        return None;
+    }
+    let year: i64 = iso.get(0..4)?.parse().ok()?;
+    let month: u64 = iso.get(5..7)?.parse().ok()?;
+    let day: u64 = iso.get(8..10)?.parse().ok()?;
+    let hour: u64 = iso.get(11..13)?.parse().ok()?;
+    let min: u64 = iso.get(14..16)?.parse().ok()?;
+    let sec: u64 = iso.get(17..19)?.parse().ok()?;
+
+    if month < 1 || month > 12 || day < 1 || day > 31 {
+        return None;
+    }
+
+    let days = days_from_civil(year, month, day);
+    if days < 0 {
+        return None;
+    }
+    let mut total_secs = (days as u64) * 86400 + hour * 3600 + min * 60 + sec;
+
+    if let Some(tz_part) = iso.get(19..) {
+        if let Some(plus_idx) = tz_part.find('+') {
+            if let Some(offset_str) = tz_part.get(plus_idx + 1..) {
+                if offset_str.len() >= 5 {
+                    let oh: u64 = offset_str.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let om: u64 = offset_str.get(3..5).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    total_secs = total_secs.saturating_sub(oh * 3600 + om * 60);
+                }
+            }
+        } else if let Some(minus_idx) = tz_part.find('-') {
+            if let Some(offset_str) = tz_part.get(minus_idx + 1..) {
+                if offset_str.len() >= 5 {
+                    let oh: u64 = offset_str.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let om: u64 = offset_str.get(3..5).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    total_secs = total_secs.saturating_add(oh * 3600 + om * 60);
+                }
+            }
+        }
+    }
+    Some(total_secs)
+}
+
+fn is_file_modified_since(path: &Path, min_epoch: u64) -> bool {
+    if min_epoch == 0 {
+        return true;
+    }
+    match fs::metadata(path).and_then(|m| m.modified()) {
+        Ok(mtime) => {
+            let secs = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(u64::MAX);
+            secs >= min_epoch
+        }
+        Err(_) => true,
+    }
+}
+
+fn fast_extract_timestamp(line: &str) -> Option<&str> {
+    for prefix in &["\"created_at\":\"", "\"timestamp\":\""] {
+        if let Some(pos) = line.find(prefix) {
+            let start = pos + prefix.len();
+            if let Some(end) = line[start..].find('"') {
+                return Some(&line[start..start + end]);
+            }
+        }
+    }
+    None
+}
+
+fn parse_items_parallel<T, F>(items: Vec<T>, parser: F) -> Vec<CodexReportSession>
+where
+    T: Send + Sync,
+    F: Fn(&T) -> Option<CodexReportSession> + Send + Sync,
+{
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    if items.len() <= 2 || num_threads <= 1 {
+        return items.iter().filter_map(&parser).collect();
+    }
+
+    let chunk_size = (items.len() + num_threads - 1) / num_threads;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = items
+            .chunks(chunk_size)
+            .map(|chunk| {
+                s.spawn(|| {
+                    chunk.iter().filter_map(&parser).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let mut results = Vec::new();
+        for handle in handles {
+            if let Ok(sub) = handle.join() {
+                results.extend(sub);
+            }
+        }
+        results
+    })
+}
+
 #[tauri::command]
 pub async fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
     tokio::task::spawn_blocking(move || load_codex_report_sessions_sync(query))
@@ -334,21 +436,31 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
         ]
     });
 
-    let to_date = if query.to.len() >= 10 { &query.to[..10] } else { &query.to };
+    let mut from_str = query.from;
+    let mut to_str = query.to;
+    if from_str.len() == 10 {
+        from_str = format!("{}T00:00:00.000Z", from_str);
+    }
+    if to_str.len() == 10 {
+        to_str = format!("{}T23:59:59.999Z", to_str);
+    }
+
+    let to_date = if to_str.len() >= 10 { &to_str[..10] } else { &to_str };
+    // Add 5 minutes grace period before query.from for mtime check
+    let min_epoch = parse_iso_timestamp(&from_str).map(|s| s.saturating_sub(300)).unwrap_or(0);
 
     let mut all_sessions = Vec::new();
 
-    // 1. Codex (with date directory pruning for future dates)
+    // 1. Codex (with date directory pruning and mtime filter)
     if selected_providers.iter().any(|p| p == "codex" || p == "all") {
         let codex_dir = home.join(".codex").join("sessions");
         if codex_dir.exists() {
             let mut session_files = Vec::new();
             collect_codex_jsonl_files_pruned(&codex_dir, to_date, &mut session_files);
-            for path in &session_files {
-                if let Some(session) = parse_codex_session(path, &query.from, &query.to) {
-                    all_sessions.push(session);
-                }
-            }
+            let sessions = parse_items_parallel(session_files, |path| {
+                parse_codex_session(path, &from_str, &to_str)
+            });
+            all_sessions.extend(sessions);
         }
     }
 
@@ -358,11 +470,14 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
         if claude_projects_dir.exists() {
             let mut claude_files = Vec::new();
             let _ = collect_jsonl_files(&claude_projects_dir, &mut claude_files);
-            for path in &claude_files {
-                if let Some(session) = parse_claude_session(path, &query.from, &query.to) {
-                    all_sessions.push(session);
-                }
-            }
+            let filtered_claude: Vec<PathBuf> = claude_files
+                .into_iter()
+                .filter(|p| is_file_modified_since(p, min_epoch))
+                .collect();
+            let sessions = parse_items_parallel(filtered_claude, |path| {
+                parse_claude_session(path, &from_str, &to_str)
+            });
+            all_sessions.extend(sessions);
         }
     }
 
@@ -370,21 +485,31 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
     if selected_providers.iter().any(|p| p == "antigravity" || p == "all") {
         let brain_dir = home.join(".gemini").join("antigravity").join("brain");
         if brain_dir.exists() {
-            let project_mappings = load_antigravity_project_mappings(&home);
+            let (_project_id_map, project_mappings, conv_to_project, _project_stats) = load_antigravity_metadata(&home);
+            let mut agy_candidates = Vec::new();
             if let Ok(entries) = fs::read_dir(&brain_dir) {
                 for entry in entries.filter_map(Result::ok) {
                     let conv_dir = entry.path();
                     if conv_dir.is_dir() {
-                        let conv_id = conv_dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                        let conv_id = conv_dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
                         let transcript_file = conv_dir.join(".system_generated").join("logs").join("transcript.jsonl");
-                        if transcript_file.exists() {
-                            if let Some(session) = parse_antigravity_transcript(&transcript_file, conv_id, &project_mappings, &query.from, &query.to) {
-                                all_sessions.push(session);
-                            }
+                        if transcript_file.exists() && is_file_modified_since(&transcript_file, min_epoch) {
+                            agy_candidates.push((transcript_file, conv_id));
                         }
                     }
                 }
             }
+            let sessions = parse_items_parallel(agy_candidates, |(transcript_file, conv_id)| {
+                parse_antigravity_transcript(
+                    transcript_file,
+                    conv_id,
+                    &conv_to_project,
+                    &project_mappings,
+                    &from_str,
+                    &to_str,
+                )
+            });
+            all_sessions.extend(sessions);
         }
     }
 
@@ -396,20 +521,25 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
             get_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
             get_local_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
         ];
+        let mut opencode_files = Vec::new();
         for storage_dir in &opencode_candidates {
             if storage_dir.exists() {
                 if let Ok(entries) = fs::read_dir(storage_dir) {
                     for entry in entries.filter_map(Result::ok) {
                         let path = entry.path();
                         if path.extension().is_some_and(|ext| ext == "json") {
-                            if let Some(session) = parse_opencode_session(&path, &query.from, &query.to) {
-                                all_sessions.push(session);
+                            if is_file_modified_since(&path, min_epoch) {
+                                opencode_files.push(path);
                             }
                         }
                     }
                 }
             }
         }
+        let sessions = parse_items_parallel(opencode_files, |path| {
+            parse_opencode_session(path, &from_str, &to_str)
+        });
+        all_sessions.extend(sessions);
     }
 
     all_sessions.sort_by(|left, right| right.started_at.cmp(&left.started_at));
@@ -444,7 +574,14 @@ fn collect_codex_jsonl_files_pruned(codex_dir: &Path, to_date: &str, files: &mut
                 let current_ymd = format!("{}-{}-{}", year_str, month_str, day_str);
                 if current_ymd.as_str() > to_date { continue; }
 
-                let _ = collect_jsonl_files(&day_path, files);
+                if let Ok(entries) = fs::read_dir(&day_path) {
+                    for entry in entries.filter_map(Result::ok) {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|ext| ext == "jsonl") {
+                            files.push(path);
+                        }
+                    }
+                }
             }
         }
     }
@@ -518,13 +655,22 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
     for line_res in reader.lines() {
         let Ok(line) = line_res else { continue; };
         // Fast string pre-filter to avoid unnecessary serde deserialization
-        if !line.contains("\"session_meta\"")
+        let is_meta = line.contains("\"session_meta\"");
+        if !is_meta
             && !line.contains("\"user\"")
             && !line.contains("\"user_message\"")
             && !line.contains("\"final_answer\"")
             && !line.contains("\"assistant\"")
         {
             continue;
+        }
+
+        if !is_meta {
+            if let Some(ts) = fast_extract_timestamp(&line) {
+                if !is_in_range(ts, from, to) {
+                    continue;
+                }
+            }
         }
 
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
@@ -618,6 +764,12 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
             continue;
         }
 
+        if let Some(ts) = fast_extract_timestamp(&line) {
+            if !is_in_range(ts, from, to) {
+                continue;
+            }
+        }
+
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -663,6 +815,7 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
 fn parse_antigravity_transcript(
     path: &Path,
     conv_id: &str,
+    conv_project_map: &HashMap<String, (String, String)>,
     project_mappings: &[(String, String)],
     from: &str,
     to: &str,
@@ -676,25 +829,24 @@ fn parse_antigravity_transcript(
         ..Default::default()
     };
 
-    let mut inferred_project_name: Option<String> = None;
-    let mut inferred_cwd: Option<String> = None;
+    let (mut inferred_project_name, mut inferred_cwd) = if let Some((pname, pcwd)) = conv_project_map.get(conv_id) {
+        (Some(pname.clone()), Some(pcwd.clone()))
+    } else {
+        (None, None)
+    };
 
     for line_res in reader.lines() {
         let Ok(line) = line_res else { continue; };
 
-        if inferred_cwd.is_none() {
-            for (pname, pcwd) in project_mappings {
-                if line.to_lowercase().contains(&pcwd.to_lowercase()) || line.contains(pname) {
-                    inferred_project_name = Some(pname.clone());
-                    inferred_cwd = Some(pcwd.clone());
-                    break;
-                }
-            }
-        }
-
         // Fast skip lines that are not user input or planner response
         if !line.contains("\"USER_INPUT\"") && !line.contains("\"PLANNER_RESPONSE\"") {
             continue;
+        }
+
+        if let Some(ts) = fast_extract_timestamp(&line) {
+            if !is_in_range(ts, from, to) {
+                continue;
+            }
         }
 
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
@@ -728,12 +880,47 @@ fn parse_antigravity_transcript(
                 if let Some(tool_calls) = entry.get("tool_calls").and_then(Value::as_array) {
                     for call in tool_calls {
                         if let Some(args) = call.get("args") {
-                            if let Some(dir) = args.get("SearchDirectory").or_else(|| args.get("Cwd")).and_then(Value::as_str) {
-                                let dir_clean = dir.trim_matches('"');
-                                let norm_dir = normalize_project_path(dir_clean);
-                                inferred_cwd = Some(norm_dir.clone());
-                                inferred_project_name = Some(get_project_name(&norm_dir));
-                                break;
+                            let candidate_path = args.get("SearchDirectory")
+                                .or_else(|| args.get("Cwd"))
+                                .or_else(|| args.get("SearchPath"))
+                                .or_else(|| args.get("TargetFile"))
+                                .or_else(|| args.get("AbsolutePath"))
+                                .and_then(Value::as_str);
+
+                            if let Some(raw_path) = candidate_path {
+                                let path_clean = raw_path.trim_matches('"').trim();
+                                if !path_clean.is_empty() {
+                                    let norm = normalize_project_path(path_clean);
+
+                                    // Check if norm matches or is inside any known project
+                                    for (pname, pcwd) in project_mappings {
+                                        let pcwd_lower = pcwd.to_lowercase();
+                                        let norm_lower = norm.to_lowercase();
+                                        if norm_lower == pcwd_lower
+                                            || norm_lower.starts_with(&format!("{}\\", pcwd_lower))
+                                            || norm_lower.starts_with(&format!("{}/", pcwd_lower))
+                                        {
+                                            inferred_project_name = Some(pname.clone());
+                                            inferred_cwd = Some(pcwd.clone());
+                                            break;
+                                        }
+                                    }
+
+                                    // If not matched to configured projects, extract directory
+                                    if inferred_cwd.is_none() {
+                                        let dir_path = if Path::new(&norm).is_file() {
+                                            Path::new(&norm).parent().and_then(|p| p.to_str()).unwrap_or(&norm).to_string()
+                                        } else {
+                                            norm.clone()
+                                        };
+                                        inferred_project_name = Some(get_project_name(&dir_path));
+                                        inferred_cwd = Some(dir_path);
+                                    }
+
+                                    if inferred_cwd.is_some() {
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -852,6 +1039,10 @@ pub fn normalize_project_path(raw: &str) -> String {
     }
     p = p.replace("%3A", ":").replace("%3a", ":");
 
+    while p.contains("\\\\") {
+        p = p.replace("\\\\", "\\");
+    }
+
     if p.len() >= 2 && p.chars().nth(1) == Some(':') {
         let drive = p.chars().next().unwrap().to_ascii_uppercase();
         p = format!("{}{}", drive, &p[1..]);
@@ -862,24 +1053,50 @@ pub fn normalize_project_path(raw: &str) -> String {
     p
 }
 
-fn load_antigravity_project_mappings(home: &Path) -> Vec<(String, String)> {
-    let mut mappings = Vec::new();
+fn load_antigravity_metadata(home: &Path) -> (
+    HashMap<String, (String, String)>,
+    Vec<(String, String)>,
+    HashMap<String, (String, String)>,
+    HashMap<String, (usize, Option<String>)>,
+) {
+    let mut project_id_map: HashMap<String, (String, String)> = HashMap::new();
+    let mut project_mappings: Vec<(String, String)> = Vec::new();
+    let mut conv_to_project: HashMap<String, (String, String)> = HashMap::new();
+    let mut project_stats: HashMap<String, (usize, Option<String>)> = HashMap::new();
+
+    // 1. Load project configurations from ~/.gemini/config/projects/*.json
     let config_projects = home.join(".gemini").join("config").join("projects");
     if config_projects.exists() {
-        if let Ok(entries) = fs::read_dir(config_projects) {
+        if let Ok(entries) = fs::read_dir(&config_projects) {
             for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
                 if path.extension().is_some_and(|ext| ext == "json") {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                            let id = val.get("id").and_then(Value::as_str)
+                                .map(str::to_string)
+                                .unwrap_or_else(|| path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string());
                             let name = val.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                            let updated_at = val.get("updatedAt").and_then(Value::as_str).map(str::to_string);
                             let folder_uri = val.pointer("/projectResources/resources/0/gitFolder/folderUri")
                                 .and_then(Value::as_str)
                                 .unwrap_or("");
                             let cwd = decode_uri_to_path(folder_uri).unwrap_or_else(|| name.clone());
                             let norm_cwd = normalize_project_path(&cwd);
+
                             if !name.is_empty() && name != "Outside of Project" {
-                                mappings.push((name, norm_cwd));
+                                if !project_mappings.iter().any(|(n, c)| n == &name && c == &norm_cwd) {
+                                    project_mappings.push((name.clone(), norm_cwd.clone()));
+                                }
+                                if !id.is_empty() {
+                                    project_id_map.insert(id, (name.clone(), norm_cwd.clone()));
+                                }
+                                if let Some(ts) = updated_at {
+                                    let stat = project_stats.entry(norm_cwd.clone()).or_insert((0, None));
+                                    if stat.1.as_ref().map_or(true, |existing| &ts > existing) {
+                                        stat.1 = Some(ts);
+                                    }
+                                }
                             }
                         }
                     }
@@ -887,7 +1104,64 @@ fn load_antigravity_project_mappings(home: &Path) -> Vec<(String, String)> {
             }
         }
     }
-    mappings
+
+    // 2. Load conversation summaries from ~/.gemini/antigravity/conversation_summaries.db
+    let db_path = home.join(".gemini").join("antigravity").join("conversation_summaries.db");
+    if db_path.exists() {
+        if let Ok(conn) = Connection::open_with_flags(
+            &db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        ) {
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT conversation_id, project_id, workspace_uris, last_modified_time FROM conversation_summaries"
+            ) {
+                let rows = stmt.query_map([], |row| {
+                    let conv_id: String = row.get(0)?;
+                    let proj_id: Option<String> = row.get(1)?;
+                    let uris: Option<String> = row.get(2)?;
+                    let last_mod: Option<String> = row.get(3)?;
+                    Ok((conv_id, proj_id, uris, last_mod))
+                });
+                if let Ok(iter) = rows {
+                    for item in iter.flatten() {
+                        let (conv_id, proj_id, uris, last_mod) = item;
+
+                        // Resolve project: 1. proj_id, 2. workspace_uris
+                        let mut resolved = proj_id.as_deref().and_then(|pid| project_id_map.get(pid)).cloned();
+
+                        if resolved.is_none() {
+                            if let Some(u_str) = uris {
+                                if let Ok(u_arr) = serde_json::from_str::<Vec<String>>(&u_str) {
+                                    if let Some(first_uri) = u_arr.first() {
+                                        if let Some(cwd) = decode_uri_to_path(first_uri) {
+                                            let matched_name = project_mappings.iter()
+                                                .find(|(_, pcwd)| pcwd.eq_ignore_ascii_case(&cwd))
+                                                .map(|(pname, _)| pname.clone())
+                                                .unwrap_or_else(|| get_project_name(&cwd));
+                                            resolved = Some((matched_name, cwd));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((pname, pcwd)) = resolved {
+                            let stat = project_stats.entry(pcwd.clone()).or_insert((0, None));
+                            stat.0 += 1;
+                            if let Some(ref ts) = last_mod {
+                                if stat.1.as_ref().map_or(true, |existing| ts > existing) {
+                                    stat.1 = Some(ts.clone());
+                                }
+                            }
+                            conv_to_project.insert(conv_id, (pname, pcwd));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (project_id_map, project_mappings, conv_to_project, project_stats)
 }
 
 fn decode_claude_project_path(folder_name: &str) -> String {
@@ -900,11 +1174,22 @@ fn decode_claude_project_path(folder_name: &str) -> String {
 }
 
 fn decode_uri_to_path(uri: &str) -> Option<String> {
-    if let Some(stripped) = uri.strip_prefix("file:///") {
-        let decoded = stripped.replace("%3A", ":").replace("%3a", ":").replace('/', "\\");
+    let raw = uri.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let unescaped = raw.replace("%3A", ":").replace("%3a", ":");
+    if let Some(stripped) = unescaped.strip_prefix("file:///") {
+        let decoded = stripped.replace('/', "\\");
+        return Some(normalize_project_path(&decoded));
+    } else if let Some(stripped) = unescaped.strip_prefix("file://") {
+        let decoded = stripped.replace('/', "\\");
+        return Some(normalize_project_path(&decoded));
+    } else if let Some(stripped) = unescaped.strip_prefix("file:") {
+        let decoded = stripped.replace('/', "\\");
         return Some(normalize_project_path(&decoded));
     }
-    None
+    Some(normalize_project_path(&unescaped))
 }
 
 fn extract_text_value(val: &Value) -> Option<String> {
@@ -1058,6 +1343,175 @@ mod tests {
         assert_eq!(proj.session_count, 14);
         assert_eq!(proj.providers, vec!["codex".to_string(), "antigravity".to_string()]);
         assert_eq!(proj.last_active_at, Some("2026-08-28T09:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_parse_antigravity_transcript_does_not_infer_from_user_message_logs() {
+        let temp_dir = std::env::temp_dir().join(format!("halowake_agy_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let file_path = temp_dir.join("transcript.jsonl");
+        let mut file = File::create(&file_path).expect("create test file");
+
+        // Line 1: User pasted error log mentioning another project D:\ly_project\ecogrid-mdm
+        writeln!(
+            file,
+            r#"{{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-09-10T08:13:55Z","content":"<USER_REQUEST>\n问题，我在devdock添加了一个react项目，但是加载出来后我点击执行命令报错了。应该执行npm run dev，但是devdock执行的是 准备执行：bun run dev\r\n工作目录：D:\\ly_project\\ecogrid-mdm\r\n进程已启动，PID 22008\r\n'bun' 不是内部或外部命令\n</USER_REQUEST>"}}"#
+        ).unwrap();
+
+        // Line 2: Agent executes tool in Lumina workspace
+        writeln!(
+            file,
+            r#"{{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-10T08:13:55Z","content":"已排查","tool_calls":[{{"name":"find_by_name","args":{{"SearchDirectory":"\"C:\\\\Users\\\\user\\\\Desktop\\\\templates\\\\Lumina\""}}}}]}}"#
+        ).unwrap();
+        drop(file);
+
+        let conv_project_map = HashMap::new();
+        let project_mappings = vec![
+            ("ecogrid-mdm".to_string(), "D:\\ly_project\\ecogrid-mdm".to_string()),
+            ("Lumina".to_string(), "C:\\Users\\user\\Desktop\\templates\\Lumina".to_string()),
+        ];
+
+        let session = parse_antigravity_transcript(
+            &file_path,
+            "test-conv-001",
+            &conv_project_map,
+            &project_mappings,
+            "2026-09-10T00:00:00Z",
+            "2026-09-10T23:59:59Z",
+        ).expect("should parse session");
+
+        // Must NOT be ecogrid-mdm, must be Lumina based on tool execution path
+        assert_eq!(session.project_name, "Lumina");
+        assert_eq!(session.cwd, Some("C:\\Users\\user\\Desktop\\templates\\Lumina".to_string()));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_antigravity_transcript_prefers_database_mapping() {
+        let temp_dir = std::env::temp_dir().join(format!("halowake_agy_test_db_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let file_path = temp_dir.join("transcript.jsonl");
+        let mut file = File::create(&file_path).expect("create test file");
+
+        writeln!(
+            file,
+            r#"{{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-09-15T03:05:52Z","content":"<USER_REQUEST>刚刚新增了xiaomi mimo的额度适配器，帮我发个版本吧</USER_REQUEST>"}}"#
+        ).unwrap();
+        writeln!(
+            file,
+            r#"{{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-15T03:07:54Z","content":"新版本 v1.3.4 已完成发布"}}"#
+        ).unwrap();
+        drop(file);
+
+        let mut conv_project_map = HashMap::new();
+        conv_project_map.insert("9596f35f".to_string(), ("Lumina".to_string(), "C:\\Users\\user\\Desktop\\templates\\Lumina".to_string()));
+
+        let project_mappings = vec![
+            ("ecogrid-mdm".to_string(), "D:\\ly_project\\ecogrid-mdm".to_string()),
+            ("Lumina".to_string(), "C:\\Users\\user\\Desktop\\templates\\Lumina".to_string()),
+        ];
+
+        let session = parse_antigravity_transcript(
+            &file_path,
+            "9596f35f",
+            &conv_project_map,
+            &project_mappings,
+            "2026-09-15T00:00:00Z",
+            "2026-09-15T23:59:59Z",
+        ).expect("should parse session");
+
+        assert_eq!(session.project_name, "Lumina");
+        assert_eq!(session.cwd, Some("C:\\Users\\user\\Desktop\\templates\\Lumina".to_string()));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_real_antigravity_conversation_9596f35f_resolves_to_lumina() {
+        let home = match get_home_dir() {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        let real_transcript = home
+            .join(".gemini")
+            .join("antigravity")
+            .join("brain")
+            .join("9596f35f-f6b3-4090-a2ea-9ca13b00fc07")
+            .join(".system_generated")
+            .join("logs")
+            .join("transcript.jsonl");
+
+        if !real_transcript.exists() {
+            return;
+        }
+
+        let (_id_map, project_mappings, conv_to_project, _stats) = load_antigravity_metadata(&home);
+
+        // Verify conversation is recognized in DB as Lumina
+        if let Some((pname, _pcwd)) = conv_to_project.get("9596f35f-f6b3-4090-a2ea-9ca13b00fc07") {
+            assert_eq!(pname, "Lumina");
+        }
+
+        // Test parsing the real file on 2026-09-15 (when user asked for xiaomi mimo)
+        let session = parse_antigravity_transcript(
+            &real_transcript,
+            "9596f35f-f6b3-4090-a2ea-9ca13b00fc07",
+            &conv_to_project,
+            &project_mappings,
+            "2026-09-15T00:00:00Z",
+            "2026-09-15T23:59:59Z",
+        ).expect("should parse real session");
+
+        assert_eq!(session.project_name, "Lumina");
+        assert_ne!(session.project_name, "ecogrid-mdm");
+        assert!(session.cwd.as_deref().unwrap_or("").to_lowercase().contains("lumina"));
+        assert!(session.user_messages.iter().any(|m| m.contains("xiaomi mimo")));
+    }
+
+    #[test]
+    fn test_parse_iso_timestamp() {
+        assert_eq!(parse_iso_timestamp("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_iso_timestamp("2026-09-07T00:00:00.000Z"), Some(1788739200));
+        assert_eq!(parse_iso_timestamp("2026-09-07T08:00:00+08:00"), Some(1788739200));
+        assert_eq!(fast_extract_timestamp(r#"{"created_at":"2026-09-10T08:13:55Z"}"#), Some("2026-09-10T08:13:55Z"));
+        assert_eq!(fast_extract_timestamp(r#"{"timestamp":"2026-09-10T08:13:55.123Z"}"#), Some("2026-09-10T08:13:55.123Z"));
+    }
+
+    #[test]
+    fn test_debug_last_week_sessions() {
+        let start = std::time::Instant::now();
+        let query = CodexReportQuery {
+            from: "2026-09-07T00:00:00.000Z".to_string(),
+            to: "2026-09-13T23:59:59.999Z".to_string(),
+            providers: None,
+        };
+        let res = load_codex_report_sessions_sync(query).expect("load sessions");
+        let elapsed = start.elapsed();
+        println!("Loaded {} sessions for last week in {:?}", res.len(), elapsed);
+        for s in &res {
+            println!("  [{}] {} ({}) - {} msgs", s.provider, s.project_name, s.started_at, s.user_messages.len());
+        }
+    }
+
+    #[test]
+    fn test_sep_11_sessions_loads_continued_codex_sessions() {
+        // 2026-09-11 in Beijing time (UTC+8): 2026-09-10T16:00:00Z ~ 2026-09-11T15:59:59.999Z
+        let query = CodexReportQuery {
+            from: "2026-09-10T16:00:00.000Z".to_string(),
+            to: "2026-09-11T15:59:59.999Z".to_string(),
+            providers: None,
+        };
+        let res = load_codex_report_sessions_sync(query).expect("load 9-11 sessions");
+        println!("Loaded {} sessions for 2026-09-11:", res.len());
+        for s in &res {
+            println!("  [{}] {} ({}) - {} msgs", s.provider, s.project_name, s.started_at, s.user_messages.len());
+        }
+        // Should include ecogrid-mdm and ami-insight which were continued on 9-11
+        assert!(res.iter().any(|s| s.project_name == "ecogrid-mdm"), "ecogrid-mdm should be found on 9-11");
+        assert!(res.iter().any(|s| s.project_name == "ami-insight"), "ami-insight should be found on 9-11");
     }
 }
 
