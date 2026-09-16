@@ -1480,24 +1480,19 @@ mod tests {
         assert_eq!(fast_extract_timestamp(r#"{"timestamp":"2026-09-10T08:13:55.123Z"}"#), Some("2026-09-10T08:13:55.123Z"));
     }
 
-    #[test]
-    fn test_debug_last_week_sessions() {
-        let start = std::time::Instant::now();
-        let query = CodexReportQuery {
-            from: "2026-09-07T00:00:00.000Z".to_string(),
-            to: "2026-09-13T23:59:59.999Z".to_string(),
-            providers: None,
-        };
-        let res = load_codex_report_sessions_sync(query).expect("load sessions");
-        let elapsed = start.elapsed();
-        println!("Loaded {} sessions for last week in {:?}", res.len(), elapsed);
-        for s in &res {
-            println!("  [{}] {} ({}) - {} msgs", s.provider, s.project_name, s.started_at, s.user_messages.len());
-        }
-    }
 
     #[test]
     fn test_sep_11_sessions_loads_continued_codex_sessions() {
+        let home = match get_home_dir() {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        let codex_sep_11 = home.join(".codex").join("sessions").join("2026").join("09").join("11");
+        if !codex_sep_11.exists() {
+            // Skip when running in clean CI runner environment without local test data
+            return;
+        }
+
         // 2026-09-11 in Beijing time (UTC+8): 2026-09-10T16:00:00Z ~ 2026-09-11T15:59:59.999Z
         let query = CodexReportQuery {
             from: "2026-09-10T16:00:00.000Z".to_string(),
