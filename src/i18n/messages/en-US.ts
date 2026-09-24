@@ -1163,5 +1163,74 @@ export default {
     colType: 'Type / Source',
     colDesc: 'Description',
     colActions: 'Actions',
+
+    // Tab switcher
+    tabInstalled: 'Installed Skills',
+    tabExplore: 'Explore & Pipelines',
+
+    // SDLC stages
+    stageAll: 'All Stages',
+    stageStarred: 'My Starred',
+    stageRequirement: 'Requirement & Spec',
+    stageDesign: 'Design & Architecture',
+    stageCoding: 'Engineering & Code',
+    stageTesting: 'QA & Testing',
+    stageDelivery: 'Delivery & Retrospect',
+
+    // Badges
+    badgeVerified: 'Verified',
+    badgeTrending: 'Trending',
+    badgeSecurity: 'Security Verified',
+    badgeCommunity: 'Community',
+
+    // Explore & Pipelines
+    pipelineTitle: 'SDLC End-to-End Pipeline Presets',
+    pipelineSubtitle: 'One-click install battle-tested skill suites across the entire SDLC pipeline',
+    pipelineInstallAll: 'Assemble Full Pipeline',
+    pipelineFullyInstalled: 'Fully Installed',
+    pipelineSkillsCount: '{count} lifecycle skills',
+    exploreSearchPlaceholder: 'Search skills by name, stack (Vue3, Tailwind...) or scenario…',
+
+    // Install Dialog
+    installDialogTitle: 'Install Skill to Agent',
+    installPipelineTitle: 'Assemble Pipeline Suite',
+    installScopeLabel: '1. Installation Scope',
+    installScopeProject: 'Current Workspace Only (Recommended)',
+    installScopeProjectDesc: 'Installed inside workspace .agents/skills, effective for this repository',
+    installScopeGlobal: 'Global User Profile',
+    installScopeGlobalDesc: 'Installed in user home directory, accessible across all workspaces',
+    installTargetAgentsLabel: '2. Target Agent(s) (Environment Detected)',
+    installGitignoreLabel: '3. Git Strategy & Repository Hygiene',
+    installGitignoreYes: 'Append to .gitignore (Recommended for personal use)',
+    installGitignoreYesDesc: 'Prevents local skill directories from dirtying Git status',
+    installGitignoreNo: 'Track in Git (Recommended for team sharing)',
+    installGitignoreNoDesc: 'Commit into git repo so teammates automatically get the skill on git pull',
+    installRememberPref: 'Remember preference for this project',
+    installConfirmBtn: 'Confirm & Install',
+    installingBtn: 'Installing…',
+    installSuccess: 'Installed successfully',
+    installFailed: 'Installation failed',
+    installedTag: 'Installed',
+    installActionBtn: 'Install',
+
+    // Detail Drawer
+    detailTitle: 'Skill Details & Guide',
+    detailScore: 'Halowake Score',
+    detailMetrics: 'Engineering Metrics & Trust',
+    detailHowToUse: 'How to Trigger & Use',
+    detailPromptExample: 'Recommended Prompt Example',
+    detailRecommendedWith: 'Recommended Companions',
+    detailCompatibleAgents: 'Compatible Agents',
+    detailAuthor: 'Author / Organization',
+    detailStarAction: 'Star',
+    detailStarredAction: 'Starred',
+    detailRateTitle: 'Experience Rating',
+
+    // Sync & Sources
+    syncRegistry: 'Sync Registry',
+    syncingRegistry: 'Syncing…',
+    syncRegistryTip: 'Sync latest recommended skills from remote registry',
+    manageSources: 'Skill Sources',
+    manageSourcesTip: 'Manage open-source GitHub skill sources',
   },
 } as const

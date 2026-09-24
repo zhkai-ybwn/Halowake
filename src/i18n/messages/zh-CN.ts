@@ -1142,5 +1142,74 @@ export default {
     colType: '类型 / 来源',
     colDesc: '功能说明',
     colActions: '操作',
+
+    // 标签页切换
+    tabInstalled: '已安装技能',
+    tabExplore: '技能探索与流水线',
+
+    // SDLC 阶段
+    stageAll: '全部阶段',
+    stageStarred: '我的收藏',
+    stageRequirement: '需求与规格',
+    stageDesign: '体验与架构',
+    stageCoding: '工程与编码',
+    stageTesting: '质量与测试',
+    stageDelivery: '交付与沉淀',
+
+    // 徽章
+    badgeVerified: '官方精选',
+    badgeTrending: '社区热门',
+    badgeSecurity: '安全认证',
+    badgeCommunity: '社区开源',
+
+    // 探索与流水线
+    pipelineTitle: 'SDLC 研发全流程流水线套餐',
+    pipelineSubtitle: '一键装配经工程验证的端到端能力组合拳，覆盖需求到交付全流程',
+    pipelineInstallAll: '一键装配全流程',
+    pipelineFullyInstalled: '已全部装配',
+    pipelineSkillsCount: '{count} 个全流程技能',
+    exploreSearchPlaceholder: '搜索技能名称、技术栈（Vue3、Tailwind...）或场景…',
+
+    // 安装决策弹窗
+    installDialogTitle: '安装技能至 Agent',
+    installPipelineTitle: '装配全流程流水线套餐',
+    installScopeLabel: '1. 安装范围 (Scope)',
+    installScopeProject: '当前项目专属 (推荐)',
+    installScopeProjectDesc: '存放在当前工作区目录，专为本工程生效',
+    installScopeGlobal: '全局通用 (用户目录)',
+    installScopeGlobalDesc: '存放在本机用户主目录，对所有工作区生效',
+    installTargetAgentsLabel: '2. 目标 Agent (已自动检测环境)',
+    installGitignoreLabel: '3. Git 版本控制与工程策略',
+    installGitignoreYes: '自动追加到 .gitignore (推荐个人使用)',
+    installGitignoreYesDesc: '防止本地技能目录污染 Git 提交历史，保持版本库纯净',
+    installGitignoreNo: '纳入 Git 版本控制 (推荐团队共享)',
+    installGitignoreNoDesc: '提交进代码库，团队同事 git pull 后自动同步生效',
+    installRememberPref: '记住此项目的偏好，下次快速安装',
+    installConfirmBtn: '确认安装并生效',
+    installingBtn: '正在装配…',
+    installSuccess: '安装成功',
+    installFailed: '安装失败',
+    installedTag: '已安装',
+    installActionBtn: '安装',
+
+    // 详情抽屉
+    detailTitle: '技能详情与引导',
+    detailScore: 'Halowake 综合评分',
+    detailMetrics: '工程指标与信誉',
+    detailHowToUse: '如何触发与使用',
+    detailPromptExample: '推荐 Prompt 提示词',
+    detailRecommendedWith: '最佳协同搭档 (推荐配合使用)',
+    detailCompatibleAgents: '支持的 Agent 工具',
+    detailAuthor: '来源组织 / 作者',
+    detailStarAction: '收藏',
+    detailStarredAction: '已收藏',
+    detailRateTitle: '使用体验反馈',
+
+    // 同步与数据源
+    syncRegistry: '同步开源库',
+    syncingRegistry: '同步中…',
+    syncRegistryTip: '从远端同步最新推荐技能与流水线',
+    manageSources: '技能数据源',
+    manageSourcesTip: '管理开源技能 GitHub 数据源与采集规则',
   },
 } as const

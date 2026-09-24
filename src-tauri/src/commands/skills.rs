@@ -69,7 +69,7 @@ fn is_yaml_block_scalar_indicator(val: &str) -> bool {
 
 /// 解析 SKILL.md 中的 YAML frontmatter
 /// 返回: (name, description, version)
-fn parse_skill_md(content: &str) -> (Option<String>, Option<String>, Option<String>) {
+pub(crate) fn parse_skill_md(content: &str) -> (Option<String>, Option<String>, Option<String>) {
     let mut lines = content.lines();
     // 检查第一行是否为 ---
     if let Some(first_line) = lines.next() {
@@ -769,6 +769,248 @@ pub async fn open_skill_folder(path: String) -> Result<(), String> {
         .map_err(|e| format!("打开目录失败 ({}): {}", path, e))?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSkillArgs {
+    pub skill_id: String,
+    pub git_url: String,
+    pub target_mode: Option<String>, // "project" | "specific_agent" | "global"
+    pub scope: Option<String>,       // fallback for backwards compatibility
+    pub target_agents: Vec<String>,
+    pub project_cwd: Option<String>,
+    pub add_to_gitignore: bool,
+    pub sub_skill_id: Option<String>, // 单独装配的子技能 ID
+    pub sub_path: Option<String>,     // 仓库中子技能相对路径 (如 "skills/canvas")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSkillResult {
+    pub success: bool,
+    pub message: String,
+    pub installed_paths: Vec<String>,
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn execute_git_clone_silent(git_url: &str, target_dir: &Path) -> Result<(), String> {
+    if let Some(parent) = target_dir.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建父目录失败: {}", e))?;
+    }
+
+    let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.args(["clone", "--depth", "1", git_url]);
+    cmd.arg(target_dir);
+
+    let output = cmd.output().map_err(|e| format!("无法启动 git 命令: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "git clone 失败，请检查网络或仓库地址".to_string()
+        } else {
+            stderr
+        });
+    }
+    Ok(())
+}
+
+fn append_to_gitignore_if_needed(project_cwd: &str) -> Result<(), String> {
+    let p = Path::new(project_cwd);
+    if !p.exists() {
+        return Ok(());
+    }
+    let gitignore_path = p.join(".gitignore");
+    let content = if gitignore_path.exists() {
+        fs::read_to_string(&gitignore_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let already_ignored = content.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == ".agents/skills"
+            || trimmed == ".agents/skills/"
+            || trimmed == "/.agents/skills/"
+            || trimmed == ".agents"
+            || trimmed == ".agents/"
+    });
+
+    if !already_ignored {
+        let mut new_content = content;
+        if !new_content.is_empty() && !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        new_content.push_str("\n# AI Agent Skills (Halowake)\n.agents/skills/\n");
+        fs::write(&gitignore_path, new_content).map_err(|e| format!("更新 .gitignore 失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn deploy_skill_files(git_url: &str, sub_path: Option<&str>, target_dir: &Path) -> Result<(), String> {
+    if let Some(sub) = sub_path.filter(|s| !s.trim().is_empty()) {
+        let temp_dir = std::env::temp_dir().join(format!("lumina-subskill-{}", current_timestamp_millis()));
+        execute_git_clone_silent(git_url, &temp_dir)?;
+        let sub_src = temp_dir.join(sub);
+        if !sub_src.exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(format!("在仓库中未找到子技能目录: {}", sub));
+        }
+        if let Err(e) = copy_dir_all(&sub_src, target_dir) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(format!("复制子技能文件失败: {}", e));
+        }
+        let _ = fs::remove_dir_all(&temp_dir);
+        Ok(())
+    } else {
+        execute_git_clone_silent(git_url, target_dir)
+    }
+}
+
+fn install_agent_skill_sync(args: InstallSkillArgs) -> Result<InstallSkillResult, String> {
+    if args.git_url.trim().is_empty() {
+        return Err("Git 仓库地址不能为空".to_string());
+    }
+
+    let clean_id = args.skill_id.trim();
+    if clean_id.is_empty() {
+        return Err("技能 ID 不能为空".to_string());
+    }
+
+    // 若指定了子技能 ID，安装后目录名采用子技能 ID；否则采用主技能 ID
+    let effective_id = match args.sub_skill_id.as_deref() {
+        Some(sid) if !sid.trim().is_empty() => sid.trim(),
+        _ => clean_id,
+    };
+
+    let mode = args
+        .target_mode
+        .as_deref()
+        .or(args.scope.as_deref())
+        .unwrap_or("project");
+
+    let mut installed_paths: Vec<String> = Vec::new();
+
+    if mode == "project" {
+        let cwd = match args.project_cwd.as_deref() {
+            Some(c) if !c.trim().is_empty() => c.trim(),
+            _ => return Err("未指定当前项目工作区目录，请先打开或选择项目".to_string()),
+        };
+
+        let target_dir = Path::new(cwd).join(".agents").join("skills").join(effective_id);
+        if target_dir.exists() {
+            return Err(format!("项目目录中已存在该技能: {}", target_dir.display()));
+        }
+
+        deploy_skill_files(&args.git_url, args.sub_path.as_deref(), &target_dir)?;
+        installed_paths.push(target_dir.to_string_lossy().to_string());
+
+        if args.add_to_gitignore {
+            let _ = append_to_gitignore_if_needed(cwd);
+        }
+    } else if mode == "global" {
+        let home = get_home_dir()?;
+        let target_dir = home.join(".agents").join("skills").join(effective_id);
+        if target_dir.exists() {
+            return Ok(InstallSkillResult {
+                success: true,
+                message: "全局通用技能目录中已存在该技能".to_string(),
+                installed_paths: vec![target_dir.to_string_lossy().to_string()],
+            });
+        }
+        deploy_skill_files(&args.git_url, args.sub_path.as_deref(), &target_dir)?;
+        installed_paths.push(target_dir.to_string_lossy().to_string());
+    } else {
+        // Specific Agent
+        let home = get_home_dir()?;
+        let agents = if args.target_agents.is_empty() {
+            vec!["antigravity".to_string()]
+        } else {
+            args.target_agents.clone()
+        };
+
+        for agent in agents {
+            let target_dir = match agent.as_str() {
+                "antigravity" => home.join(".gemini").join("config").join("skills").join(effective_id),
+                "claude" => home.join(".claude").join("skills").join(effective_id),
+                "cursor" => home.join(".cursor").join("skills").join(effective_id),
+                "trae" => home.join(".trae").join("skills").join(effective_id),
+                _ => home.join(".agents").join("skills").join(effective_id),
+            };
+
+            if target_dir.exists() {
+                continue;
+            }
+
+            deploy_skill_files(&args.git_url, args.sub_path.as_deref(), &target_dir)?;
+            installed_paths.push(target_dir.to_string_lossy().to_string());
+        }
+
+        if installed_paths.is_empty() {
+            return Ok(InstallSkillResult {
+                success: true,
+                message: "指定的目标目录中均已存在该技能".to_string(),
+                installed_paths,
+            });
+        }
+    }
+
+    Ok(InstallSkillResult {
+        success: true,
+        message: format!("成功安装技能至 {} 个目标路径", installed_paths.len()),
+        installed_paths,
+    })
+}
+
+#[tauri::command]
+pub async fn install_agent_skill(args: InstallSkillArgs) -> Result<InstallSkillResult, String> {
+    tokio::task::spawn_blocking(move || install_agent_skill_sync(args))
+        .await
+        .map_err(|e| format!("安装任务异常: {}", e))?
+}
+
+#[tauri::command]
+pub async fn uninstall_agent_skill(skill_path: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || {
+        let target = Path::new(&skill_path);
+        if !target.exists() {
+            return Err(format!("路径不存在: {}", skill_path));
+        }
+
+        let path_str = skill_path.replace('\\', "/").to_lowercase();
+        if !path_str.contains("skill") && !path_str.contains("rule") && !path_str.contains(".agents") {
+            return Err("出于安全限制，只能删除技能或规则目录".to_string());
+        }
+
+        fs::remove_dir_all(target).map_err(|e| format!("删除技能目录失败: {}", e))?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| format!("卸载任务异常: {}", e))?
 }
 
 #[cfg(test)]

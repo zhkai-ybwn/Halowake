@@ -7,14 +7,41 @@
     :close-on-esc="true"
     transform-origin="center"
   >
-    <section class="macos-quota-window" role="dialog" :aria-label="t('quota.viewTitle')">
-      <!-- macOS Style Unified Header Bar -->
-      <header class="macos-window-header">
-        <div class="header-leading">
-          <Icon icon="solar:wallet-money-linear" class="header-icon" />
-          <div class="header-titles">
-            <h2 class="window-title">{{ t('quota.viewTitle') }}</h2>
-            <span class="window-subtitle">
+    <section class="macos-quota-window" :class="{ maximized }" role="dialog" aria-modal="true" :aria-label="t('quota.viewTitle')">
+      <!-- 1. Window-Level Chrome Header: Strictly Window Identity & Window Actions -->
+      <header class="quota-titlebar" @dblclick="handleTitlebarDoubleClick">
+        <div class="title-identity">
+          <span class="app-icon">
+            <Icon icon="solar:wallet-money-linear" />
+          </span>
+          <div>
+            <h2 id="quota-window-title">{{ t('quota.viewTitle') }}</h2>
+            <p>{{ t('quota.viewSubtitle', '多平台 Token 与余额资产概览 · 自动化配额跟踪与告警') }}</p>
+          </div>
+        </div>
+
+        <div class="window-actions">
+          <button
+            class="maximize-button"
+            type="button"
+            :title="maximized ? t('workbench.restore', '还原窗口') : t('workbench.maximize', '最大化窗口')"
+            :aria-label="maximized ? t('workbench.restore', '还原窗口') : t('workbench.maximize', '最大化窗口')"
+            @click.stop="toggleMaximized"
+          >
+            <Icon :icon="maximized ? 'solar:minimize-square-3-linear' : 'solar:maximize-square-3-linear'" />
+          </button>
+          <WorkbenchCloseButton
+            @close="quotaStore.closeModal"
+          />
+        </div>
+      </header>
+
+      <!-- 2. Workspace Subnav: Page-Level Actions (Separated from modal window operations) -->
+      <nav class="quota-subnav" aria-label="额度资产操作与状态">
+        <div class="subnav-leading">
+          <div class="health-summary-pill" :class="{ 'has-issues': attentionCount > 0 }">
+            <span class="health-indicator-dot"></span>
+            <span class="health-summary-text">
               {{ healthyAccountsCount }}/{{ quotas.length }} {{ t('quota.accountsHealthy') }}
               <template v-if="attentionCount > 0">
                 · <span class="highlight-warn">{{ attentionCount }} {{ t('quota.needsAttention') }}</span>
@@ -23,11 +50,11 @@
           </div>
         </div>
 
-        <div class="header-trailing">
+        <div class="workspace-actions">
           <!-- 1. 扫描本地客户端凭据 -->
           <button
             type="button"
-            class="macos-push-btn"
+            class="page-action-btn"
             :disabled="discovering"
             :title="t('quota.discoverLocal')"
             @click="handleDiscoverLocal"
@@ -39,7 +66,7 @@
           <!-- 2. 添加账号 -->
           <button
             type="button"
-            class="macos-push-btn macos-push-btn--primary"
+            class="page-action-btn page-action-btn--primary"
             :title="t('quota.addAccount')"
             @click="openAddModal"
           >
@@ -47,10 +74,10 @@
             <span>{{ t('quota.addAccount') }}</span>
           </button>
 
-          <!-- 3. 管理账号 (直接打开管理，不再通过易被遮挡的下拉菜单) -->
+          <!-- 3. 管理账号 -->
           <button
             type="button"
-            class="macos-push-btn"
+            class="page-action-btn"
             :title="t('quota.manageAccounts')"
             @click="manageModalOpen = true"
           >
@@ -61,7 +88,7 @@
           <!-- 4. 刷新全部 -->
           <button
             type="button"
-            class="macos-push-btn"
+            class="page-action-btn"
             :disabled="loading"
             :title="t('quota.refreshAll')"
             @click="handleRefreshAll(false)"
@@ -69,13 +96,8 @@
             <Icon icon="solar:restart-linear" :class="{ 'spin-glyph': loading }" />
             <span>{{ loading ? t('quota.refreshing') : t('quota.refreshAll') }}</span>
           </button>
-
-          <!-- 5. 关闭按钮 -->
-          <WorkbenchCloseButton
-            @close="quotaStore.closeModal"
-          />
         </div>
-      </header>
+      </nav>
 
       <!-- macOS 风格仪表盘统计栏 (5 个独立精致 Metric Tiles) -->
       <section class="macos-metric-strip" aria-label="额度资产总览">
@@ -319,6 +341,18 @@ const isMac = isMacPlatform
 const quotas = computed(() => quotaStore.quotas)
 const summary = computed(() => quotaStore.summary)
 const loading = computed(() => quotaStore.loading)
+
+const maximized = ref(false)
+
+function toggleMaximized() {
+  maximized.value = !maximized.value
+}
+
+function handleTitlebarDoubleClick(event: MouseEvent) {
+  if (!(event.target instanceof Element) || !event.target.closest('button')) {
+    toggleMaximized()
+  }
+}
 
 type DiscoveryStage = 'idle' | 'scanning' | 'syncing'
 const discoveryStage = ref<DiscoveryStage>('idle')
@@ -630,105 +664,199 @@ async function handleLaunchClient(accountId: string, providerType: ProviderType)
   color: var(--lumina-text);
   display: flex;
   flex-direction: column;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  height: 84vh;
-  max-height: 800px;
-  max-width: 1100px;
+  font-family: var(--lumina-font-sans);
+  height: min(840px, calc(100vh - 40px));
+  max-height: 840px;
+  max-width: 1120px;
   overflow: hidden;
+  transition: border-radius var(--lumina-duration-normal) var(--lumina-ease-out),
+    height var(--lumina-duration-normal) var(--lumina-ease-out),
+    width var(--lumina-duration-normal) var(--lumina-ease-out);
   user-select: none;
-  width: 92vw;
+  width: min(1120px, calc(100vw - 40px));
+
+  &.maximized {
+    border-radius: 8px;
+    height: calc(100vh - 12px);
+    max-height: calc(100vh - 12px);
+    max-width: calc(100vw - 12px);
+    width: calc(100vw - 12px);
+  }
 }
 
-/* macOS Window Header */
-.macos-window-header {
+/* macOS Window Chrome Header: Window Identity & Window Actions strictly separated */
+.quota-titlebar {
   align-items: center;
-  background: var(--lumina-toolbar-bg, var(--lumina-surface-elevated));
+  backdrop-filter: saturate(180%) blur(24px);
+  background: var(--lumina-toolbar-bg);
+  border-bottom: 0.5px solid var(--lumina-separator);
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 12px 7px 14px;
+  user-select: none;
+}
+
+.title-identity {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+
+  h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  p {
+    color: var(--lumina-text-secondary);
+    font-size: 11.5px;
+    margin: 1px 0 0;
+  }
+}
+
+.app-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--lumina-primary) 12%, var(--lumina-surface-2));
+  border-radius: 8px;
+  color: var(--lumina-primary);
+  display: flex;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+
+  svg {
+    height: 17px;
+    width: 17px;
+  }
+}
+
+.window-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.maximize-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--lumina-text-secondary);
+  cursor: pointer;
+  display: flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+
+  svg {
+    height: 15px;
+    width: 15px;
+  }
+
+  &:hover {
+    background: var(--lumina-control-hover);
+    color: var(--lumina-text);
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 3px var(--lumina-accent-ring);
+    outline: none;
+  }
+}
+
+/* Page-level Action Subnav: Separated from window operations */
+.quota-subnav {
+  align-items: center;
+  background: color-mix(in srgb, var(--lumina-surface-elevated) 88%, transparent);
   border-bottom: 0.5px solid var(--lumina-separator);
   display: flex;
   flex-shrink: 0;
-  height: 52px;
+  height: 48px;
   justify-content: space-between;
   padding: 0 16px;
+  user-select: none;
+}
 
-  .header-leading {
-    align-items: center;
-    display: flex;
-    gap: 10px;
+.subnav-leading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
 
-    .header-icon {
-      color: var(--lumina-primary, #39786f);
-      font-size: 20px;
-    }
+.health-summary-pill {
+  align-items: center;
+  background: color-mix(in srgb, var(--lumina-fill-quaternary) 70%, transparent);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: var(--lumina-radius-md, 7px);
+  display: inline-flex;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
 
-    .header-titles {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-
-      .window-title {
-        color: var(--lumina-text);
-        font-size: 13.5px;
-        font-weight: 600;
-        letter-spacing: -0.1px;
-        margin: 0;
-      }
-
-      .window-subtitle {
-        color: var(--lumina-text-tertiary);
-        font-size: 11px;
-
-        .highlight-warn {
-          color: var(--lumina-warning, #b76500);
-          font-weight: 550;
-        }
-      }
-    }
+  .health-indicator-dot {
+    background: var(--lumina-success, #27853f);
+    border-radius: 50%;
+    height: 6px;
+    width: 6px;
   }
 
-  .header-trailing {
-    align-items: center;
-    display: flex;
-    gap: 8px;
+  &.has-issues .health-indicator-dot {
+    background: var(--lumina-warning, #b76500);
+  }
+
+  .health-summary-text {
+    color: var(--lumina-text);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  .highlight-warn {
+    color: var(--lumina-warning, #b76500);
+    font-weight: 600;
   }
 }
 
-.macos-push-btn {
+.workspace-actions {
   align-items: center;
-  background: var(--lumina-control-bg);
+  display: flex;
+  gap: 8px;
+}
+
+.page-action-btn {
+  align-items: center;
+  background: color-mix(in srgb, var(--lumina-fill-quaternary) 80%, transparent);
   border: 0.5px solid var(--lumina-separator);
-  border-radius: var(--lumina-radius-sm, 5px);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-radius: var(--lumina-radius-sm, 6px);
   color: var(--lumina-text);
   cursor: pointer;
   display: inline-flex;
   font-size: 11.5px;
   font-weight: 500;
   gap: 5px;
-  height: 26px;
+  height: 28px;
   padding: 0 10px;
-  transition: all var(--lumina-duration-fast) var(--lumina-ease-out);
+  transition: all 120ms ease;
+  white-space: nowrap;
 
   &:hover:not(:disabled) {
-    background: var(--lumina-control-hover);
-  }
-
-  &:active:not(:disabled) {
-    transform: scale(0.98);
+    background: color-mix(in srgb, var(--lumina-fill-secondary) 85%, transparent);
   }
 
   &:disabled {
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: 0.45;
   }
 
   &--primary {
     background: var(--lumina-primary, #39786f);
     border-color: transparent;
-    color: var(--lumina-on-primary, #ffffff);
+    color: #ffffff;
+    font-weight: 600;
 
     &:hover:not(:disabled) {
-      filter: brightness(1.08);
       background: var(--lumina-primary, #39786f);
+      filter: brightness(1.08);
     }
   }
 

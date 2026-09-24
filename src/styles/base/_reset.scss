@@ -11,11 +11,16 @@ body {
   background: var(--lumina-window-bg, #f5f5f7);
   color: var(--lumina-text, #1d1d1f);
   font-family: var(--lumina-font-sans);
-  -webkit-font-smoothing: antialiased;
   height: 100%;
   margin: 0;
   padding: 0;
+  text-rendering: optimizeLegibility;
   width: 100%;
+}
+
+.platform-macos {
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
 }
 
 img {

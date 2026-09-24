@@ -30,9 +30,11 @@
 
   /* Material recipes */
   --lumina-vibrancy: none;
-  --lumina-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  --lumina-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --lumina-font-mono: "SF Mono", "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+
+  /* Typography - Optimized for Windows ClearType & macOS Retina */
+  --lumina-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Variable Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", system-ui, sans-serif;
+  --lumina-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --lumina-font-mono: "Cascadia Code", "SF Mono", Consolas, "JetBrains Mono", Menlo, Monaco, "Courier New", monospace;
 }
 
 .platform-macos {

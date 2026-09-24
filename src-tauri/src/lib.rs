@@ -173,6 +173,8 @@ pub fn run() {
             commands::skills::check_agent_skills_updates,
             commands::skills::update_agent_skill,
             commands::skills::open_skill_folder,
+            commands::skills::install_agent_skill,
+            commands::skills::uninstall_agent_skill,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

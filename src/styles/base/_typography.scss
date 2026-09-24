@@ -25,5 +25,14 @@ strong {
 
 body {
   font-size: 13px;
-  line-height: 1.38;
+  line-height: 1.45;
+}
+
+/* 提高极小字体在各种屏幕上的清晰度与饱满度 */
+small,
+.caption,
+.meta-text,
+.sub-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
 }
