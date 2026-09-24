@@ -3,7 +3,6 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import GitAssistantView from '@/views/git-assistant/GitAssistantView.vue'
 import DevDockView from '@/views/devdock/DevDockView.vue'
 import CodexReportView from '@/views/codex-report/CodexReportView.vue'
-import AiQuotaView from '@/views/quota/AiQuotaView.vue'
 import SettingsView from '@/views/settings/SettingsView.vue'
 
 const routes: RouteRecordRaw[] = [
@@ -29,11 +28,6 @@ const routes: RouteRecordRaw[] = [
         path: 'codex-report',
         name: 'codex-report',
         component: CodexReportView,
-      },
-      {
-        path: 'ai-quota',
-        name: 'ai-quota',
-        component: AiQuotaView,
       },
       {
         path: 'markdown',

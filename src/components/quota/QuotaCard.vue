@@ -10,14 +10,6 @@
           <div class="title-row">
             <h3 class="account-name" :title="quota.name">{{ quota.name }}</h3>
             <span v-if="quota.plan" class="plan-tag">{{ quota.plan }}</span>
-            <span
-              v-if="quota.resetCredits && quota.resetCredits.availableCount > 0"
-              class="reset-credits-tag"
-              :title="formatResetCreditsTooltip(quota.resetCredits)"
-            >
-              <Icon icon="solar:restart-circle-linear" />
-              {{ quota.resetCredits.availableCount }} {{ t('quota.resetCreditsUnit') }}{{ t('quota.resetCreditsShort') }}
-            </span>
           </div>
           <span v-if="cardSubtitle" class="provider-type-label">{{ cardSubtitle }}</span>
         </div>
@@ -33,157 +25,29 @@
           <span>{{ quota.errorMessage || t('quota.connectionFailed') }}</span>
         </div>
 
-        <!-- 1. 余额类型展示 (DeepSeek / OpenRouter / OpenAI) -->
-        <div v-for="(item, idx) in balanceQuotas" :key="'bal-' + idx" class="balance-section">
-          <div class="balance-main">
-            <span class="currency-symbol">{{ item.currency === 'USD' ? '$' : '¥' }}</span>
-            <span class="balance-value">{{ item.totalRemaining.toFixed(2) }}</span>
-            <span class="currency-code">{{ item.currency }}</span>
-          </div>
+        <!-- 1. 余额类型展示 -->
+        <QuotaCardBalance
+          :balance-quotas="balanceQuotas"
+          :has-other-quotas="hasOtherQuotas"
+        />
 
-          <div v-if="item.toppedUp > 0 || item.granted > 0" class="balance-breakdown">
-            <div v-if="item.toppedUp > 0" class="breakdown-item">
-              <span class="breakdown-label">{{ t('quota.toppedUp') }}</span>
-              <span class="breakdown-val">{{ item.toppedUp.toFixed(2) }}</span>
-            </div>
-            <div v-if="item.granted > 0" class="breakdown-item">
-              <span class="breakdown-label">{{ t('quota.granted') }}</span>
-              <span class="breakdown-val">{{ item.granted.toFixed(2) }}</span>
-            </div>
-          </div>
-        </div>
+        <!-- 2. 周期限额类型与重置次数展示 -->
+        <QuotaCardRateLimit
+          :rate-limit-quotas="rateLimitQuotas"
+          :reset-credits="quota.resetCredits"
+        />
 
-        <!-- 2. 周期限额类型展示 (Codex 5h/Weekly, Gemini 等) -->
-        <div v-if="rateLimitQuotas.length > 0" class="ratelimit-section">
-          <div v-for="(item, idx) in rateLimitQuotas" :key="'rate-' + idx" class="ratelimit-row">
-            <div class="ratelimit-header">
-              <span class="rate-label">{{ item.periodLabel }}</span>
-              <div class="rate-percent-group">
-                <span class="rate-remaining" :class="getRateColorClass(item.usedPercent)">
-                  {{ t('quota.remaining') }} {{ Math.max(0, 100 - item.usedPercent).toFixed(0) }}%
-                </span>
-                <span class="rate-used-sub">
-                  ({{ item.usedPercent.toFixed(0) }}% {{ t('quota.used') }})
-                </span>
-              </div>
-            </div>
-
-            <div class="progress-bar-bg">
-              <div
-                class="progress-bar-fill"
-                :class="getRateColorClass(item.usedPercent)"
-                :style="{ width: Math.max(0, 100 - item.usedPercent) + '%' }"
-              ></div>
-            </div>
-
-            <div v-if="item.resetsAt || item.resetsInSeconds" class="reset-time-hint">
-              <Icon icon="solar:clock-circle-linear" />
-              <span>{{ formatResetDetailed(item.resetsAt, item.resetsInSeconds) }}</span>
-            </div>
-          </div>
-
-          <!-- 限额重置次数卡片 (Codex rate_limit_reset_credits) -->
-          <div v-if="quota.resetCredits" class="reset-credits-panel">
-            <div class="reset-credits-left">
-              <div class="reset-icon-pill">
-                <Icon icon="solar:restart-square-linear" />
-              </div>
-              <div class="reset-info">
-                <div class="reset-title-row">
-                  <span class="reset-label">{{ t('quota.resetCredits') }}</span>
-                  <span
-                    v-if="quota.resetCredits.nearestExpiresAt || quota.resetCredits.nearestExpiresInSeconds"
-                    class="reset-expire-badge"
-                  >
-                    <Icon icon="solar:calendar-date-linear" />
-                    {{ formatExpiryTag(quota.resetCredits.nearestExpiresAt, quota.resetCredits.nearestExpiresInSeconds) }}
-                  </span>
-                </div>
-                <span class="reset-desc">
-                  {{ formatResetCreditsSubtitle(quota.resetCredits) }}
-                </span>
-              </div>
-            </div>
-            <div class="reset-credits-count">
-              <strong class="reset-number">{{ quota.resetCredits.availableCount }}</strong>
-              <span class="reset-unit">{{ t('quota.resetCreditsUnit') }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 无 RateLimit 时的独立重置次数展示兜底 -->
-        <div v-else-if="quota.resetCredits" class="reset-credits-panel">
-          <div class="reset-credits-left">
-            <div class="reset-icon-pill">
-              <Icon icon="solar:restart-square-linear" />
-            </div>
-            <div class="reset-info">
-              <div class="reset-title-row">
-                <span class="reset-label">{{ t('quota.resetCredits') }}</span>
-                <span
-                  v-if="quota.resetCredits.nearestExpiresAt || quota.resetCredits.nearestExpiresInSeconds"
-                  class="reset-expire-badge"
-                >
-                  <Icon icon="solar:calendar-date-linear" />
-                  {{ formatExpiryTag(quota.resetCredits.nearestExpiresAt, quota.resetCredits.nearestExpiresInSeconds) }}
-                </span>
-              </div>
-              <span class="reset-desc">
-                {{ formatResetCreditsSubtitle(quota.resetCredits) }}
-              </span>
-            </div>
-          </div>
-          <div class="reset-credits-count">
-            <strong class="reset-number">{{ quota.resetCredits.availableCount }}</strong>
-            <span class="reset-unit">{{ t('quota.resetCreditsUnit') }}</span>
-          </div>
-        </div>
-
-        <!-- 3. 点数/积分展示 (Prompt 积分 / Flow 积分 / Credits 及到期时间倒计时) -->
-        <div v-if="creditsQuotas.length > 0" class="credits-container">
-          <div
-            v-for="(item, idx) in creditsQuotas"
-            :key="'cred-' + idx"
-            class="credit-pill"
-            :class="{
-              'has-expiry': Boolean(item.expiresAt || item.remainingDays !== undefined),
-              'expiring-soon': isExpiringSoon(item),
-            }"
-          >
-            <div class="credit-pill-top">
-              <span class="credit-pill-label" :title="item.label">{{ item.label || t('quota.credits') }}</span>
-              <span v-if="getCreditExpiryBadge(item)" class="credit-expiry-badge" :class="{ urgent: isExpiringSoon(item) }">
-                <Icon icon="solar:clock-circle-linear" class="expire-icon" />
-                {{ getCreditExpiryBadge(item) }}
-              </span>
-            </div>
-            <div class="credit-pill-num-group">
-              <span class="credit-pill-val">{{ formatCreditValue(item.remaining) }}</span>
-              <span v-if="item.total" class="credit-pill-total">/ {{ formatCreditValue(item.total) }}</span>
-              <span v-if="getCreditUnit(item)" class="credit-pill-unit">{{ getCreditUnit(item) }}</span>
-            </div>
-            <div v-if="item.cycleType" class="credit-pill-cycle" :title="item.cycleType">
-              <Icon icon="solar:tag-linear" class="cycle-icon" />
-              <span>{{ item.cycleType }}</span>
-            </div>
-          </div>
-        </div>
+        <!-- 3. 点数/积分/Credits 展示 -->
+        <QuotaCardCredits
+          :credits-quotas="creditsQuotas"
+        />
       </div>
 
-      <!-- 4. Pace Projection (配速健康预测，对齐吸附到底部区域) -->
-      <div v-if="quota.pace" class="pace-section" :class="'pace-' + quota.pace.level">
-        <div class="pace-header">
-          <span class="pace-dot"></span>
-          <span class="pace-level-text">{{ getPaceLabel(quota.pace.level) }}</span>
-          <span
-            v-if="quota.pace.projectedUsagePercent !== undefined && quota.pace.projectedUsagePercent !== null"
-            class="projected-tag"
-          >
-            {{ t('quota.projected') }} {{ Math.round(quota.pace.projectedUsagePercent) }}%
-          </span>
-        </div>
-        <p class="pace-desc">{{ formatPaceMessage(quota.pace.message) }}</p>
-      </div>
+      <!-- 4. Pace 节奏健康评估预测 -->
+      <QuotaCardPace
+        v-if="quota.pace"
+        :pace="quota.pace"
+      />
     </main>
 
     <!-- 卡片底部：左侧更新时间，右侧操作按钮栏 -->
@@ -195,26 +59,31 @@
       <div class="footer-actions">
         <button
           v-if="isDesktopClient"
-          class="primary-card-action"
+          class="macos-card-action-btn primary"
           type="button"
           :disabled="launching"
           @click="emit('launch', quota.accountId, quota.providerType)"
         >
           <Icon :icon="launching ? 'solar:restart-linear' : 'solar:play-circle-linear'" :class="{ spinning: launching }" />
-          {{ launching ? t('quota.launchingClient') : launchActionLabel }}
+          <span>{{ launching ? t('quota.launchingClient') : launchActionLabel }}</span>
         </button>
         <button
           v-else-if="quota.officialDashboardUrl"
-          class="primary-card-action"
+          class="macos-card-action-btn"
           type="button"
           @click="handleOpenExternal(quota.officialDashboardUrl)"
         >
           <Icon icon="solar:link-linear" />
-          {{ t('quota.openDashboardShort') }}
+          <span>{{ t('quota.openDashboardShort') }}</span>
         </button>
 
-        <NDropdown :options="cardActionOptions" trigger="click" @select="handleActionSelect">
-          <button class="action-btn" type="button" :title="t('quota.moreActions')">
+        <NDropdown
+          :options="cardActionOptions"
+          placement="top-end"
+          trigger="click"
+          @select="handleActionSelect"
+        >
+          <button class="macos-card-more-btn" type="button" :title="t('quota.moreActions')">
             <Icon icon="solar:menu-dots-bold" />
           </button>
         </NDropdown>
@@ -229,8 +98,12 @@ import { useI18n } from 'vue-i18n'
 import { NDropdown, type DropdownOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import ProviderBrandLogo from './ProviderBrandLogo.vue'
+import QuotaCardBalance from './card/QuotaCardBalance.vue'
+import QuotaCardRateLimit from './card/QuotaCardRateLimit.vue'
+import QuotaCardCredits from './card/QuotaCardCredits.vue'
+import QuotaCardPace from './card/QuotaCardPace.vue'
 import { openExternalUrl } from '@/services/app-service'
-import type { ProviderQuota, QuotaKind, PaceLevel } from '@/services/quota/quota-service'
+import type { ProviderQuota, QuotaKind } from '@/services/quota/quota-service'
 
 const props = defineProps<{
   quota: ProviderQuota
@@ -353,21 +226,6 @@ const cardSubtitle = computed(() => {
   return providerDisplayName.value
 })
 
-function formatCreditValue(val: number | undefined | null): string {
-  if (val === undefined || val === null) return '0'
-  return val.toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
-
-function getCreditUnit(item: Extract<QuotaKind, { type: 'credits' }>): string {
-  if (item.unit !== undefined && item.unit !== null) {
-    return item.unit
-  }
-  if (item.cycleType?.toLowerCase().includes('token')) {
-    return 'Tokens'
-  }
-  return t('quota.creditsUnit', '点')
-}
-
 const balanceQuotas = computed(() => {
   return props.quota.quotas.filter((q): q is Extract<QuotaKind, { type: 'balance' }> => q.type === 'balance')
 })
@@ -380,165 +238,9 @@ const creditsQuotas = computed(() => {
   return props.quota.quotas.filter((q): q is Extract<QuotaKind, { type: 'credits' }> => q.type === 'credits')
 })
 
-function isExpiringSoon(item: Extract<QuotaKind, { type: 'credits' }>): boolean {
-  if (item.remainingDays !== undefined && item.remainingDays !== null) {
-    return item.remainingDays <= 7
-  }
-  return false
-}
-
-function getCreditExpiryBadge(item: Extract<QuotaKind, { type: 'credits' }>): string | null {
-  if (item.remainingDays !== undefined && item.remainingDays !== null) {
-    if (item.remainingDays === 0) {
-      return t('quota.expiresToday', '今日到期')
-    }
-    if (item.expiresAt) {
-      const shortDate = item.expiresAt.includes('-')
-        ? item.expiresAt.split(' ')[0].slice(5)
-        : item.expiresAt
-      return `剩${item.remainingDays}天 · ${shortDate}`
-    }
-    return `剩 ${item.remainingDays} 天到期`
-  }
-  if (item.expiresAt) {
-    const shortDate = item.expiresAt.includes('-')
-      ? item.expiresAt.split(' ')[0].slice(5)
-      : item.expiresAt
-    return `${shortDate} 到期`
-  }
-  return null
-}
-
-function getRateColorClass(usedPercent: number): string {
-  const remaining = 100 - usedPercent
-  if (remaining <= 10) return 'is-danger'
-  if (remaining <= 25) return 'is-warning'
-  return 'is-healthy'
-}
-
-function getPaceLabel(level: PaceLevel): string {
-  switch (level) {
-    case 'onPace':
-      return t('quota.paceHealthy')
-    case 'tight':
-      return t('quota.paceTight')
-    case 'overPace':
-      return t('quota.paceOver')
-  }
-}
-
-function formatPaceMessage(msg?: string): string {
-  if (!msg) return ''
-  return msg.replace(/(\d+)\.\d+(?=\s*[%％])/g, '$1')
-}
-
-function formatResetDetailed(resetsAt?: number, resetsInSeconds?: number): string {
-  if (!resetsAt && !resetsInSeconds) return ''
-
-  let timeDesc = ''
-  if (resetsAt) {
-    const d = new Date(resetsAt * 1000)
-    const month = d.getMonth() + 1
-    const date = d.getDate()
-    const hours = String(d.getHours()).padStart(2, '0')
-    const mins = String(d.getMinutes()).padStart(2, '0')
-    timeDesc = `${month}月${date}日 ${hours}:${mins}`
-  }
-
-  let countdown = ''
-  if (resetsInSeconds && resetsInSeconds > 0) {
-    const d = Math.floor(resetsInSeconds / 86400)
-    const h = Math.floor((resetsInSeconds % 86400) / 3600)
-    const m = Math.floor((resetsInSeconds % 3600) / 60)
-
-    if (d > 0) {
-      countdown = ` (${d}天后重置)`
-    } else if (h > 0) {
-      countdown = ` (${h}h ${m}m 后重置)`
-    } else {
-      countdown = ` (${m}m 后重置)`
-    }
-  }
-
-  return `${t('quota.resetAt')}: ${timeDesc}${countdown}`
-}
-
-function formatExpiryTag(expiresAt?: number, expiresInSeconds?: number): string {
-  if (!expiresAt && !expiresInSeconds) return ''
-  let timeStr = ''
-  if (expiresAt) {
-    const d = new Date(expiresAt * 1000)
-    const month = d.getMonth() + 1
-    const date = d.getDate()
-    timeStr = `${month}月${date}日`
-  }
-  let remaining = ''
-  if (expiresInSeconds && expiresInSeconds > 0) {
-    const days = Math.floor(expiresInSeconds / 86400)
-    const hours = Math.floor((expiresInSeconds % 86400) / 3600)
-    if (days > 0) {
-      remaining = `${days}天后`
-    } else if (hours > 0) {
-      remaining = `${hours}h后`
-    } else {
-      remaining = '即将到期'
-    }
-  }
-  if (timeStr && remaining) {
-    return `${timeStr} · ${remaining}`
-  }
-  return timeStr || remaining
-}
-
-function formatResetCreditsSubtitle(credits: NonNullable<ProviderQuota['resetCredits']>): string {
-  if (credits.nearestExpiresAt || credits.nearestExpiresInSeconds) {
-    let timeDesc = ''
-    if (credits.nearestExpiresAt) {
-      const d = new Date(credits.nearestExpiresAt * 1000)
-      const month = d.getMonth() + 1
-      const date = d.getDate()
-      const hours = String(d.getHours()).padStart(2, '0')
-      const mins = String(d.getMinutes()).padStart(2, '0')
-      timeDesc = `${month}月${date}日 ${hours}:${mins}`
-    }
-
-    let countdown = ''
-    if (credits.nearestExpiresInSeconds && credits.nearestExpiresInSeconds > 0) {
-      const d = Math.floor(credits.nearestExpiresInSeconds / 86400)
-      const h = Math.floor((credits.nearestExpiresInSeconds % 86400) / 3600)
-      if (d > 0) {
-        countdown = ` (${d}天后过期)`
-      } else if (h > 0) {
-        countdown = ` (${h}小时后过期)`
-      } else {
-        countdown = ` (即将过期)`
-      }
-    }
-
-    return `${t('quota.resetCreditsExpiresAt', { time: timeDesc })}${countdown}`
-  }
-
-  if (credits.applicableAvailableCount && credits.applicableAvailableCount > 0) {
-    return t('quota.resetCreditsApplicableDesc')
-  }
-
-  return t('quota.resetCreditsAvailableDesc', { count: credits.availableCount })
-}
-
-function formatResetCreditsTooltip(credits: NonNullable<ProviderQuota['resetCredits']>): string {
-  const base = credits.applicableAvailableCount
-    ? t('quota.resetCreditsApplicable')
-    : t('quota.resetCreditsAvailable', { count: credits.availableCount })
-  if (credits.nearestExpiresAt) {
-    const d = new Date(credits.nearestExpiresAt * 1000)
-    const month = d.getMonth() + 1
-    const date = d.getDate()
-    const hours = String(d.getHours()).padStart(2, '0')
-    const mins = String(d.getMinutes()).padStart(2, '0')
-    return `${base} (${t('quota.resetCreditsExpiresTag', { time: `${month}月${date}日 ${hours}:${mins}` })})`
-  }
-  return base
-}
+const hasOtherQuotas = computed(() => {
+  return rateLimitQuotas.value.length > 0 || creditsQuotas.value.length > 0
+})
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp
@@ -566,19 +268,22 @@ async function handleOpenExternal(url: string) {
   min-height: 290px;
   background: var(--lumina-surface-elevated);
   border: 0.5px solid var(--lumina-separator);
-  border-radius: var(--lumina-radius-lg);
-  padding: 16px;
-  box-shadow: var(--lumina-shadow-sm);
-  transition: all var(--lumina-duration-fast) var(--lumina-ease-out);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+  transition: transform var(--lumina-duration-fast) var(--lumina-ease-out),
+              box-shadow var(--lumina-duration-fast) var(--lumina-ease-out),
+              border-color var(--lumina-duration-fast) var(--lumina-ease-out);
   position: relative;
 
   &:hover {
+    transform: translateY(-1px);
     border-color: var(--lumina-separator-strong);
-    box-shadow: var(--lumina-shadow-md);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   }
 
   &.is-unhealthy {
-    border-color: rgba(220, 38, 38, 0.35);
+    border-color: rgba(255, 59, 48, 0.35);
   }
 }
 
@@ -599,20 +304,22 @@ async function handleOpenExternal(url: string) {
 }
 
 .provider-badge {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 0.5px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
   :deep(.brand-svg),
   :deep(.brand-img),
   svg,
   img {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
   }
 
   &[data-provider='deepseek'] {
@@ -692,11 +399,13 @@ async function handleOpenExternal(url: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: -0.01em;
   flex-shrink: 1;
 }
 
 .plan-tag {
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--lumina-control-bg);
@@ -707,25 +416,6 @@ async function handleOpenExternal(url: string) {
   text-overflow: ellipsis;
   max-width: 150px;
   flex-shrink: 0;
-}
-
-.reset-credits-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-  border: 0.5px solid rgba(16, 185, 129, 0.25);
-  white-space: nowrap;
-
-  svg {
-    width: 11px;
-    height: 11px;
-  }
 }
 
 .provider-type-label {
@@ -753,10 +443,10 @@ async function handleOpenExternal(url: string) {
   align-items: flex-start;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(220, 38, 38, 0.08);
-  border: 0.5px solid rgba(220, 38, 38, 0.2);
-  color: var(--lumina-danger);
+  border-radius: 8px;
+  background: rgba(255, 59, 48, 0.08);
+  border: 0.5px solid rgba(255, 59, 48, 0.25);
+  color: #ff3b30;
   font-size: 11px;
   line-height: 1.4;
 
@@ -766,417 +456,6 @@ async function handleOpenExternal(url: string) {
     flex-shrink: 0;
     margin-top: 1px;
   }
-}
-
-.balance-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.balance-main {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.currency-symbol {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--lumina-text-secondary);
-}
-
-.balance-value {
-  font-size: 24px;
-  font-weight: 700;
-  font-family: var(--lumina-font-mono);
-  color: var(--lumina-text);
-  line-height: 1;
-}
-
-.currency-code {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--lumina-text-tertiary);
-  margin-left: 4px;
-}
-
-.balance-breakdown {
-  display: flex;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--lumina-text-tertiary);
-}
-
-.breakdown-item {
-  display: flex;
-  gap: 4px;
-}
-
-.ratelimit-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ratelimit-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ratelimit-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 11px;
-}
-
-.rate-label {
-  color: var(--lumina-text-secondary);
-  font-weight: 500;
-}
-
-.rate-percent-group {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.rate-remaining {
-  font-weight: 600;
-
-  &.is-healthy {
-    color: #10b981;
-  }
-  &.is-warning {
-    color: #f59e0b;
-  }
-  &.is-danger {
-    color: #ef4444;
-  }
-}
-
-.rate-used-sub {
-  color: var(--lumina-text-tertiary);
-  font-size: 10px;
-}
-
-.progress-bar-bg {
-  width: 100%;
-  height: 6px;
-  background: var(--lumina-control-bg);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-
-  &.is-healthy {
-    background: #10b981;
-  }
-  &.is-warning {
-    background: #f59e0b;
-  }
-  &.is-danger {
-    background: #ef4444;
-  }
-}
-
-.reset-time-hint {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--lumina-text-tertiary);
-
-  svg {
-    width: 11px;
-    height: 11px;
-  }
-}
-
-.reset-credits-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(16, 185, 129, 0.06);
-  border: 0.5px solid rgba(16, 185, 129, 0.2);
-  margin-top: 2px;
-}
-
-.reset-credits-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.reset-icon-pill {
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-
-  svg {
-    width: 14px;
-    height: 14px;
-  }
-}
-
-.reset-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.reset-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.reset-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--lumina-text);
-  line-height: 1.2;
-}
-
-.reset-expire-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 9.5px;
-  font-weight: 500;
-  padding: 0.5px 5px;
-  border-radius: 3px;
-  background: rgba(16, 185, 129, 0.12);
-  color: #059669;
-  border: 0.5px solid rgba(16, 185, 129, 0.25);
-  white-space: nowrap;
-
-  svg {
-    width: 10px;
-    height: 10px;
-  }
-}
-
-.reset-desc {
-  font-size: 10px;
-  color: var(--lumina-text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reset-credits-count {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  flex-shrink: 0;
-  margin-left: 8px;
-}
-
-.reset-number {
-  font-size: 15px;
-  font-weight: 700;
-  font-family: var(--lumina-font-mono);
-  color: #10b981;
-  line-height: 1;
-}
-
-.reset-unit {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--lumina-text-secondary);
-}
-
-.credits-container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-
-.credit-pill {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: var(--lumina-surface-2);
-  border: 0.5px solid var(--lumina-separator);
-  border-radius: var(--lumina-radius-sm);
-  padding: 8px 12px;
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.credit-pill.expiring-soon {
-  border-color: rgba(245, 158, 11, 0.4);
-  background: rgba(245, 158, 11, 0.05);
-}
-
-.credit-pill-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.credit-pill-label {
-  color: var(--lumina-text-secondary);
-  font-weight: 600;
-  font-size: 12px;
-}
-
-.credit-expiry-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: var(--lumina-surface-1);
-  color: var(--lumina-text-tertiary);
-  border: 0.5px solid var(--lumina-separator);
-}
-
-.credit-expiry-badge .expire-icon {
-  font-size: 12px;
-}
-
-.credit-expiry-badge.urgent {
-  background: rgba(245, 158, 11, 0.12);
-  color: #f59e0b;
-  border-color: rgba(245, 158, 11, 0.35);
-  font-weight: 600;
-}
-
-.credit-pill-num-group {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-}
-
-.credit-pill-val {
-  font-family: var(--lumina-font-mono);
-  font-weight: 700;
-  color: var(--lumina-primary);
-  font-size: 15px;
-}
-
-.credit-pill-total {
-  font-family: var(--lumina-font-mono);
-  color: var(--lumina-text-tertiary);
-  font-size: 12px;
-}
-
-.credit-pill-unit {
-  font-size: 11px;
-  color: var(--lumina-text-tertiary);
-  margin-left: 2px;
-}
-
-.credit-pill-cycle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  color: var(--lumina-text-tertiary);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-
-  .cycle-icon {
-    font-size: 11px;
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-}
-
-.pace-section {
-  padding: 8px 10px;
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
-  margin-top: 4px;
-
-  &.pace-onPace {
-    background: rgba(16, 185, 129, 0.08);
-    border: 0.5px solid rgba(16, 185, 129, 0.2);
-
-    .pace-dot {
-      background: #10b981;
-    }
-    .pace-level-text {
-      color: #10b981;
-    }
-  }
-
-  &.pace-tight {
-    background: rgba(245, 158, 11, 0.08);
-    border: 0.5px solid rgba(245, 158, 11, 0.2);
-
-    .pace-dot {
-      background: #f59e0b;
-    }
-    .pace-level-text {
-      color: #f59e0b;
-    }
-  }
-
-  &.pace-overPace {
-    background: rgba(239, 68, 68, 0.08);
-    border: 0.5px solid rgba(239, 68, 68, 0.2);
-
-    .pace-dot {
-      background: #ef4444;
-    }
-    .pace-level-text {
-      color: #ef4444;
-    }
-  }
-}
-
-.pace-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pace-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.pace-level-text {
-  font-weight: 600;
-}
-
-.projected-tag {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--lumina-text-tertiary);
-}
-
-.pace-desc {
-  margin: 0;
-  font-size: 10.5px;
-  color: var(--lumina-text-secondary);
-  line-height: 1.35;
 }
 
 .card-footer {
@@ -1196,36 +475,61 @@ async function handleOpenExternal(url: string) {
 .footer-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
-.primary-card-action {
+.macos-card-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 28px;
+  height: 26px;
   padding: 0 10px;
-  border: 0.5px solid color-mix(in srgb, var(--lumina-accent) 36%, var(--lumina-separator));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--lumina-accent) 9%, transparent);
-  color: var(--lumina-accent);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
+  background: var(--lumina-control-bg);
+  border: 0.5px solid var(--lumina-separator);
+  color: var(--lumina-text);
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+  transition: all var(--lumina-duration-fast);
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--lumina-accent) 15%, transparent);
+    background: var(--lumina-control-hover);
+    border-color: var(--lumina-separator-strong);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.98);
   }
 
   &:disabled {
     cursor: default;
-    opacity: 0.65;
+    opacity: 0.55;
+  }
+
+  &.primary {
+    background: var(--lumina-primary, #39786f);
+    border-color: var(--lumina-primary, #39786f);
+    color: var(--lumina-on-primary, #ffffff);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--lumina-primary, #39786f) 28%, transparent);
+
+    &:hover:not(:disabled) {
+      filter: brightness(1.08);
+      background: var(--lumina-primary, #39786f);
+      border-color: var(--lumina-primary, #39786f);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.98);
+      filter: brightness(0.96);
+    }
   }
 
   svg {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
   }
 
   .spinning {
@@ -1233,31 +537,33 @@ async function handleOpenExternal(url: string) {
   }
 }
 
-.action-btn {
+.macos-card-more-btn {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: transparent;
-  border: 0;
+  background: var(--lumina-control-bg);
+  border: 0.5px solid var(--lumina-separator);
   color: var(--lumina-text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.04);
   transition: all var(--lumina-duration-fast);
 
   &:hover {
     background: var(--lumina-control-hover);
     color: var(--lumina-text);
+    border-color: var(--lumina-separator-strong);
+  }
+
+  &:active {
+    transform: scale(0.96);
   }
 
   svg {
     width: 14px;
     height: 14px;
-  }
-
-  &.is-refreshing svg {
-    animation: spin 1s linear infinite;
   }
 }
 

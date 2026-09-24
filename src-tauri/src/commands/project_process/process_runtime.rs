@@ -863,19 +863,27 @@ pub(super) fn now_millis() -> u128 {
 pub(super) fn pid_is_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
-        let output = silent_command("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output();
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout.lines().any(|line| {
-                    line.split_whitespace()
-                        .nth(1)
-                        .is_some_and(|value| value == pid.to_string())
-                })
+        extern "system" {
+            fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
+            fn GetExitCodeProcess(hProcess: *mut std::ffi::c_void, lpExitCode: *mut u32) -> i32;
+            fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+            fn GetLastError() -> u32;
+        }
+
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        const ERROR_ACCESS_DENIED: u32 = 5;
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                // If access is denied, the process exists and is alive (e.g. elevated or different user)
+                return GetLastError() == ERROR_ACCESS_DENIED;
             }
-            Err(_) => false,
+            let mut exit_code: u32 = 0;
+            let ok = GetExitCodeProcess(handle, &mut exit_code);
+            CloseHandle(handle);
+            ok != 0 && exit_code == STILL_ACTIVE
         }
     }
 

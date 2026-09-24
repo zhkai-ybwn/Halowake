@@ -102,7 +102,7 @@
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useDialog, useMessage } from 'naive-ui'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
 import WorkbenchTag from '@/components/workbench/WorkbenchTag.vue'
@@ -199,6 +199,7 @@ const visibleProjects = computed(() => {
 let lastScannedAt = 0
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   pinnedScripts.value = loadPinnedScripts()
   await initStoredProjects()
   void scanAllProjects()
@@ -227,6 +228,7 @@ onDeactivated(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   stopLogPolling()
   stopProcessPolling()
 })
@@ -652,14 +654,23 @@ async function refreshProcesses() {
   try {
     const list = await listProjectProcesses()
     processes.value = list.filter(p => !dismissedProcessIds.has(p.id))
-    void refreshRunHistory()
   } catch (err) {
     reportError('devdock.refresh-processes', err)
   }
 }
 
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopProcessPolling()
+  } else {
+    void refreshProcesses()
+    startProcessPolling()
+  }
+}
+
 function startProcessPolling() {
   stopProcessPolling()
+  if (document.hidden) return
   processPollTimer = window.setInterval(() => void refreshProcesses(), 5000)
 }
 
@@ -729,8 +740,8 @@ function closeProcessLogs() {
 function startLogPolling(processId: string) {
   stopLogPolling()
   logPollTimer = window.setInterval(() => {
-    if (!logModalOpen.value) {
-      stopLogPolling()
+    if (!logModalOpen.value || document.hidden) {
+      if (!logModalOpen.value) stopLogPolling()
       return
     }
     void refreshProcessLogs(processId)

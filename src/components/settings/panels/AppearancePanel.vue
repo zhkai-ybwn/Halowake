@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue"
-import { useTheme } from "@/hooks/useTheme"
+import { useTheme } from "@/composables/useTheme"
 
 /* ---------------------
   主题切换

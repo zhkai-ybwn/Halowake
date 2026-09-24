@@ -75,7 +75,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import { loadProjectConfig, saveProjectConfig, validateProjectConfig, type LuminaProjectConfig, type ProjectCommand, type ProjectCommandCandidate } from '@/services/project/project-service'
 
 interface EditableEnvironmentRow {

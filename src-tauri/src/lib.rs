@@ -169,6 +169,10 @@ pub fn run() {
             commands::markdown::get_markdown_file_metadata,
             commands::markdown::get_initial_markdown_file,
             commands::markdown::open_markdown_in_editor,
+            commands::skills::scan_agent_skills,
+            commands::skills::check_agent_skills_updates,
+            commands::skills::update_agent_skill,
+            commands::skills::open_skill_folder,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

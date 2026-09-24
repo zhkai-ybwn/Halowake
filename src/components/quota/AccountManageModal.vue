@@ -3,9 +3,11 @@
     :show="show"
     preset="card"
     :title="t('quota.manageAccounts')"
+    :closable="true"
     class="account-modal"
     style="width: 540px; max-width: calc(100vw - 32px)"
     @update:show="emit('update:show', $event)"
+    @close="emit('update:show', false)"
   >
     <div class="modal-container">
       <!-- 账号状态与启停列表 -->

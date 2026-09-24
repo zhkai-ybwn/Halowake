@@ -16,9 +16,7 @@
           <Icon icon="solar:trash-bin-trash-linear" />
           <span>{{ t('devdock.processes.clearCompleted') }}</span>
         </button>
-        <button class="inspector-close" type="button" :aria-label="t('common.close')" @click="$emit('close')">
-          <span class="close-glyph" aria-hidden="true">×</span>
-        </button>
+        <WorkbenchCloseButton @close="$emit('close')" />
       </div>
     </header>
 
@@ -160,7 +158,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 import type { ProjectProcessSnapshot } from '@/services/project/project-service'
 
 type ProcessFilter = 'all' | 'active' | 'completed'
@@ -296,32 +295,6 @@ function formatPorts(ports: number[]): string {
   &:hover {
     background: var(--lumina-control-hover);
     color: var(--lumina-text);
-  }
-}
-
-.inspector-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  height: 26px;
-  justify-content: center;
-  padding: 0;
-  width: 26px;
-
-  &:hover {
-    background: var(--lumina-control-hover);
-    color: var(--lumina-text);
-  }
-
-  .close-glyph {
-    font-size: 20px;
-    font-weight: 300;
-    line-height: 1;
-    transform: translateY(-1px);
   }
 }
 

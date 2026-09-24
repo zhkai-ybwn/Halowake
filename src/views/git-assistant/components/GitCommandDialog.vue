@@ -1,15 +1,12 @@
 <template>
   <div v-if="visible" class="dialog-mask">
     <section class="command-dialog">
-      <button
+      <WorkbenchCloseButton
         class="dialog-close"
-        type="button"
-        :aria-label="closeLabel"
+        :label="closeLabel"
         :disabled="running"
-        @click="$emit('close')"
-      >
-        <span class="close-glyph" aria-hidden="true">×</span>
-      </button>
+        @close="$emit('close')"
+      />
       <header class="dialog-header">
         <div>
           <span class="dialog-kicker">Halowake Git Operation</span>
@@ -75,7 +72,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 
 const { t } = useLocale()
 
@@ -246,43 +244,10 @@ const progressStyle = computed(() => {
 }
 
 .dialog-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
   position: absolute;
   right: 12px;
   top: 12px;
-  width: 28px;
   z-index: 3;
-
-  &:hover:not(:disabled) {
-    background: var(--lumina-button-secondary-hover);
-    color: var(--lumina-text);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 3px var(--lumina-accent-ring);
-    outline: none;
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
-  }
-
-  .close-glyph {
-    font-size: 20px;
-    font-weight: 300;
-    line-height: 1;
-    transform: translateY(-1px);
-  }
 }
 
 .dialog-header {

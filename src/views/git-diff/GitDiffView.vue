@@ -25,7 +25,7 @@ import {
 } from '@/services/git/git-service'
 import type { GitDiffRequest } from '@/services/git/git-diff-window'
 import UnifiedDiffViewer from './UnifiedDiffViewer.vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 
 const request = ref<GitDiffRequest | null>(null)

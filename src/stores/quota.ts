@@ -64,6 +64,7 @@ export const useQuotaStore = defineStore('quota', {
     loading: false,
     refreshing: false,
     lastUpdated: 0,
+    modalVisible: false,
   }),
 
   getters: {
@@ -174,6 +175,23 @@ export const useQuotaStore = defineStore('quota', {
     async ensureFresh(maxAgeMs = 15000): Promise<void> {
       if (Date.now() - this.lastUpdated > maxAgeMs && !this.loading && !this.refreshing) {
         await this.fetchAll(true)
+      }
+    },
+
+    openModal(): void {
+      this.modalVisible = true
+      void this.ensureFresh(5000)
+    },
+
+    closeModal(): void {
+      this.modalVisible = false
+    },
+
+    toggleModal(): void {
+      if (this.modalVisible) {
+        this.closeModal()
+      } else {
+        this.openModal()
       }
     },
   },

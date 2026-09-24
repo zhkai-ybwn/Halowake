@@ -6,9 +6,7 @@
         <h2>{{ title }}</h2>
         <p v-if="description">{{ description }}</p>
       </div>
-      <button class="workbench-sheet__close" type="button" :aria-label="closeLabel" :disabled="busy" @click="$emit('close')">
-        <span class="close-glyph" aria-hidden="true">×</span>
-      </button>
+      <WorkbenchCloseButton :label="closeLabel" :disabled="busy" @close="$emit('close')" />
     </header>
     <main class="workbench-sheet__body"><slot /></main>
     <footer v-if="$slots.footer" class="workbench-sheet__footer"><slot name="footer" /></footer>
@@ -16,14 +14,16 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
+
 withDefaults(defineProps<{
   title: string
   description?: string
-  closeLabel: string
+  closeLabel?: string
   icon?: string
   busy?: boolean
   size?: 'compact' | 'normal' | 'wide'
-}>(), { description: '', icon: '', busy: false, size: 'normal' })
+}>(), { closeLabel: '', description: '', icon: '', busy: false, size: 'normal' })
 defineEmits<{ close: [] }>()
 </script>
 
@@ -76,25 +76,6 @@ defineEmits<{ close: [] }>()
   min-width: 0;
   h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
   p { color: var(--lumina-text-secondary); font-size: 11px; line-height: 1.4; margin: 2px 0 0; }
-}
-
-.workbench-sheet__close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--lumina-text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  transition: background var(--lumina-duration-fast) var(--lumina-ease-out), color var(--lumina-duration-fast) var(--lumina-ease-out);
-  width: 28px;
-  &:hover:not(:disabled) { background: var(--lumina-button-secondary-hover); color: var(--lumina-text); }
-  &:focus-visible { box-shadow: 0 0 0 3px var(--lumina-accent-ring); outline: none; }
-  &:disabled { cursor: default; opacity: .4; }
-  .close-glyph { font-size: 20px; font-weight: 300; line-height: 1; transform: translateY(-1px); }
 }
 
 .workbench-sheet__body { display: grid; gap: 12px; min-height: 0; overflow: auto; padding: 16px; }

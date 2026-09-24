@@ -3,9 +3,11 @@
     :show="show"
     preset="card"
     :title="isCreating ? t('quota.createAccount') : t('quota.editAccount')"
+    :closable="true"
     class="account-edit-modal"
     style="width: 520px; max-width: calc(100vw - 32px)"
     @update:show="emit('update:show', $event)"
+    @close="emit('update:show', false)"
   >
     <div class="edit-form-content">
       <div class="form-item">

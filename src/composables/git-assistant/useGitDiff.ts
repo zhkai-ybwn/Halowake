@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import { loadGitFileDiff, loadGitFileHeadDiff } from '@/services/git/git-service'
 import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
 import type { GitFileStatus } from '@/types/git'

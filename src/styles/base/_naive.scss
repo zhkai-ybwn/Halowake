@@ -82,6 +82,38 @@
   backdrop-filter: blur(3px);
 }
 
+.n-card-header__close {
+  align-items: center !important;
+  background: transparent !important;
+  border-radius: var(--lumina-radius-sm) !important;
+  color: var(--lumina-text-secondary) !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  font-size: 16px !important;
+  height: var(--lumina-control-height) !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  transition:
+    background var(--lumina-duration-fast) var(--lumina-ease-out),
+    color var(--lumina-duration-fast) var(--lumina-ease-out),
+    transform var(--lumina-duration-fast) var(--lumina-ease-out) !important;
+  width: var(--lumina-control-height) !important;
+
+  &:hover {
+    background: var(--lumina-button-secondary-hover) !important;
+    color: var(--lumina-text) !important;
+  }
+
+  &:active {
+    transform: scale(0.94) !important;
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 3px var(--lumina-accent-ring) !important;
+    outline: none !important;
+  }
+}
+
 .n-message .n-message__content,
 .n-notification {
   font-family: var(--lumina-font-sans);

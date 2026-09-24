@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import {
   buildGitCommitPrompt,
   cancelGitAiAnalysis,

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import {
   abortGitMerge,
   abortGitRebase,

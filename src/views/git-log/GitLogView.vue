@@ -118,7 +118,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NDatePicker, NInput, NSelect } from 'naive-ui'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import {
   type GitCommitChangedFile,
   type GitCommitDetail,

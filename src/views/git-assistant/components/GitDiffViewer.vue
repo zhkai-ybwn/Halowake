@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import { STATUS_META } from '../git-assistant.config'
 import type { GitAssistantFileView } from '../git-assistant.types'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'

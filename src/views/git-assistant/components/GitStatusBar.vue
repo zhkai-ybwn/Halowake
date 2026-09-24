@@ -49,7 +49,7 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { NDropdown, type DropdownOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
 import WorkbenchTag from '@/components/workbench/WorkbenchTag.vue'

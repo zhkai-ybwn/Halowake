@@ -676,6 +676,8 @@ function highlightCurrentMatch() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  if (document.querySelector('.macos-skills-window') || document.querySelector('.n-modal-container')) return
+
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault()
     openSearch()

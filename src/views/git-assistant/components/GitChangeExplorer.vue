@@ -189,7 +189,7 @@
 import { computed, h, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
 import { NDropdown, type DropdownOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import { STATUS_FILTER_OPTIONS, STATUS_META } from '../git-assistant.config'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
@@ -478,6 +478,7 @@ function handleContextMenuSelect(key: string | number) {
 
 function handleFindShortcut(event: KeyboardEvent) {
   if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'f') return
+  if (document.querySelector('.macos-skills-window') || document.querySelector('.n-modal-container')) return
   if (!searchInput.value?.offsetParent) return
   event.preventDefault()
   searchInput.value.focus()

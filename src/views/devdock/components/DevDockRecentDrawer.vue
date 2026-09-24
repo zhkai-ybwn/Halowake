@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import type { DevDockRunHistoryRecord } from '@/services/project/project-service'
 
 defineProps<{

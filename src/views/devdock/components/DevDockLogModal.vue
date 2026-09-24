@@ -158,7 +158,7 @@
 import { AnsiUp } from 'ansi_up'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import type { ProjectProcessLogs } from '@/services/project/project-service'
 
 type LogLevel = 'info' | 'warning' | 'error'

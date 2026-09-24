@@ -1,6 +1,6 @@
 import { computed, nextTick, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import { loadGitSnapshot, type GitSnapshot } from '@/services/git/git-service'
 import { ensureGitProjectProfile } from '@/services/git/git-profile-service'
 import {

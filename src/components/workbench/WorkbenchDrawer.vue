@@ -5,9 +5,7 @@
         <h3>{{ title }}</h3>
         <p v-if="description">{{ description }}</p>
       </div>
-      <button type="button" :aria-label="closeLabel" @click="$emit('close')">
-        <span class="close-glyph" aria-hidden="true">×</span>
-      </button>
+      <WorkbenchCloseButton :label="closeLabel" @close="$emit('close')" />
     </header>
     <section class="workbench-drawer-body">
       <slot />
@@ -16,8 +14,10 @@
 </template>
 
 <script setup lang="ts">
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
+
 withDefaults(defineProps<{
-  closeLabel: string
+  closeLabel?: string
   description?: string
   fixed?: boolean
   size?: 'narrow' | 'normal' | 'wide' | 'log'
@@ -86,38 +86,6 @@ defineEmits<{
       font-size: 11px;
       line-height: 1.45;
       margin: 0;
-    }
-
-    button {
-      align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: var(--lumina-radius-sm);
-      color: var(--lumina-text-secondary);
-      cursor: pointer;
-      display: inline-flex;
-      flex: 0 0 26px;
-      height: 26px;
-      justify-content: center;
-      padding: 0;
-      width: 26px;
-
-      &:hover {
-        background: var(--lumina-button-secondary-hover);
-        color: var(--lumina-text);
-      }
-
-      &:focus-visible {
-        box-shadow: 0 0 0 3px var(--lumina-accent-ring);
-        outline: none;
-      }
-
-      .close-glyph {
-        font-size: 20px;
-        font-weight: 300;
-        line-height: 1;
-        transform: translateY(-1px);
-      }
     }
   }
 }

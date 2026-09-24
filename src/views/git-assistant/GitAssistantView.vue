@@ -104,9 +104,16 @@
           :selected-count="reviewSelectedRaws.length"
           :title="commitTitle"
           :body="commitBody"
+          :ai-loading="aiLoading"
+          :can-generate="Boolean(snapshot) && reviewSelectedRaws.length > 0"
+          :prompt-generation-step="promptGenerationStep"
+          :current-model-label="selectedCommitModelLabel"
+          :current-language-label="selectedCommitLanguageLabel"
           @submit="handleCommit"
           @update:title="commitTitle = $event"
           @update:body="commitBody = $event"
+          @generate="handleGenerateAiAnalysis"
+          @cancel-generate="handleCancelAiAnalysis"
         />
 
         <section class="commit-side">
@@ -223,9 +230,6 @@
           </section>
 
           <section class="ai-tool-section ai-tool-section--actions">
-            <button class="ai-action primary-action" type="button" :disabled="!snapshot && !aiLoading" @click="aiLoading ? handleCancelAiAnalysis() : handleGenerateAiAnalysis()">
-              {{ aiLoading ? t('gitAssistant.ai.stopGenerating') : t('gitAssistant.ai.generate') }}
-            </button>
             <div class="ai-action-grid">
               <button class="ai-action" type="button" :disabled="!promptPreview" @click="promptDrawerOpen = true">
                 {{ t('gitAssistant.ai.viewPrompt') }}
@@ -241,10 +245,6 @@
               </button>
             </div>
           </section>
-          <div v-if="aiLoading" class="ai-progress">
-            <span class="ai-progress__dot"></span>
-            <span>{{ promptGenerationStep }}</span>
-          </div>
         </section>
       </aside>
 
@@ -658,7 +658,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCheckbox, NInput, NModal, NSelect, useDialog } from 'naive-ui'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import {
   openGitFileExternal,
   revertGitFile,

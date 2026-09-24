@@ -19,6 +19,7 @@
       </button>
 
       <div class="titlebar-actions" data-tauri-drag-region>
+        <TopbarSkillsPill />
         <TopbarQuotaPill />
         <div v-if="!isMac" class="windows-window-controls" @mousedown.stop @dblclick.stop>
           <button class="window-button" type="button" :title="t('topbar.minimize')" @click="minimizeWindow"><span class="caption-icon caption-icon--minimize" aria-hidden="true"></span></button>
@@ -46,7 +47,7 @@
               :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
-              <Icon :icon="item.icon" />
+              <AppNavIcon :name="item.route" :size="20" :fallback-icon="item.icon" />
               <span class="item-title">{{ item.label }}</span>
               <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
             </button>
@@ -72,7 +73,7 @@
               :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
-              <Icon :icon="item.icon" />
+              <AppNavIcon :name="item.route" :size="20" :fallback-icon="item.icon" />
               <span class="item-title">{{ item.label }}</span>
               <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
             </button>
@@ -81,7 +82,7 @@
 
         <footer class="sidebar-footer">
           <button class="sidebar-item" :class="{ active: route.name === 'settings' }" type="button" :title="sidebarCollapsed ? `${t('topbar.settings')} (${isMac ? '⌘,' : 'Ctrl+,'})` : undefined" @click="toggleSettings">
-            <Icon icon="solar:settings-linear" />
+            <AppNavIcon name="settings" :size="20" fallback-icon="solar:settings-linear" />
             <span class="item-title">{{ t('topbar.settings') }}</span>
             <kbd class="shortcut-kbd">{{ isMac ? '⌘,' : 'Ctrl+,' }}</kbd>
           </button>
@@ -103,8 +104,10 @@
         </header>
         <div class="command-results">
           <p class="command-group-label">{{ t('topbar.commandGroupNavigation') }}</p>
-          <button v-for="(command, index) in filteredCommands" :key="command.route" type="button" :class="{ selected: index === selectedCommandIndex }" @mouseenter="selectedCommandIndex = index" @click="runCommand(command.route)">
-            <span class="command-icon"><Icon :icon="command.icon" /></span>
+          <button v-for="(command, index) in filteredCommands" :key="command.route || command.id" type="button" :class="{ selected: index === selectedCommandIndex }" @mouseenter="selectedCommandIndex = index" @click="runCommand(command)">
+            <span class="command-icon">
+              <AppNavIcon :name="command.route || command.id || ''" :size="20" :fallback-icon="command.icon" />
+            </span>
             <span><strong>{{ command.label }}</strong><small>{{ command.description }}</small></span>
             <Icon icon="solar:arrow-right-linear" />
           </button>
@@ -115,7 +118,7 @@
 
     <n-modal v-model:show="exitDialogOpen" :auto-focus="false" :mask-closable="false" :close-on-esc="true">
       <section class="exit-dialog" role="dialog" aria-modal="true" :aria-label="t('topbar.exitTitle')">
-        <button class="exit-dialog-close" type="button" :aria-label="t('topbar.cancel')" @click="exitDialogOpen = false">×</button>
+        <WorkbenchCloseButton class="exit-dialog-close" :label="t('common.close')" @close="exitDialogOpen = false" />
         <header class="exit-dialog-heading">
           <span class="exit-dialog-icon" aria-hidden="true"><Icon icon="solar:power-linear" /></span>
           <div><h3>{{ t('topbar.exitTitle') }}</h3><p>{{ runningProcesses.length ? t('topbar.exitRunningHint') : t('topbar.exitIdleHint') }}</p></div>
@@ -146,9 +149,14 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIconButton from '@/components/workbench/WorkbenchIconButton.vue'
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 import TopbarQuotaPill from '@/components/quota/TopbarQuotaPill.vue'
+import TopbarSkillsPill from '@/components/skills/TopbarSkillsPill.vue'
+import AppNavIcon from '@/components/common/AppNavIcon.vue'
 import { listProjectProcesses, stopAllProjectProcesses, type ProjectProcessSnapshot } from '@/services/project/project-service'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useSkillsStore } from '@/stores/skills'
+import { useQuotaStore } from '@/stores/quota'
 import { hasPrimaryModifier, isMacPlatform } from '@/utils/platform-shortcuts'
 
 const router = useRouter()
@@ -157,6 +165,8 @@ const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
 const appWindow = getCurrentWindow()
 const preferencesStore = usePreferencesStore()
+const skillsStore = useSkillsStore()
+const quotaStore = useQuotaStore()
 const isMac = isMacPlatform
 const SIDEBAR_STORAGE_KEY = 'lumina.shell.sidebarCollapsed'
 const isMaximized = ref(false)
@@ -175,11 +185,13 @@ let unlistenTrayExit: UnlistenFn | null = null
 let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 interface ShellNavItem {
-  route: string
+  id?: string
+  route?: string
   label: string
   icon: string
   description: string
-  shortcut: string
+  shortcut?: string
+  action?: () => void
 }
 
 const workspaceItems = computed<ShellNavItem[]>(() => [
@@ -190,28 +202,47 @@ const workspaceItems = computed<ShellNavItem[]>(() => [
 const utilityItems = computed<ShellNavItem[]>(() => [
   { route: 'markdown-preview', label: t('workbench.markdownPreview'), icon: 'solar:document-text-linear', description: t('workbench.markdownPreviewDescription'), shortcut: '3' },
   { route: 'codex-report', label: t('workbench.codexReport'), icon: 'solar:notes-linear', description: t('workbench.codexReportDescription'), shortcut: '4' },
-  { route: 'ai-quota', label: t('workbench.aiQuota'), icon: 'solar:wallet-money-linear', description: t('workbench.aiQuotaDescription'), shortcut: '5' },
 ])
 
 const navItems = computed(() => [...workspaceItems.value, ...utilityItems.value])
-const commands = computed(() => [...navItems.value, { route: 'settings', label: t('topbar.settings'), icon: 'solar:settings-linear', description: t('workbench.settingsDescription') }])
+const commands = computed<ShellNavItem[]>(() => [
+  ...navItems.value,
+  {
+    id: 'ai-quota',
+    label: t('workbench.aiQuota'),
+    icon: 'solar:wallet-money-linear',
+    description: t('workbench.aiQuotaDescription'),
+    action: () => quotaStore.openModal(),
+  },
+  {
+    id: 'skills',
+    label: t('skills.title'),
+    icon: 'solar:magic-stick-3-linear',
+    description: t('skills.searchPlaceholder', '管理与更新 AI 技能'),
+    action: () => skillsStore.openModal(),
+  },
+  {
+    route: 'settings',
+    label: t('topbar.settings'),
+    icon: 'solar:settings-linear',
+    description: t('workbench.settingsDescription'),
+  },
+])
 const filteredCommands = computed(() => {
   const query = commandQuery.value.trim().toLocaleLowerCase()
   return query ? commands.value.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query)) : commands.value
 })
-const currentModuleLabel = computed(() => commands.value.find(item => item.route === route.name)?.label ?? t('workbench.git'))
+const currentModuleLabel = computed(() => navItems.value.find(item => item.route === route.name)?.label ?? t('workbench.git'))
 const windowTitle = computed(() =>
   route.name === 'devdock'
     ? t('topbar.titleDevDock')
     : route.name === 'codex-report'
       ? t('topbar.titleCodexReport')
-      : route.name === 'ai-quota'
-        ? t('topbar.titleAiQuota')
-        : route.name === 'markdown-preview'
-          ? t('topbar.titleMarkdownPreview')
-          : route.name === 'settings'
-            ? t('topbar.titleSettings')
-            : t('topbar.titleGit')
+      : route.name === 'markdown-preview'
+        ? t('topbar.titleMarkdownPreview')
+        : route.name === 'settings'
+          ? t('topbar.titleSettings')
+          : t('topbar.titleGit')
 )
 const maximizeTitle = computed(() => isMaximized.value ? t('topbar.restore') : t('topbar.maximize'))
 
@@ -229,6 +260,13 @@ onMounted(async () => {
   unlistenCloseRequested = await appWindow.onCloseRequested(event => { event.preventDefault(); void handleCloseRequest() })
   unlistenTrayExit = await listen('lumina://request-exit', () => { void requestExit() })
   window.addEventListener('keydown', handleGlobalKeydown)
+
+  const skillsStore = useSkillsStore()
+  void skillsStore.scan().then(() => {
+    setTimeout(() => {
+      void skillsStore.checkUpdates()
+    }, 3000)
+  })
 })
 onUnmounted(() => {
   if (resizeDebounceTimer) {
@@ -258,12 +296,16 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   const isAltNumber = event.altKey && ['1', '2', '3', '4', '5'].includes(event.key)
   const isModNumber = mod && ['1', '2', '3', '4', '5'].includes(event.key)
   if (isAltNumber || isModNumber) {
+    if (event.key === '5') {
+      event.preventDefault()
+      quotaStore.toggleModal()
+      return
+    }
     const shortcutMap: Record<string, string> = {
       '1': 'devdock',
       '2': 'git-assistant',
       '3': 'markdown-preview',
       '4': 'codex-report',
-      '5': 'ai-quota',
     }
     const dest = shortcutMap[event.key]
     if (dest) {
@@ -275,8 +317,15 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0') }
 function openCommandPalette() { commandPaletteOpen.value = true }
 function moveCommandSelection(offset: number) { const count = filteredCommands.value.length; if (count) selectedCommandIndex.value = (selectedCommandIndex.value + offset + count) % count }
-function runSelectedCommand() { const command = filteredCommands.value[selectedCommandIndex.value]; if (command) runCommand(command.route) }
-function runCommand(routeName: string) { commandPaletteOpen.value = false; void router.push({ name: routeName }) }
+function runSelectedCommand() { const command = filteredCommands.value[selectedCommandIndex.value]; if (command) runCommand(command) }
+function runCommand(command: ShellNavItem) {
+  commandPaletteOpen.value = false
+  if (command.action) {
+    command.action()
+  } else if (command.route) {
+    void router.push({ name: command.route })
+  }
+}
 function toggleSettings() { void router.push({ name: route.name === 'settings' ? 'devdock' : 'settings' }) }
 async function minimizeWindow() { await appWindow.minimize() }
 async function toggleMaximize() { await appWindow.toggleMaximize(); await refreshMaximizedState() }
@@ -327,7 +376,9 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 .sidebar-item:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }
 .sidebar-item:active { transform: scale(0.98); }
 .sidebar-item.active { background: var(--lumina-control-active); color: var(--lumina-text); font-weight: 500; }
-.sidebar-item svg { flex: 0 0 auto; height: 17px; width: 17px; }
+.sidebar-item .app-nav-icon { flex: 0 0 auto; }
+.sidebar-item.active .app-nav-icon { filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.28)); transform: scale(1.04); }
+.sidebar-item > svg { flex: 0 0 auto; height: 17px; width: 17px; }
 .sidebar-item .item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item .shortcut-kbd { align-items: center; background: color-mix(in srgb, var(--lumina-text) 6%, transparent); border-radius: 4px; color: var(--lumina-text-tertiary); display: inline-flex; font-family: var(--lumina-font-mono); font-size: 10px; font-weight: 500; height: 17px; justify-content: center; line-height: 1; margin-left: auto; min-width: 18px; padding: 0 4px; transition: color var(--lumina-duration-fast) var(--lumina-ease-out), background var(--lumina-duration-fast) var(--lumina-ease-out); }
 .sidebar-item:hover .shortcut-kbd { background: color-mix(in srgb, var(--lumina-text) 10%, transparent); color: var(--lumina-text-secondary); }
@@ -335,11 +386,11 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 .sidebar-is-collapsed .sidebar { flex-basis: var(--lumina-sidebar-collapsed-width); padding-inline: 10px; }
 .sidebar-is-collapsed .sidebar-section-header, .sidebar-is-collapsed .sidebar-item .item-title, .sidebar-is-collapsed .shortcut-kbd { display: none; }
 .sidebar-is-collapsed .sidebar-section-divider { margin: 10px 4px; }
-.sidebar-is-collapsed .sidebar-item { justify-content: center; padding: 0; }
+.sidebar-is-collapsed .sidebar-item { height: 34px; justify-content: center; padding: 0; }
 .view-host { background: var(--lumina-content-bg); flex: 1; min-height: 0; min-width: 0; overflow: hidden; position: relative; }.route-fade-enter-active { transition: opacity 0.1s ease-out; }.route-fade-enter-from { opacity: 0.85; }
 .command-palette { background: color-mix(in srgb, var(--lumina-surface-elevated) 92%, transparent); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); overflow: hidden; width: min(620px, calc(100vw - 48px)); backdrop-filter: var(--lumina-vibrancy); }.command-palette > header { align-items: center; border-bottom: 0.5px solid var(--lumina-separator); display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 54px; padding: 8px 12px; }.command-palette > header > svg { color: var(--lumina-text-secondary); height: 19px; width: 19px; }.command-palette :deep(.n-input) { --n-border: 0; --n-border-hover: 0; --n-border-focus: 0; --n-box-shadow-focus: none; --n-color: transparent; --n-color-focus: transparent; font-size: 15px; }
 .command-results { max-height: 360px; overflow: auto; padding: 8px; }.command-group-label { color: var(--lumina-text-tertiary); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; margin: 4px 8px 6px; text-transform: uppercase; }.command-results button { align-items: center; background: transparent; border: 0; border-radius: var(--lumina-radius-md); color: var(--lumina-text); cursor: pointer; display: grid; gap: 10px; grid-template-columns: auto 1fr auto; min-height: 48px; padding: 6px 9px; text-align: left; width: 100%; }.command-results button.selected { background: var(--lumina-primary-soft); }.command-results button > svg { color: var(--lumina-text-tertiary); height: 15px; width: 15px; }.command-icon { align-items: center; background: var(--lumina-control-bg); border-radius: var(--lumina-radius-sm); display: flex; height: 30px; justify-content: center; width: 30px; }.command-icon svg { height: 17px; width: 17px; }.command-results button > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }.command-results strong { font-size: 13px; font-weight: 550; }.command-results small { color: var(--lumina-text-secondary); font-size: 11px; }.command-empty { color: var(--lumina-text-secondary); padding: 32px; text-align: center; }
-.exit-dialog { background: var(--lumina-surface-elevated); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); color: var(--lumina-text); padding: 22px; position: relative; width: min(430px, calc(100vw - 32px)); }.exit-dialog-close { align-items: center; background: var(--lumina-control-bg); border: 0; border-radius: var(--lumina-radius-sm); color: var(--lumina-text-secondary); cursor: pointer; display: flex; font-size: 20px; height: 28px; justify-content: center; position: absolute; right: 12px; top: 12px; width: 28px; }.exit-dialog-close:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }
+.exit-dialog { background: var(--lumina-surface-elevated); border: 0.5px solid var(--lumina-separator-strong); border-radius: var(--lumina-radius-xl); box-shadow: var(--lumina-shadow-lg); color: var(--lumina-text); padding: 22px; position: relative; width: min(430px, calc(100vw - 32px)); }.exit-dialog-close { position: absolute; right: 12px; top: 12px; z-index: 2; }
 .exit-dialog-heading { align-items: flex-start; display: flex; gap: 12px; padding-right: 34px; }.exit-dialog-heading h3 { font-size: 17px; margin: 0; }.exit-dialog-heading p { color: var(--lumina-text-secondary); font-size: 12px; line-height: 1.5; margin: 5px 0 0; }.exit-dialog-icon { align-items: center; background: color-mix(in srgb, var(--lumina-danger) 12%, var(--lumina-control-bg)); border-radius: var(--lumina-radius-md); color: var(--lumina-danger); display: flex; height: 34px; justify-content: center; width: 34px; }.exit-dialog-icon svg { height: 18px; width: 18px; }
 .exit-process-list { background: var(--lumina-surface-secondary); border-radius: var(--lumina-radius-md); margin-top: 18px; max-height: 220px; overflow: auto; padding: 0 12px; }.exit-process-row { align-items: center; display: flex; justify-content: space-between; min-height: 42px; }.exit-process-row + .exit-process-row { border-top: 0.5px solid var(--lumina-separator); }.exit-process-row span { color: var(--lumina-text-secondary); font-family: var(--lumina-font-mono); font-size: 11px; }.exit-dialog-footer { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }.exit-remember { align-items: center; display: flex; gap: 8px; }.exit-remember > span { color: var(--lumina-text-secondary); font-size: 11px; }.exit-actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 </style>

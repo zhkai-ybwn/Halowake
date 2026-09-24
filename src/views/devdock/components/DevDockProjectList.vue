@@ -186,7 +186,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { useLocale } from '@/hooks/useLocale'
+import { useLocale } from '@/composables/useLocale'
 import type { ProjectCommand } from '@/services/project/project-service'
 import type { DevDockProject, ScriptSort } from '../types'
 import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
@@ -234,6 +234,7 @@ const searchInput = ref<HTMLInputElement | null>(null)
 
 function handleFindShortcut(event: KeyboardEvent) {
   if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'f') return
+  if (document.querySelector('.macos-skills-window') || document.querySelector('.n-modal-container')) return
   if (!searchInput.value?.offsetParent) return
   event.preventDefault()
   searchInput.value.focus()

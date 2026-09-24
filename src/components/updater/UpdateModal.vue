@@ -3,10 +3,12 @@
     :show="updaterStore.modalVisible"
     :mask-closable="!updaterStore.isDownloading"
     :close-on-esc="!updaterStore.isDownloading"
+    :closable="!updaterStore.isDownloading"
     preset="card"
     class="update-modal"
     style="width: 540px; max-width: calc(100vw - 32px)"
     @update:show="handleCloseModal"
+    @close="handleCloseModal(false)"
   >
     <template #header>
       <div class="update-header">

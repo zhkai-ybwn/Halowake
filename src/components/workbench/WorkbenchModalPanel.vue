@@ -1,15 +1,15 @@
 <template>
   <section class="workbench-modal-panel" :class="`size-${size}`">
-    <button class="workbench-modal-close" type="button" :aria-label="closeLabel" @click="$emit('close')">
-      <span class="close-glyph" aria-hidden="true">×</span>
-    </button>
+    <WorkbenchCloseButton class="workbench-modal-close" :label="closeLabel" @close="$emit('close')" />
     <slot />
   </section>
 </template>
 
 <script setup lang="ts">
+import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
+
 withDefaults(defineProps<{
-  closeLabel: string
+  closeLabel?: string
   size?: 'normal' | 'wide' | 'diff' | 'log'
 }>(), {
   size: 'normal',
@@ -65,37 +65,9 @@ defineEmits<{
 }
 
 .workbench-modal-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--lumina-radius-sm);
-  color: var(--lumina-text-secondary);
-  cursor: pointer;
-  display: flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
   position: absolute;
   right: 12px;
   top: 12px;
-  width: 28px;
   z-index: 20;
-
-  &:hover {
-    background: var(--lumina-button-secondary-hover);
-    color: var(--lumina-text);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 3px var(--lumina-accent-ring);
-    outline: none;
-  }
-
-  .close-glyph {
-    font-size: 20px;
-    font-weight: 300;
-    line-height: 1;
-    transform: translateY(-1px);
-  }
 }
 </style>
