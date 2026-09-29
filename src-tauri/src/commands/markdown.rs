@@ -103,6 +103,39 @@ fn read_file_via_system_fallback(path: &str) -> Option<String> {
     None
 }
 
+#[cfg(windows)]
+fn read_file_bytes_via_system_fallback(path: &Path) -> Option<Vec<u8>> {
+    let mut command = Command::new("powershell");
+    command.creation_flags(CREATE_NO_WINDOW);
+    command.env("HALOWAKE_BINARY_READ_PATH", clean_path_string(path));
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$bytes = [System.IO.File]::ReadAllBytes($env:HALOWAKE_BINARY_READ_PATH); $output = [Console]::OpenStandardOutput(); $output.Write($bytes, 0, $bytes.Length)",
+    ]);
+    command.output().ok().filter(|result| result.status.success()).map(|result| result.stdout)
+}
+
+pub(crate) fn read_file_bytes_with_dlp_fallback(path: &Path) -> Result<Vec<u8>, String> {
+    let direct = fs::read(path);
+    #[cfg(windows)]
+    {
+        if let Ok(bytes) = &direct {
+            if !is_likely_encrypted_bytes(bytes) {
+                return Ok(bytes.clone());
+            }
+        }
+        if let Some(bytes) = read_file_bytes_via_system_fallback(path) {
+            return Ok(bytes);
+        }
+        if direct.is_ok() {
+            return Err(format!("文件疑似受加密保护，无法读取原始内容: {}", path.display()));
+        }
+    }
+    direct.map_err(|error| format!("读取文件失败 {}: {error}", path.display()))
+}
+
 #[cfg(not(windows))]
 fn read_file_via_system_fallback(_path: &str) -> Option<String> {
     None

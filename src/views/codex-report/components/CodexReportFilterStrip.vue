@@ -73,7 +73,7 @@
           title="OpenCode"
           @click="emit('update:selectedProvider', 'opencode')"
         >
-          <Icon icon="solar:terminal-linear" class="provider-btn-icon icon-opencode" />
+          <Icon icon="solar:code-square-linear" class="provider-btn-icon icon-opencode" />
           <span>OpenCode</span>
         </button>
       </div>

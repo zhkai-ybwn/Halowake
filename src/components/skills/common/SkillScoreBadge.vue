@@ -7,10 +7,10 @@
     </span>
 
     <!-- 综合量化评分 (Halowake Score) -->
-    <span v-if="score !== undefined" class="score-pill" :title="`Halowake 综合评分: ${score}/100`">
+    <span v-if="score !== undefined" class="score-pill" :title="t('skills.review.scoreTitle', { score })">
       <Icon icon="solar:star-bold" class="score-star-glyph" />
       <span class="score-num">{{ score }}</span>
-      <span class="score-scale">分</span>
+      <span class="score-scale">{{ t('skills.review.scoreUnit') }}</span>
     </span>
   </div>
 </template>

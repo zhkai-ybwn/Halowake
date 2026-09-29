@@ -151,6 +151,8 @@ pub fn run() {
             commands::storage::save_storage_settings,
             commands::storage::get_storage_overview,
             commands::storage::run_storage_cleanup,
+            commands::agent_storage::scan_agent_storage,
+            commands::agent_storage::clear_agent_cache,
             commands::quota::load_all_quotas,
             commands::quota::refresh_single_quota,
             commands::quota::load_quota_accounts,
@@ -174,7 +176,10 @@ pub fn run() {
             commands::skills::update_agent_skill,
             commands::skills::open_skill_folder,
             commands::skills::install_agent_skill,
+            commands::skills::list_skill_install_history,
             commands::skills::uninstall_agent_skill,
+            commands::skill_registry::load_skill_registry,
+            commands::skill_registry::save_skill_registry,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

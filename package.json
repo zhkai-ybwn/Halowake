@@ -1,10 +1,12 @@
 {
   "name": "halowake",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/generate-icon-collection.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/generate-icon-collection.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -16,6 +18,8 @@
     "format": "prettier --write . && stylelint '**/*.{css,scss,vue}' --fix"
   },
   "dependencies": {
+    "@iconify-json/mdi": "^1.2.3",
+    "@iconify-json/solar": "^1.2.12",
     "@iconify/vue": "^5.0.0",
     "@tauri-apps/api": "~2.9.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",

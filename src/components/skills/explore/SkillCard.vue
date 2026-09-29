@@ -47,25 +47,25 @@
 
     <!-- 3. Multi-Skill Bundle Banner & Interactive Sub-skills Shelf -->
     <div v-if="skill.isBundle && skill.subSkills?.length" class="bundle-shelf-wrap">
-      <div
+      <button
         class="bundle-header-toggle"
-        role="button"
-        tabindex="0"
+        type="button"
+        :aria-expanded="isSubSkillsOpen"
         @click.stop="isSubSkillsOpen = !isSubSkillsOpen"
       >
-        <div class="bundle-pill">
+        <span class="bundle-pill">
           <Icon icon="solar:box-minimalistic-bold" class="bundle-box-icon" />
-          <span>多技能合集 · 含 {{ skill.subSkills.length }} 个独立技能</span>
-        </div>
-        <button type="button" class="toggle-action-btn">
-          <span>{{ isSubSkillsOpen ? '收起清单' : '展开单独装配' }}</span>
+          <span>{{ t('skills.review.card.bundleSummary', { count: skill.subSkills.length }) }}</span>
+        </span>
+        <span class="toggle-action-btn">
+          <span>{{ isSubSkillsOpen ? t('skills.review.card.collapse') : t('skills.review.card.expand') }}</span>
           <Icon
             icon="solar:alt-arrow-down-linear"
             class="toggle-chevron"
             :class="{ rotated: isSubSkillsOpen }"
           />
-        </button>
-      </div>
+        </span>
+      </button>
 
       <!-- Slide-down sub-skills shelf -->
       <div v-if="isSubSkillsOpen" class="subskills-shelf">
@@ -84,11 +84,11 @@
           <button
             type="button"
             class="subskill-install-btn"
-            title="单独装配此子技能"
+            :title="t('skills.review.card.installSubskillTitle')"
             @click.stop="exploreStore.openSubSkillInstallDialog(skill, sub)"
           >
             <Icon icon="solar:cloud-download-linear" />
-            <span>单独装配</span>
+            <span>{{ t('skills.review.card.installSubskill') }}</span>
           </button>
         </div>
       </div>
@@ -101,7 +101,7 @@
 
     <!-- 5. Tags & Stats Row -->
     <div class="card-tags-row">
-      <span v-for="tag in customTags" :key="tag" class="micro-custom-tag" :title="`自定义分类: ${tag}`">
+      <span v-for="tag in customTags" :key="tag" class="micro-custom-tag" :title="t('skills.review.card.customCategory', { tag })">
         #{{ tag }}
       </span>
       <span v-for="tag in displayTags" :key="tag" class="micro-tag">
@@ -110,7 +110,7 @@
       <span
         v-if="formattedStars"
         class="micro-stars-counter"
-        :title="`GitHub Stars: ${skill.metrics?.githubStars || skill.stars || 0}`"
+        :title="`GitHub Stars: ${skill.metrics?.githubStars || skill.stars || 0}${skill.sourceId === 'agent-skills-corpus' ? t('skills.review.card.snapshotDate') : ''}`"
       >
         ⭐ {{ formattedStars }}
       </span>
@@ -118,16 +118,6 @@
 
     <!-- 6. Card Action Footer -->
     <div class="card-footer">
-      <div class="card-agent-dots" :title="`兼容 Agent: ${skill.compatibleAgents.join(', ')}`">
-        <span
-          v-for="agent in skill.compatibleAgents"
-          :key="agent"
-          class="agent-dot"
-          :class="`agent-dot--${agent}`"
-          :title="agent"
-        ></span>
-      </div>
-
       <div class="footer-buttons">
         <button
           type="button"
@@ -135,7 +125,7 @@
           @click="exploreStore.openDetail(skill)"
         >
           <Icon icon="solar:info-circle-linear" />
-          <span>玩法指引</span>
+          <span>{{ t('skills.review.card.viewGuide') }}</span>
         </button>
 
         <button
@@ -155,7 +145,7 @@
           @click="exploreStore.openInstallDialog(skill)"
         >
           <Icon icon="solar:box-minimalistic-linear" />
-          <span>合集装配 ({{ skill.subSkills?.length || skill.bundleCount }})</span>
+          <span>{{ t('skills.review.card.assembleCount', { count: skill.subSkills?.length || skill.bundleCount }) }}</span>
         </button>
 
         <button
@@ -201,8 +191,9 @@ const customTags = computed(() => {
 })
 
 const displayTags = computed(() => {
-  return props.skill.tags.slice(0, 2)
+  return props.skill.tags.filter(tag => tag !== 'generic' && tag !== 'other').slice(0, 2)
 })
+
 
 function formatStars(count: number): string {
   if (count >= 1000) {
@@ -352,6 +343,7 @@ const formattedStars = computed(() => {
   justify-content: space-between;
   padding: 5px 8px;
   transition: all 150ms ease;
+  width: 100%;
 
   &:hover {
     background: color-mix(in srgb, var(--lumina-primary) 10%, var(--lumina-surface-2));
@@ -526,39 +518,9 @@ const formattedStars = computed(() => {
   border-top: 0.5px solid var(--lumina-separator);
   display: flex;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: auto;
   padding-top: 8px;
-}
-
-.card-agent-dots {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-}
-
-.agent-dot {
-  background: var(--lumina-text-tertiary);
-  border-radius: 50%;
-  display: inline-block;
-  height: 6px;
-  width: 6px;
-
-  &--antigravity {
-    background: #39786f;
-  }
-
-  &--claude {
-    background: #d97706;
-  }
-
-  &--cursor {
-    background: #2563eb;
-  }
-
-  &--trae {
-    background: #7c3aed;
-  }
 }
 
 .footer-buttons {

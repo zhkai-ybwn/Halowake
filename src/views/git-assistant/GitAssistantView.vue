@@ -490,7 +490,7 @@
 
       <NModal v-model:show="repositorySetupOpen" class="repository-action-modal" :mask-closable="true">
         <WorkbenchSheet
-          :icon="repositorySetupMode === 'clone' ? 'solar:download-square-linear' : 'solar:folder-add-linear'"
+          :icon="repositorySetupMode === 'clone' ? 'solar:download-square-linear' : 'solar:add-folder-linear'"
           :title="repositorySetupMode === 'clone' ? t('gitAssistant.repo.cloneRepository') : t('gitAssistant.repo.initRepository')"
           :description="t('gitAssistant.repo.repositorySetupHint')"
           :close-label="t('gitAssistant.prompt.close')"

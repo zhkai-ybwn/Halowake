@@ -1,11 +1,21 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  AgentStorageOverview,
+  AgentCacheCleanupResult,
   CompleteStorageCleanupResult,
   NativeStorageOverview,
   StorageCleanupResult,
   StorageOverview,
   StorageSettings,
 } from '@/types/storage'
+
+export async function scanAgentStorage(): Promise<AgentStorageOverview> {
+  return invoke<AgentStorageOverview>('scan_agent_storage')
+}
+
+export async function clearAgentCache(key: string): Promise<AgentCacheCleanupResult> {
+  return invoke<AgentCacheCleanupResult>('clear_agent_cache', { key })
+}
 
 const EXPIRABLE_STORAGE_ENTRIES = [
   { key: 'lumina.git.commitMessageHistory', timestampKey: 'createdAt' },

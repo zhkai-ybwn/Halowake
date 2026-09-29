@@ -69,7 +69,7 @@
         <!-- Font Size Toggle -->
         <WorkbenchIconButton
           v-if="currentFileContent"
-          icon="solar:text-size-linear"
+          icon="solar:text-format-linear"
           :label="t('markdownPreview.fontSizeCycle')"
           @click="historyStore.cycleFontSize"
         />

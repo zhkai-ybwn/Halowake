@@ -7,13 +7,18 @@ import { i18n } from './i18n'
 import { useAiSettingsStore } from './stores/ai-settings'
 import { usePreferencesStore } from './stores/preferences'
 import { useStorageStore } from './stores/storage'
-import { Icon } from '@iconify/vue';
+import { Icon, addCollection } from '@iconify/vue';
+import solarIcons from '@/assets/icons/solar-collection.json';
+import mdiIcons from '@/assets/icons/mdi-collection.json';
 import "@/styles/base/index.scss";
 import "@/styles/themes/index.scss";
 import "@/styles/utilities/index.scss";
 import "@/styles/workbench/index.scss";
 
 async function bootstrap() {
+  // Bundle the icons used by the app so they also render when Iconify's API is unreachable.
+  addCollection(solarIcons)
+  addCollection(mdiIcons)
   const app = createApp(App)
   app.use(pinia)
   usePreferencesStore(pinia).initPreferences()

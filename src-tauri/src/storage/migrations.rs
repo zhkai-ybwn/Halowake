@@ -201,6 +201,48 @@ const MIGRATIONS: &[&str] = &[
       updated_at INTEGER NOT NULL
     );
     "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS skill_registry_snapshot (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      description TEXT,
+      pipelines_json TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE TABLE IF NOT EXISTS skill_registry_entries (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_skill_registry_stage_name
+      ON skill_registry_entries(stage, name);
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS skill_install_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      skill_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      sub_skill_id TEXT,
+      git_url TEXT NOT NULL,
+      sub_path TEXT,
+      target_mode TEXT NOT NULL,
+      target_agents_json TEXT NOT NULL DEFAULT '[]',
+      project_cwd TEXT,
+      status TEXT NOT NULL,
+      message TEXT NOT NULL,
+      installed_paths_json TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_skill_install_history_created
+      ON skill_install_history(created_at DESC, id DESC);
+    "#,
+    r#"
+    UPDATE skill_install_history
+      SET display_name = COALESCE(NULLIF(sub_skill_id, ''), skill_id)
+      WHERE display_name = '';
+    "#,
 ];
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
@@ -221,6 +263,21 @@ pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
 }
 
 fn apply_migration(transaction: &Transaction<'_>, version: usize, sql: &str) -> Result<(), String> {
+    if version == 9 {
+        let mut statement = transaction
+            .prepare("PRAGMA table_info(skill_install_history)")
+            .map_err(|error| format!("检查技能安装记录字段失败: {error}"))?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?;
+        if !columns.iter().any(|column| column == "display_name") {
+            transaction
+                .execute_batch("ALTER TABLE skill_install_history ADD COLUMN display_name TEXT NOT NULL DEFAULT '';")
+                .map_err(|error| format!("补齐技能安装记录名称字段失败: {error}"))?;
+        }
+    }
     transaction
         .execute_batch(sql)
         .map_err(|error| format!("执行 SQLite migration v{version} 失败: {error}"))?;
@@ -263,5 +320,48 @@ mod tests {
             )
             .expect("metadata table count");
         assert_eq!(metadata_exists, 1);
+
+        let display_name_exists = connection
+            .prepare("PRAGMA table_info(skill_install_history)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .any(|column| column.unwrap() == "display_name");
+        assert!(display_name_exists);
+    }
+
+    #[test]
+    fn migration_repairs_existing_install_history_without_losing_rows() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE skill_install_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              skill_id TEXT NOT NULL,
+              sub_skill_id TEXT,
+              git_url TEXT NOT NULL,
+              sub_path TEXT,
+              target_mode TEXT NOT NULL,
+              target_agents_json TEXT NOT NULL DEFAULT '[]',
+              project_cwd TEXT,
+              status TEXT NOT NULL,
+              message TEXT NOT NULL,
+              installed_paths_json TEXT NOT NULL DEFAULT '[]',
+              created_at INTEGER NOT NULL
+            );
+            INSERT INTO skill_install_history (skill_id, sub_skill_id, git_url, target_mode, status, message, created_at)
+              VALUES ('catalog-native', 'native-ui', 'https://example.com/native', 'specific_agent', 'success', '已安装', 123);
+            PRAGMA user_version = 8;
+        "#).unwrap();
+
+        run_migrations(&mut connection).unwrap();
+        let (name, source): (String, String) = connection.query_row(
+            "SELECT display_name, git_url FROM skill_install_history WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(name, "native-ui");
+        assert_eq!(source, "https://example.com/native");
+        run_migrations(&mut connection).unwrap();
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 9);
     }
 }

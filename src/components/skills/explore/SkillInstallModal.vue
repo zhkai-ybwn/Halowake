@@ -33,15 +33,23 @@
         </button>
       </header>
 
+      <div v-if="exploreStore.pendingSkill" class="install-source-note">
+        <Icon icon="solar:info-circle-linear" />
+        <span>
+          {{ exploreStore.pendingSkill.sourceId === 'agent-skills-corpus' ? t('skills.review.install.unreviewedSource') : t('skills.review.install.source') }}
+          {{ exploreStore.pendingSkill.gitUrl }}<template v-if="exploreStore.pendingSkill.subPath">/{{ exploreStore.pendingSkill.subPath }}</template>
+        </span>
+      </div>
+
       <!-- Sheet Form Body -->
       <div class="sheet-body">
         <!-- 单独子技能模式提示横幅 -->
         <div v-if="exploreStore.pendingSubSkill && exploreStore.pendingSkill" class="subskill-banner">
           <Icon icon="solar:box-minimalistic-bold" class="banner-icon" />
           <div class="banner-text">
-            <span class="banner-title">独立单项装配模式</span>
+            <span class="banner-title">{{ t('skills.review.install.subskillMode') }}</span>
             <span class="banner-sub">
-              源自合集「{{ exploreStore.pendingSkill.titleZh }}」，将仅把子技能「{{ exploreStore.pendingSubSkill.titleZh }}」提取并安装至目标目录。
+              {{ t('skills.review.install.subskillHint', { bundle: exploreStore.pendingSkill.titleZh, skill: exploreStore.pendingSubSkill.titleZh }) }}
             </span>
           </div>
         </div>
@@ -53,12 +61,12 @@
         >
           <div class="section-label-row">
             <label class="section-title">
-              包含的独立子技能（已勾选 {{ exploreStore.selectedBundleSubSkillIds.length }}/{{ exploreStore.pendingSkill.subSkills.length }}）
+              {{ t('skills.review.install.bundleSelection', { selected: exploreStore.selectedBundleSubSkillIds.length, total: exploreStore.pendingSkill.subSkills.length }) }}
             </label>
             <div class="bundle-quick-actions">
-              <button type="button" class="quick-link-btn" @click="selectAllBundleSubs">全选</button>
+              <button type="button" class="quick-link-btn" @click="selectAllBundleSubs">{{ t('skills.review.install.selectAll') }}</button>
               <span class="divider">·</span>
-              <button type="button" class="quick-link-btn" @click="clearBundleSubs">清空</button>
+              <button type="button" class="quick-link-btn" @click="clearBundleSubs">{{ t('skills.review.install.clear') }}</button>
             </div>
           </div>
 
@@ -76,7 +84,7 @@
                 @change="toggleSubChecked(sub.id)"
               />
               <div class="check-box-icon">
-                <Icon :icon="isSubChecked(sub.id) ? 'solar:check-square-bold' : 'solar:square-linear'" />
+                <Icon :icon="isSubChecked(sub.id) ? 'solar:check-square-bold' : 'solar:square-dashed-linear'" />
               </div>
               <div class="sub-check-info">
                 <div class="sub-check-names">
@@ -92,7 +100,7 @@
         <!-- 核心 3 种目标模式选择 -->
         <div class="form-section">
           <div class="section-label-row">
-            <label class="section-title">选择安装目标位置 (Target Destination)</label>
+            <label class="section-title">{{ t('skills.review.install.destination') }}</label>
           </div>
 
           <div class="target-modes-grid">
@@ -108,9 +116,9 @@
               <div class="card-info">
                 <div class="card-title">
                   <Icon icon="solar:folder-with-files-linear" class="title-glyph" />
-                  <span>放入当前项目内 (Project)</span>
+                  <span>{{ t('skills.review.install.project') }}</span>
                 </div>
-                <p class="card-desc">存放在当前工作区目录中，仅为当前项目生效。可选择是否提交进 Git。</p>
+                <p class="card-desc">{{ t('skills.review.install.projectHint') }}</p>
               </div>
             </div>
 
@@ -126,9 +134,9 @@
               <div class="card-info">
                 <div class="card-title">
                   <Icon icon="solar:devices-linear" class="title-glyph" />
-                  <span>对应特定 Agent 的目录</span>
+                  <span>{{ t('skills.review.install.agent') }}</span>
                 </div>
-                <p class="card-desc">针对 Antigravity、Claude Code、Cursor 等特定工具安装到对应全局路径。</p>
+                <p class="card-desc">{{ t('skills.review.install.agentHint') }}</p>
               </div>
             </div>
 
@@ -144,9 +152,9 @@
               <div class="card-info">
                 <div class="card-title">
                   <Icon icon="solar:global-linear" class="title-glyph" />
-                  <span>全局通用 (Universal)</span>
+                  <span>{{ t('skills.review.install.global') }}</span>
                 </div>
-                <p class="card-desc">存入通用目录 (~/.agents/skills)，本机所有支持标准 Skills 的 Agent 均可免配置共享。</p>
+                <p class="card-desc">{{ t('skills.review.install.globalHint') }}</p>
               </div>
             </div>
           </div>
@@ -155,9 +163,9 @@
         <!-- 模式 1 补充设置：项目路径与 Git 策略 -->
         <div v-if="localPref.targetMode === 'project'" class="sub-config-box">
           <div class="project-path-display">
-            <span class="path-label">目标项目工作区:</span>
+            <span class="path-label">{{ t('skills.review.install.projectPath') }}</span>
             <span class="path-value" :title="activeProjectCwd">
-              {{ activeProjectCwd || '未检测到项目目录，请先打开工程' }}
+              {{ activeProjectCwd || t('skills.review.install.noProject') }}
             </span>
           </div>
 
@@ -165,8 +173,8 @@
             <label class="gitignore-label">
               <input v-model="localPref.addToGitignore" type="checkbox" class="lumina-checkbox" />
               <span class="checkbox-text-group">
-                <span class="checkbox-title">自动追加到 .gitignore (推荐个人使用)</span>
-                <span class="checkbox-desc">自动将 .agents/skills/ 写入 .gitignore，防止个人技能污染团队 Git 提交树。</span>
+                <span class="checkbox-title">{{ t('skills.review.install.gitignore') }}</span>
+                <span class="checkbox-desc">{{ t('skills.review.install.gitignoreHint') }}</span>
               </span>
             </label>
           </div>
@@ -175,7 +183,7 @@
         <!-- 模式 2 补充设置：多 Agent 勾选与全选智能校验 -->
         <div v-if="localPref.targetMode === 'specific_agent'" class="sub-config-box">
           <div class="agent-select-header">
-            <span class="path-label">勾选要安装到的具体 Agent:</span>
+            <span class="path-label">{{ t('skills.review.install.chooseAgents') }}</span>
           </div>
 
           <div class="agents-checkbox-row">
@@ -200,14 +208,14 @@
           <div v-if="isAllAgentsSelected" class="all-agents-hint-banner">
             <Icon icon="solar:lightbulb-linear" class="hint-icon" />
             <div class="hint-text">
-              <span>已勾选所有 Agent，建议直接选择<strong>【全局通用】</strong>，所有工具均可自动识别，无需在各目录重复克隆。</span>
+              <span>{{ t('skills.review.install.allAgentsHint') }}</span>
             </div>
             <button
               type="button"
               class="switch-global-btn"
               @click="localPref.targetMode = 'global'"
             >
-              一键设为全局
+              {{ t('skills.review.install.setGlobal') }}
             </button>
           </div>
         </div>
@@ -215,11 +223,11 @@
         <!-- 模式 3 补充说明：全局目录 -->
         <div v-if="localPref.targetMode === 'global'" class="sub-config-box">
           <div class="project-path-display">
-            <span class="path-label">全局通用安装路径:</span>
+            <span class="path-label">{{ t('skills.review.install.globalPath') }}</span>
             <span class="path-value">~/.agents/skills/{{ targetId }}</span>
           </div>
           <p class="global-hint-text">
-            💡 符合 Agentic 开放通用标准，支持 Antigravity、Claude Code、OpenCode、Cline 等跨工具协同共享。
+            {{ t('skills.review.install.globalPathHint') }}
           </p>
         </div>
 
@@ -227,9 +235,24 @@
         <div class="remember-row">
           <label class="remember-label">
             <input v-model="localPref.remember" type="checkbox" class="lumina-checkbox" />
-            <span>记住此项目的偏好，下次安装直接一键完成</span>
+            <span>{{ t('skills.review.install.remember') }}</span>
           </label>
         </div>
+      </div>
+
+      <div v-if="exploreStore.installProgress" class="install-feedback" :class="{ 'install-feedback--error': exploreStore.installError }" role="status" aria-live="polite">
+        <div class="install-feedback__heading">
+          <Icon :icon="exploreStore.installError ? 'solar:danger-circle-linear' : 'solar:download-minimalistic-linear'" />
+          <div>
+            <strong>{{ exploreStore.installError ? t('skills.review.install.incomplete') : t('skills.review.install.progress', { current: exploreStore.installCurrent, total: exploreStore.installTotal }) }}</strong>
+            <span>{{ exploreStore.installProgress.message }}</span>
+          </div>
+          <small v-if="exploreStore.installProgress.percent !== null && !exploreStore.installError">{{ exploreStore.installProgress.percent }}%</small>
+        </div>
+        <div v-if="isInstalling" class="install-feedback__track" :class="{ 'install-feedback__track--indeterminate': exploreStore.installProgress.percent === null }">
+          <span :style="exploreStore.installProgress.percent === null ? undefined : { width: `${exploreStore.installProgress.percent}%` }"></span>
+        </div>
+        <p v-if="exploreStore.installError" class="install-feedback__error">{{ exploreStore.installError }}</p>
       </div>
 
       <!-- Sheet Footer Actions -->
@@ -253,7 +276,7 @@
             :icon="isInstalling ? 'solar:refresh-linear' : 'solar:cloud-download-linear'"
             :class="{ 'spin-glyph': isInstalling }"
           />
-          <span>{{ isInstalling ? '正在装配…' : '确认安装并生效' }}</span>
+          <span>{{ isInstalling ? t('skills.installingBtn') : t('skills.installConfirmBtn') }}</span>
         </button>
       </footer>
     </div>
@@ -312,10 +335,10 @@ const targetName = computed(() => {
 })
 
 const modalTitle = computed(() => {
-  if (isPipeline.value) return '装配全流程流水线套餐'
-  if (exploreStore.pendingSubSkill) return '单独装配独立子技能'
-  if (exploreStore.pendingSkill?.isBundle) return '装配多技能合集'
-  return '安装技能至 Agent'
+  if (isPipeline.value) return t('skills.review.install.pipelineTitle')
+  if (exploreStore.pendingSubSkill) return t('skills.review.install.subskillTitle')
+  if (exploreStore.pendingSkill?.isBundle) return t('skills.review.install.bundleTitle')
+  return t('skills.installDialogTitle')
 })
 
 const pipelineSkillsCount = computed(() => {
@@ -326,7 +349,8 @@ const isInstalling = computed(() => exploreStore.installingIds.length > 0)
 
 const availableAgents = [
   { key: 'antigravity', name: 'Antigravity', icon: 'solar:magic-stick-3-linear' },
-  { key: 'claude', name: 'Claude Code', icon: 'solar:terminal-linear' },
+  { key: 'claude', name: 'Claude Code', icon: 'solar:code-square-linear' },
+  { key: 'codex', name: 'Codex', icon: 'solar:code-linear' },
   { key: 'cursor', name: 'Cursor', icon: 'solar:code-file-linear' },
   { key: 'trae', name: 'Trae', icon: 'solar:laptop-minimalistic-linear' },
 ]
@@ -392,15 +416,85 @@ async function handleConfirm() {
 
   const res = await exploreStore.executeInstall(currentCwd)
   if (res.success) {
-    message.success(res.message)
-    void skillsStore.scan(currentCwd)
+    const scan = await skillsStore.scan(currentCwd)
+    if (skillsStore.errorMessage) {
+      message.warning(t('skills.review.install.scanFailed', { error: skillsStore.errorMessage }))
+    } else {
+      const scannedPaths = new Set(skillsStore.skills.map(skill => skill.path.replace(/\\/g, '/').toLowerCase()))
+      const missedPaths = res.installedPaths.filter(path => !scannedPaths.has(path.replace(/\\/g, '/').toLowerCase()))
+      if (missedPaths.length) {
+        message.warning(t('skills.review.install.pathsMissed', { count: missedPaths.length }))
+      } else {
+        message.success(t('skills.review.install.scanned', { message: res.message, count: scan.total }))
+      }
+    }
+    const installedPathSet = new Set(res.installedPaths.map(path => path.replace(/\\/g, '/').toLowerCase()))
+    const matchingNames = new Set(skillsStore.skills
+      .filter(skill => installedPathSet.has(skill.path.replace(/\\/g, '/').toLowerCase()))
+      .map(skill => skill.name))
+    skillsStore.revealInstalledSkills(matchingNames.size === 1 ? [...matchingNames][0] : '')
+    exploreStore.activeMainTab = 'installed'
   } else {
-    message.error(res.message)
+    message.error(t('skills.review.install.failedHint'))
   }
 }
 </script>
 
 <style scoped lang="scss">
+.install-feedback {
+  background: var(--lumina-surface-secondary);
+  border-top: 0.5px solid var(--lumina-separator);
+  display: grid;
+  gap: 8px;
+  padding: 12px 20px;
+}
+.install-feedback__heading {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+
+  > svg { color: var(--lumina-primary); font-size: 18px; flex-shrink: 0; }
+  > div { display: grid; flex: 1; gap: 2px; min-width: 0; }
+  strong { font-size: 12px; }
+  span { color: var(--lumina-text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  small { color: var(--lumina-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
+}
+.install-feedback__track {
+  background: var(--lumina-fill-tertiary);
+  border-radius: 999px;
+  height: 4px;
+  overflow: hidden;
+
+  span { background: var(--lumina-primary); border-radius: inherit; display: block; height: 100%; transition: width 180ms ease; }
+}
+.install-feedback__track--indeterminate span { animation: install-progress 1.4s ease-in-out infinite; width: 35%; }
+.install-feedback--error .install-feedback__heading > svg { color: var(--lumina-danger); }
+.install-feedback__error {
+  color: var(--lumina-danger);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 90px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@keyframes install-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(300%); }
+}
+
+.install-source-note {
+  align-items: center;
+  border-bottom: 0.5px solid var(--lumina-separator);
+  color: var(--lumina-text-secondary);
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+  overflow-wrap: anywhere;
+  padding: 8px 18px;
+}
+
 .install-sheet-modal {
   background: var(--lumina-surface-elevated, #ffffff);
   border: 0.5px solid var(--lumina-separator-strong);

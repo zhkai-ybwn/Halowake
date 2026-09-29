@@ -4,6 +4,7 @@ import {
   checkSkillsUpdates,
   openSkillFolder,
   scanAgentSkills,
+  uninstallAgentSkill,
   updateAgentSkill,
   type AgentSkill,
   type SkillUpdateResult,
@@ -50,11 +51,15 @@ export const useSkillsStore = defineStore('skills', () => {
   const loading = ref(false)
   const checkingUpdates = ref(false)
   const updatingPaths = ref<string[]>([])
+  const uninstallingPaths = ref<string[]>([])
   const modalVisible = ref(false)
   const searchQuery = ref('')
   const selectedCategory = ref<string>('all')
   const lastCheckTime = ref<number | null>(null)
   const errorMessage = ref<string | null>(null)
+  const installationRevealCount = ref(0)
+  const installationRevealQuery = ref('')
+  let scanRequestId = 0
 
   const updateCount = computed(() => skills.value.filter(s => s.hasUpdate).length)
   const hasUpdates = computed(() => updateCount.value > 0)
@@ -113,11 +118,15 @@ export const useSkillsStore = defineStore('skills', () => {
   })
 
   async function scan(projectCwd?: string) {
+    const requestId = ++scanRequestId
     loading.value = true
     errorMessage.value = null
     const prevIds = new Set(skills.value.map(s => s.id))
     try {
       const scanned = await scanAgentSkills(projectCwd)
+      if (requestId !== scanRequestId) {
+        return { total: skills.value.length, newCount: 0, newSkills: [] }
+      }
       // 保留已有的更新状态（如果存在）
       const updateMap = new Map(skills.value.map(s => [s.id, s.hasUpdate]))
       const summaryMap = new Map(skills.value.map(s => [s.id, s.updateSummary]))
@@ -134,11 +143,14 @@ export const useSkillsStore = defineStore('skills', () => {
       skills.value = scanned
       return { total: scanned.length, newCount: newSkills.length, newSkills }
     } catch (err: unknown) {
+      if (requestId !== scanRequestId) {
+        return { total: skills.value.length, newCount: 0, newSkills: [] }
+      }
       console.warn('Failed to scan agent skills:', err)
       errorMessage.value = String(err)
       return { total: skills.value.length, newCount: 0, newSkills: [] }
     } finally {
-      loading.value = false
+      if (requestId === scanRequestId) loading.value = false
     }
   }
 
@@ -207,6 +219,17 @@ export const useSkillsStore = defineStore('skills', () => {
     return results
   }
 
+  async function uninstallSingle(skill: AgentSkill, projectCwd?: string): Promise<void> {
+    if (uninstallingPaths.value.includes(skill.path)) return
+    uninstallingPaths.value.push(skill.path)
+    try {
+      await uninstallAgentSkill(skill.path, projectCwd)
+      await scan(projectCwd)
+    } finally {
+      uninstallingPaths.value = uninstallingPaths.value.filter(path => path !== skill.path)
+    }
+  }
+
   async function openFolder(path: string) {
     try {
       await openSkillFolder(path)
@@ -223,16 +246,24 @@ export const useSkillsStore = defineStore('skills', () => {
     modalVisible.value = false
   }
 
+  function revealInstalledSkills(query = '') {
+    installationRevealQuery.value = query
+    installationRevealCount.value++
+  }
+
   return {
     skills,
     loading,
     checkingUpdates,
     updatingPaths,
+    uninstallingPaths,
     modalVisible,
     searchQuery,
     selectedCategory,
     lastCheckTime,
     errorMessage,
+    installationRevealCount,
+    installationRevealQuery,
     updateCount,
     hasUpdates,
     availableCategories,
@@ -242,8 +273,10 @@ export const useSkillsStore = defineStore('skills', () => {
     checkUpdates,
     updateSingle,
     updateAll,
+    uninstallSingle,
     openFolder,
     openModal,
     closeModal,
+    revealInstalledSkills,
   }
 })

@@ -21,7 +21,7 @@
               </div>
               <div class="process-subtitle-row">
                 <span class="process-command-preview" :title="description">
-                  <Icon icon="solar:terminal-linear" class="sub-icon" />
+                  <Icon icon="solar:code-square-linear" class="sub-icon" />
                   {{ description }}
                 </span>
               </div>
@@ -99,7 +99,7 @@
           </section>
 
           <section v-else class="process-empty">
-            <Icon icon="solar:terminal-linear" class="empty-icon" />
+            <Icon icon="solar:code-square-linear" class="empty-icon" />
             <strong>{{ t('devdock.processes.emptyLogsTitle') }}</strong>
             <p>{{ t('devdock.processes.emptyLogsDescription') }}</p>
           </section>

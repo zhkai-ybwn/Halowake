@@ -16,7 +16,7 @@
           </div>
           <div class="header-title-box">
             <h3 class="drawer-skill-title">{{ pipeline.title }}</h3>
-            <span class="drawer-subtitle">SDLC 全流程实战协同玩法指引</span>
+            <span class="drawer-subtitle">{{ t('skills.review.detail.pipelineSubtitle') }}</span>
           </div>
         </div>
 
@@ -36,7 +36,7 @@
           <div class="scenario-banner">
             <Icon icon="solar:target-bold" class="target-icon" />
             <div class="scenario-content">
-              <span class="scenario-title">目标适用场景</span>
+              <span class="scenario-title">{{ t('skills.review.detail.scenario') }}</span>
               <p class="scenario-text">{{ pipeline.targetScenario }}</p>
             </div>
           </div>
@@ -47,7 +47,7 @@
         <div class="drawer-section">
           <div class="section-title-row">
             <Icon icon="solar:route-linear" class="sec-icon" />
-            <h5 class="sec-heading">全流程协同操作链路 (Step-by-Step Playbook)</h5>
+            <h5 class="sec-heading">{{ t('skills.review.detail.playbook') }}</h5>
           </div>
 
           <div class="playbook-steps-list">
@@ -66,14 +66,14 @@
                 <p class="step-how-to-act">{{ step.howToAct }}</p>
                 <div class="step-prompt-box">
                   <div class="prompt-header">
-                    <span class="prompt-label">推荐 Prompt 示范:</span>
+                    <span class="prompt-label">{{ t('skills.review.detail.prompt') }}</span>
                     <button
                       type="button"
                       class="copy-mini-btn"
                       @click="handleCopy(step.promptExample)"
                     >
                       <Icon icon="solar:copy-linear" />
-                      <span>复制</span>
+                      <span>{{ t('skills.review.detail.copy') }}</span>
                     </button>
                   </div>
                   <pre class="prompt-snippet">{{ step.promptExample }}</pre>
@@ -93,9 +93,9 @@
 
         <!-- 评分与信誉指标卡片 -->
         <!-- 评分与信誉指标卡片 (仅当存在客观真实指标时渲染) -->
-        <div v-if="skill.metrics || skill.halowakeScore" class="metrics-dashboard-card">
+        <div v-if="(isCommunityIndex && skill.stars > 0) || (!isCommunityIndex && (skill.metrics || skill.halowakeScore))" class="metrics-dashboard-card">
           <div class="dashboard-header">
-            <span class="dashboard-title">{{ t('skills.detailScore') }}</span>
+            <span class="dashboard-title">{{ isCommunityIndex ? t('skills.review.detail.indexPopularity') : t('skills.detailScore') }}</span>
             <SkillScoreBadge v-if="skill.halowakeScore" :score="skill.halowakeScore" :badge="skill.badge" />
           </div>
 
@@ -104,23 +104,23 @@
               <span class="metric-label">GitHub Stars</span>
               <span class="metric-val">⭐ {{ formatNumber(skill.metrics.githubStars) }}</span>
             </div>
-            <div v-if="skill.metrics.forks !== undefined" class="metric-item">
+            <div v-if="!isCommunityIndex && skill.metrics.forks !== undefined" class="metric-item">
               <span class="metric-label">Forks</span>
               <span class="metric-val">{{ formatNumber(skill.metrics.forks) }}</span>
             </div>
-            <div v-if="skill.metrics.lastCommitDaysAgo !== undefined" class="metric-item">
-              <span class="metric-label">最近更新</span>
-              <span class="metric-val highlight-green">{{ skill.metrics.lastCommitDaysAgo }} 天前</span>
+            <div v-if="!isCommunityIndex && skill.metrics.lastCommitDaysAgo !== undefined" class="metric-item">
+              <span class="metric-label">{{ t('skills.review.detail.lastUpdated') }}</span>
+              <span class="metric-val highlight-green">{{ t('skills.review.detail.daysAgo', { count: skill.metrics.lastCommitDaysAgo }) }}</span>
             </div>
-            <div v-if="skill.metrics.issueCloseRate !== undefined" class="metric-item">
-              <span class="metric-label">Issue 解决率</span>
+            <div v-if="!isCommunityIndex && skill.metrics.issueCloseRate !== undefined" class="metric-item">
+              <span class="metric-label">{{ t('skills.review.detail.issueRate') }}</span>
               <span class="metric-val">{{ skill.metrics.issueCloseRate }}%</span>
             </div>
           </div>
 
           <div v-if="skill.metrics?.securityAuditPassed" class="security-status-row">
             <Icon icon="solar:shield-check-bold" class="security-glyph" />
-            <span>自动化静态安全门禁审计通过，未检测到破坏性脚本</span>
+            <span>{{ t('skills.review.detail.security') }}</span>
           </div>
         </div>
 
@@ -128,7 +128,7 @@
         <div class="drawer-section">
           <div class="section-title-row">
             <Icon icon="solar:tag-linear" class="sec-icon" />
-            <h5 class="sec-heading">自定义分类与业务标签 (User Custom Tags)</h5>
+            <h5 class="sec-heading">{{ t('skills.review.detail.myTags') }}</h5>
           </div>
           <div class="custom-tags-editor">
             <div class="existing-tags-row">
@@ -147,7 +147,7 @@
                 </button>
               </span>
               <span v-if="currentSkillCustomTags.length === 0" class="no-tags-hint">
-                暂无自定义标签，可在右侧添加
+                {{ t('skills.review.detail.noTags') }}
               </span>
             </div>
 
@@ -156,7 +156,7 @@
                 v-model="newTagInput"
                 type="text"
                 class="tag-input-field"
-                placeholder="输入新标签名 (如: 前端必备、林洋项目)..."
+                :placeholder="t('skills.review.detail.tagName')"
                 @keydown.enter.prevent="handleAddTag"
               />
               <button
@@ -165,7 +165,7 @@
                 :disabled="!newTagInput.trim()"
                 @click="handleAddTag"
               >
-                + 添加分类
+                {{ t('skills.review.detail.addCategory') }}
               </button>
             </div>
           </div>
@@ -178,8 +178,53 @@
             <h5 class="sec-heading">{{ t('skills.detailHowToUse') }}</h5>
           </div>
           <div class="instruction-box">
-            <p class="instruction-text">{{ skill.howToUse }}</p>
+            <div v-if="skill.usageGuide" class="usage-summary">
+              <p class="usage-provenance">{{ t('skills.review.detail.provenance', { date: new Date(skill.usageGuide.extractedAt).toLocaleDateString(locale) }) }}</p>
+              <p v-if="skill.usageGuide.summary !== skill.usageGuide.trigger" class="usage-overview">{{ skill.usageGuide.summary }}</p>
+              <div v-if="skill.usageGuide.trigger" class="usage-field">
+                <strong>{{ t('skills.review.detail.trigger') }}</strong>
+                <p>{{ skill.usageGuide.trigger }}</p>
+              </div>
+              <div v-if="skill.usageGuide.steps.length" class="usage-field">
+                <strong>{{ t('skills.review.detail.steps') }}</strong>
+                <ol><li v-for="(step, index) in skill.usageGuide.steps" :key="index">{{ step }}</li></ol>
+              </div>
+              <div v-if="skill.usageGuide.example" class="usage-field">
+                <strong>{{ t('skills.review.detail.example') }}</strong>
+                <p>{{ skill.usageGuide.example }}</p>
+              </div>
+            </div>
+            <p v-else-if="sourceGuideLoading" class="instruction-text">{{ t('skills.review.detail.loadingGuide') }}</p>
+            <template v-else-if="sourceGuide">
+              <div v-if="sourceGuides.length > 1" class="source-guide-switch">
+                <button
+                  v-for="guide in sourceGuides"
+                  :key="guide.kind"
+                  type="button"
+                  :class="{ active: selectedGuideKind === guide.kind }"
+                  :aria-pressed="selectedGuideKind === guide.kind"
+                  @click="selectedGuideKind = guide.kind"
+                >{{ guide.kind }}</button>
+              </div>
+              <p class="instruction-text">{{ t('skills.review.detail.guideSource', { path: sourceGuide.path }) }}{{ sourceGuide.kind === 'README' && !sourceGuides.some(guide => guide.kind === 'SKILL.md') ? t('skills.review.detail.repositoryReadme') : '' }}</p>
+              <div class="source-guide-preview" @click="handleGuideLinkClick" v-html="renderedGuide.html" />
+              <p v-if="renderedGuide.truncated" class="instruction-text">{{ t('skills.review.detail.guideTruncated') }}</p>
+            </template>
+            <p v-else class="instruction-text">{{ sourceGuideError || t('skills.review.detail.noGuide') }}</p>
+            <button v-if="!skill.usageGuide && !sourceGuideLoading && sourceGuideError" type="button" class="source-retry" @click="loadGuides(skill)">{{ t('skills.review.detail.retryGuide') }}</button>
+            <p v-if="!skill.usageGuide && !sourceGuide && !sourceGuideLoading && !isUsageUnknown" class="instruction-text">{{ t('skills.review.detail.indexHint', { hint: skill.howToUse }) }}</p>
           </div>
+        </div>
+
+        <div class="drawer-section">
+          <div class="section-title-row">
+            <Icon icon="solar:link-round-linear" class="sec-icon" />
+            <h5 class="sec-heading">{{ t('skills.review.detail.sourceAddresses') }}</h5>
+          </div>
+          <button type="button" class="source-address" :title="skill.gitUrl" @click="openSourceUrl(skill.gitUrl)">{{ skill.gitUrl }}</button>
+          <button v-if="sourceDirectoryUrl" type="button" class="source-address" :title="sourceDirectoryUrl" @click="openSourceUrl(sourceDirectoryUrl)">{{ t('skills.review.detail.skillDirectory', { url: sourceDirectoryUrl }) }}</button>
+          <button v-if="skill.usageGuide" type="button" class="source-address" :title="skill.usageGuide.sourceUrl" @click="openSourceUrl(skill.usageGuide.sourceUrl)">SKILL.md：{{ skill.usageGuide.sourceUrl }}</button>
+          <button v-for="guide in sourceGuides" :key="guide.url" type="button" class="source-address" :title="guide.url" @click="openSourceUrl(guide.url)">{{ guide.kind }}：{{ guide.url }}</button>
         </div>
 
         <!-- 推荐提示词示例 -->
@@ -189,7 +234,7 @@
             <h5 class="sec-heading">{{ t('skills.detailPromptExample') }}</h5>
             <button type="button" class="copy-pill-btn" @click="handleCopy(skill.promptExample)">
               <Icon icon="solar:copy-linear" />
-              <span>{{ copied ? '已复制' : '复制' }}</span>
+              <span>{{ copied ? t('skills.review.detail.copied') : t('skills.review.detail.copy') }}</span>
             </button>
           </div>
           <pre class="prompt-code-block">{{ skill.promptExample }}</pre>
@@ -216,37 +261,6 @@
           </div>
         </div>
 
-        <!-- 支持的 Agent -->
-        <div class="drawer-section">
-          <div class="section-title-row">
-            <Icon icon="solar:devices-linear" class="sec-icon" />
-            <h5 class="sec-heading">{{ t('skills.detailCompatibleAgents') }}</h5>
-          </div>
-          <AgentPills :agents="skill.compatibleAgents" />
-        </div>
-
-        <!-- 用户体验打分互动 -->
-        <div class="drawer-section user-rating-section">
-          <div class="section-title-row">
-            <Icon icon="solar:like-shapes-linear" class="sec-icon" />
-            <h5 class="sec-heading">{{ t('skills.detailRateTitle') }}</h5>
-          </div>
-          <div class="rating-stars-interactive">
-            <button
-              v-for="starIndex in 5"
-              :key="starIndex"
-              type="button"
-              class="star-interact-btn"
-              :class="{ active: (skill.userRating || 0) >= starIndex }"
-              @click="handleRate(starIndex)"
-            >
-              ★
-            </button>
-            <span v-if="skill.userRating" class="user-rated-text">
-              已评价 {{ skill.userRating }} 星
-            </span>
-          </div>
-        </div>
       </div>
 
       <!-- 抽屉底部动作栏 -->
@@ -254,7 +268,7 @@
         <!-- A. 流水线模式底部动作 -->
         <div v-if="pipeline" class="drawer-footer-actions">
           <div class="pipeline-status-text">
-            <span>共包含 {{ pipeline.skills.length }} 个全流程协同技能</span>
+            <span>{{ t('skills.review.detail.pipelineCount', { count: pipeline.skills.length }) }}</span>
           </div>
           <button
             type="button"
@@ -262,7 +276,7 @@
             @click="exploreStore.openPipelineInstallDialog(pipeline)"
           >
             <Icon icon="solar:rocket-2-linear" />
-            <span>装配全套流水线</span>
+            <span>{{ t('skills.review.detail.installPipeline') }}</span>
           </button>
         </div>
 
@@ -304,25 +318,71 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NDrawer, NDrawerContent, useMessage } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillExploreStore } from '@/stores/skill-explore'
 import { useSkillsStore } from '@/stores/skills'
+import { openExternalUrl } from '@/services/app-service'
+import { loadSkillSourceGuides, type SkillSourceGuide } from '@/services/skills/skill-source-guide'
+import { renderSkillMarkdownPreview } from '@/services/skills/skill-markdown-preview'
 import SkillStageBadge from '../common/SkillStageBadge.vue'
 import SkillScoreBadge from '../common/SkillScoreBadge.vue'
-import AgentPills from '../common/AgentPills.vue'
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 const message = useMessage()
 const exploreStore = useSkillExploreStore()
 const skillsStore = useSkillsStore()
 
 const skill = computed(() => exploreStore.activeDetailSkill)
 const pipeline = computed(() => exploreStore.activeDetailPipeline)
+const sourceDirectoryUrl = computed(() => {
+  if (!skill.value?.subPath || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(skill.value.gitUrl)) return ''
+  const path = skill.value.subPath.split('/').filter(Boolean)
+  if (path.some(part => part === '.' || part === '..')) return ''
+  return `${skill.value.gitUrl.replace(/\/$/, '')}/tree/HEAD/${path.map(encodeURIComponent).join('/')}`
+})
+const isCommunityIndex = computed(() => skill.value?.sourceId === 'agent-skills-corpus')
+const isUsageUnknown = computed(() => {
+  const guidance = skill.value?.howToUse || ''
+  return isCommunityIndex.value || !guidance || guidance.startsWith('在对应 Agent 会话或工程中启用此技能') ||
+    guidance.startsWith('本技能为多技能集合包') || guidance.startsWith('未收录触发条件')
+})
 const copied = ref(false)
 const newTagInput = ref('')
+const sourceGuides = ref<SkillSourceGuide[]>([])
+const selectedGuideKind = ref<SkillSourceGuide['kind']>('SKILL.md')
+const sourceGuide = computed(() => sourceGuides.value.find(guide => guide.kind === selectedGuideKind.value) || sourceGuides.value[0] || null)
+const sourceGuideLoading = ref(false)
+const sourceGuideError = ref('')
+const renderedGuide = computed(() => sourceGuide.value
+  ? renderSkillMarkdownPreview(sourceGuide.value)
+  : { html: '', truncated: false })
+let guideRequest = 0
+
+async function loadGuides(current: typeof skill.value) {
+  const request = ++guideRequest
+  sourceGuides.value = []
+  selectedGuideKind.value = 'SKILL.md'
+  sourceGuideError.value = ''
+  sourceGuideLoading.value = Boolean(current)
+  if (!current) return
+  if (current.usageGuide) {
+    sourceGuideLoading.value = false
+    return
+  }
+  try {
+    const guides = await loadSkillSourceGuides(current)
+    if (request === guideRequest) sourceGuides.value = guides
+  } catch (error) {
+    if (request === guideRequest) sourceGuideError.value = t('skills.review.detail.guideError', { error: error instanceof Error ? error.message : String(error) })
+  } finally {
+    if (request === guideRequest) sourceGuideLoading.value = false
+  }
+}
+
+watch(skill, current => { void loadGuides(current) })
 
 const isInstalled = computed(() => {
   if (!skill.value) return false
@@ -351,26 +411,47 @@ function handleAddTag() {
   if (!val || !skill.value) return
   exploreStore.addSkillCustomCategory(skill.value.id, val)
   newTagInput.value = ''
-  message.success(`已添加分类: ${val}`)
+  message.success(t('skills.review.detail.categoryAdded', { tag: val }))
 }
 
 async function handleCopy(text: string) {
   try {
     await navigator.clipboard.writeText(text)
     copied.value = true
-    message.success('已复制到剪贴板')
+    message.success(t('skills.review.detail.copyDone'))
     setTimeout(() => {
       copied.value = false
     }, 2000)
   } catch {
-    message.error('复制失败')
+    message.error(t('skills.review.detail.copyFailed'))
   }
 }
 
-function handleRate(rating: number) {
-  if (!skill.value) return
-  exploreStore.rateSkill(skill.value.id, rating)
-  message.success(`感谢评价：${rating} 星`)
+async function openSourceUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') throw new Error('来源地址无效')
+    await openExternalUrl(parsed.href)
+  } catch {
+    message.error(t('skills.review.detail.sourceOpenFailed'))
+  }
+}
+
+async function handleGuideLinkClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const link = target.closest('a[href]')
+  if (!link) return
+  event.preventDefault()
+  const href = link.getAttribute('href')
+  if (!href) return
+  try {
+    const parsed = new URL(href)
+    if (parsed.protocol !== 'https:') throw new Error('文档链接无效')
+    await openExternalUrl(parsed.href)
+  } catch {
+    message.error(t('skills.review.detail.linkOpenFailed'))
+  }
 }
 </script>
 
@@ -379,6 +460,85 @@ function handleRate(rating: number) {
   align-items: center;
   display: flex;
   gap: 10px;
+}
+
+.source-guide-preview {
+  color: var(--lumina-text);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0;
+  max-height: 440px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.source-guide-preview :deep(:first-child) { margin-top: 0; }
+.source-guide-preview :deep(:last-child) { margin-bottom: 0; }
+.source-guide-preview :deep(h1),
+.source-guide-preview :deep(h2),
+.source-guide-preview :deep(h3),
+.source-guide-preview :deep(h4) { color: var(--lumina-text); line-height: 1.35; margin: 16px 0 7px; }
+.source-guide-preview :deep(h1) { font-size: 17px; }
+.source-guide-preview :deep(h2) { font-size: 15px; }
+.source-guide-preview :deep(h3),
+.source-guide-preview :deep(h4) { font-size: 13px; }
+.source-guide-preview :deep(p),
+.source-guide-preview :deep(ul),
+.source-guide-preview :deep(ol),
+.source-guide-preview :deep(blockquote) { margin: 7px 0; }
+.source-guide-preview :deep(ul),
+.source-guide-preview :deep(ol) { padding-left: 20px; }
+.source-guide-preview :deep(pre) {
+  background: var(--lumina-surface-elevated);
+  border: 1px solid var(--lumina-separator);
+  border-radius: 6px;
+  overflow-x: auto;
+  padding: 9px 10px;
+}
+.source-guide-preview :deep(code) { font-family: var(--lumina-font-mono, monospace); font-size: 11px; }
+.source-guide-preview :deep(:not(pre) > code) { background: var(--lumina-control-hover); border-radius: 3px; padding: 1px 4px; }
+.source-guide-preview :deep(a) { color: var(--lumina-primary); cursor: pointer; text-decoration: underline; }
+.source-guide-preview :deep(img) { height: auto; max-width: 100%; }
+.source-guide-preview :deep(table) { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+.source-guide-preview :deep(th),
+.source-guide-preview :deep(td) { border: 1px solid var(--lumina-separator); padding: 4px 7px; }
+.source-guide-preview :deep(blockquote) { border-left: 2px solid var(--lumina-separator); color: var(--lumina-text-secondary); padding-left: 10px; }
+.source-guide-switch {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.source-guide-switch button {
+  background: transparent;
+  border: 1px solid var(--lumina-separator);
+  border-radius: 5px;
+  color: var(--lumina-text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.source-guide-switch button.active {
+  background: var(--lumina-primary-soft);
+  border-color: var(--lumina-primary);
+  color: var(--lumina-primary);
+}
+.source-address {
+  background: transparent;
+  border: 0;
+  color: var(--lumina-primary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-align: left;
+}
+.source-address { overflow-wrap: anywhere; text-decoration: underline; }
+.source-retry {
+  background: transparent;
+  border: 0;
+  color: var(--lumina-primary);
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 0;
 }
 
 .header-icon-pill {
@@ -754,6 +914,14 @@ function handleRate(rating: number) {
   padding: 8px 12px;
 }
 
+.usage-summary { display: flex; flex-direction: column; gap: 9px; }
+.usage-provenance { color: var(--lumina-text-tertiary); font-size: 11px; margin: 0; }
+.usage-overview { color: var(--lumina-text); font-size: 12px; line-height: 1.55; margin: 0; }
+.usage-field strong { color: var(--lumina-text); font-size: 11px; }
+.usage-field p { color: var(--lumina-text-secondary); font-size: 12px; line-height: 1.55; margin: 3px 0 0; }
+.usage-field ol { color: var(--lumina-text-secondary); font-size: 12px; line-height: 1.55; margin: 4px 0 0; padding-left: 18px; }
+.usage-field li + li { margin-top: 4px; }
+
 .instruction-text {
   color: var(--lumina-text);
   font-size: 12px;
@@ -826,37 +994,6 @@ function handleRate(rating: number) {
     font-size: 11px;
     font-weight: 600;
   }
-}
-
-.rating-stars-interactive {
-  align-items: center;
-  display: flex;
-  gap: 4px;
-}
-
-.star-interact-btn {
-  background: none;
-  border: none;
-  color: var(--lumina-text-tertiary);
-  cursor: pointer;
-  font-size: 20px;
-  padding: 0 2px;
-  transition: transform 100ms, color 120ms;
-
-  &:hover {
-    color: var(--lumina-warning, #b76500);
-    transform: scale(1.15);
-  }
-
-  &.active {
-    color: var(--lumina-warning, #b76500);
-  }
-}
-
-.user-rated-text {
-  color: var(--lumina-warning, #b76500);
-  font-size: 11px;
-  margin-left: 8px;
 }
 
 .drawer-footer-actions {

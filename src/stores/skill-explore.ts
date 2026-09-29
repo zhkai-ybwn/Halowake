@@ -1,27 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
-  DEFAULT_REGISTRY_URL,
   FALLBACK_SEED_PIPELINES,
   FALLBACK_SEED_SKILLS,
   getLastSyncTime,
   getLocalInstallPreference,
-  getLocalRatings,
   getLocalStars,
-  getRemoteRegistryUrl,
-  getSavedGitHubToken,
   getUserCustomCategories,
   loadHarvestedCatalogSkills,
   loadHarvestedPipelines,
   removeUserCustomCategory,
   saveLocalInstallPreference,
-  saveLocalRating,
   saveLocalStars,
-  saveRemoteRegistryUrl,
-  saveSavedGitHubToken,
   saveUserCustomCategory,
   syncOnlineRegistry,
-  testRegistryConnection,
 } from '@/services/skills/skill-catalog-service'
 import {
   installAgentSkill,
@@ -30,33 +22,29 @@ import type {
   AgentSkill,
   CatalogSkill,
   InstallPreference,
+  InstallSkillProgress,
   SdlcStage,
   SkillPipeline,
-  SkillSource,
   SubSkillItem,
 } from '@/types/skills'
+import { skillCategoryLabel } from '@/utils/skill-category-label'
 
 export const useSkillExploreStore = defineStore('skillExplore', () => {
   // 顶层主标签：已安装列表 vs 技能探索与流水线
-  const activeMainTab = ref<'installed' | 'explore'>('installed')
+  const activeMainTab = ref<'installed' | 'explore' | 'history'>('installed')
 
   // 本地星标与评分缓存
   const starredIds = ref<Set<string>>(getLocalStars())
-  const userRatings = ref<Record<string, number>>(getLocalRatings())
   const userCustomCategories = ref<Record<string, string[]>>(getUserCustomCategories())
   const lastSyncTime = ref<number | null>(getLastSyncTime())
   const isSyncing = ref(false)
   const syncStatusMessage = ref('')
-  const registryUrl = ref<string>(getRemoteRegistryUrl())
 
   // 基础数据与数据源
   function decorateSkills(skills: CatalogSkill[]): CatalogSkill[] {
     return skills.map(s => {
       const clone = { ...s }
       clone.isStar = starredIds.value.has(s.id)
-      if (userRatings.value[s.id] !== undefined) {
-        clone.userRating = userRatings.value[s.id]
-      }
       return clone
     })
   }
@@ -65,9 +53,6 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     decorateSkills(FALLBACK_SEED_SKILLS.map(skill => ({ ...skill })))
   )
   const pipelines = ref<SkillPipeline[]>(FALLBACK_SEED_PIPELINES)
-  const skillSources = ref<SkillSource[]>([])
-  const sourcesModalVisible = ref(false)
-  const githubToken = ref(getSavedGitHubToken())
 
   // 探索页面的过滤与搜索
   const searchQuery = ref('')
@@ -80,6 +65,10 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
   const selectedBundleSubSkillIds = ref<string[]>([])
   const pendingPipeline = ref<SkillPipeline | null>(null)
   const installingIds = ref<string[]>([])
+  const installProgress = ref<InstallSkillProgress | null>(null)
+  const installError = ref('')
+  const installCurrent = ref(0)
+  const installTotal = ref(0)
   const installPreference = ref<InstallPreference>(getLocalInstallPreference())
 
   // 详情抽屉状态 (支持单技能指引 OR 流水线全流程玩法指引)
@@ -135,17 +124,14 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     }
 
     // 搜索过滤
-    const q = searchQuery.value.trim().toLowerCase()
-    if (q) {
+    const terms = searchQuery.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (terms.length) {
       result = result.filter(s => {
         const customTags = userCustomCategories.value[s.id] || []
-        return (
-          s.name.toLowerCase().includes(q) ||
-          s.titleZh.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q) ||
-          s.tags.some(t => t.toLowerCase().includes(q)) ||
-          customTags.some(t => t.toLowerCase().includes(q))
-        )
+        const searchable = [s.name, s.titleZh, s.description, s.category, skillCategoryLabel(s.category), s.author.name,
+          s.gitUrl, s.subPath || '', s.usageGuide?.summary || '', s.usageGuide?.trigger || '',
+          ...(s.usageGuide?.steps || []), ...s.tags, ...customTags].join(' ').toLowerCase()
+        return terms.every(term => searchable.includes(term))
       })
     }
 
@@ -183,15 +169,6 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     }
   }
 
-  function rateSkill(skillId: string, rating: number) {
-    userRatings.value[skillId] = rating
-    saveLocalRating(skillId, rating)
-    const target = catalogSkills.value.find(s => s.id === skillId)
-    if (target) {
-      target.userRating = rating
-    }
-  }
-
   function addSkillCustomCategory(skillId: string, category: string) {
     saveUserCustomCategory(skillId, category)
     userCustomCategories.value = getUserCustomCategories()
@@ -203,6 +180,8 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
   }
 
   function openInstallDialog(skill: CatalogSkill) {
+    installError.value = ''
+    installProgress.value = null
     pendingSkill.value = skill
     pendingSubSkill.value = null
     pendingPipeline.value = null
@@ -215,6 +194,8 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
   }
 
   function openSubSkillInstallDialog(parentSkill: CatalogSkill, subSkill: SubSkillItem) {
+    installError.value = ''
+    installProgress.value = null
     pendingSkill.value = parentSkill
     pendingSubSkill.value = subSkill
     pendingPipeline.value = null
@@ -223,6 +204,8 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
   }
 
   function openPipelineInstallDialog(pipeline: SkillPipeline) {
+    installError.value = ''
+    installProgress.value = null
     pendingPipeline.value = pipeline
     pendingSkill.value = null
     pendingSubSkill.value = null
@@ -236,6 +219,8 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     pendingSubSkill.value = null
     pendingPipeline.value = null
     selectedBundleSubSkillIds.value = []
+    installProgress.value = null
+    installError.value = ''
   }
 
   function openDetail(skill: CatalogSkill) {
@@ -263,18 +248,17 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     }
   }
 
-  async function syncRegistry(urlOverride?: string): Promise<{ updatedCount: number; totalCount: number; message: string }> {
+  async function syncRegistry(): Promise<{ updatedCount: number; totalCount: number; message: string }> {
     isSyncing.value = true
     try {
-      const targetUrl = urlOverride || registryUrl.value
-      const res = await syncOnlineRegistry(targetUrl)
-      lastSyncTime.value = res.lastSyncAt
+      const res = await syncOnlineRegistry()
+      if (res.success) lastSyncTime.value = res.lastSyncAt
       syncStatusMessage.value = res.message
 
       if (res.skills && res.skills.length > 0) {
         catalogSkills.value = decorateSkills(res.skills)
       }
-      if (res.pipelines && res.pipelines.length > 0) {
+      if (res.success) {
         pipelines.value = res.pipelines
       }
 
@@ -284,40 +268,29 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     }
   }
 
-  function updateRegistryUrl(url: string) {
-    saveRemoteRegistryUrl(url)
-    registryUrl.value = url.trim() || DEFAULT_REGISTRY_URL
-  }
-
-  async function testRegistry(url: string) {
-    return await testRegistryConnection(url)
-  }
-
-  function openSourcesModal() {
-    sourcesModalVisible.value = true
-  }
-
-  function closeSourcesModal() {
-    sourcesModalVisible.value = false
-  }
-
-  function updateGitHubToken(token: string) {
-    saveSavedGitHubToken(token)
-    githubToken.value = token
-  }
-
 
   async function executeInstall(projectCwd?: string): Promise<{
     success: boolean
     message: string
     count: number
+    installedPaths: string[]
   }> {
     const pref = installPreference.value
+    installError.value = ''
+    installProgress.value = { phase: 'preparing', message: '正在准备安装…', percent: null }
+    const reportProgress = (progress: InstallSkillProgress) => { installProgress.value = progress }
+    const fail = (message: string) => {
+      installError.value = message
+      installProgress.value = { phase: 'failed', message: '安装未完成', percent: null }
+      return { success: false, message, count: 0, installedPaths: [] }
+    }
 
     // 1. 如果是单独装配子技能
     if (pendingSubSkill.value && pendingSkill.value) {
       const parent = pendingSkill.value
       const sub = pendingSubSkill.value
+      installCurrent.value = 1
+      installTotal.value = 1
       installingIds.value.push(sub.id)
       try {
         const res = await installAgentSkill({
@@ -329,16 +302,15 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
           addToGitignore: pref.addToGitignore,
           subSkillId: sub.id,
           subPath: sub.subPath,
-        })
-        closeInstallDialog()
+        }, reportProgress)
         if (res.success) {
-          return { success: true, message: `成功单独装配子技能「${sub.titleZh}」`, count: 1 }
+          closeInstallDialog()
+          return { success: true, message: res.installedPaths.length ? `成功单独装配子技能「${sub.titleZh}」` : res.message, count: res.installedPaths.length ? 1 : 0, installedPaths: res.installedPaths }
         } else {
-          return { success: false, message: res.message || '安装失败', count: 0 }
+          return fail(res.message || '安装失败')
         }
       } catch (err) {
-        closeInstallDialog()
-        return { success: false, message: String(err), count: 0 }
+        return fail(err instanceof Error ? err.message : String(err))
       } finally {
         installingIds.value = installingIds.value.filter(id => id !== sub.id)
       }
@@ -348,9 +320,12 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     if (pendingSkill.value?.isBundle && pendingSkill.value.subSkills && selectedBundleSubSkillIds.value.length > 0) {
       const parent = pendingSkill.value
       const selectedSubs = parent.subSkills.filter(s => selectedBundleSubSkillIds.value.includes(s.id))
+      installTotal.value = selectedSubs.length
       let successCount = 0
       let lastError = ''
-      for (const sub of selectedSubs) {
+      const installedPaths: string[] = []
+      for (const [index, sub] of selectedSubs.entries()) {
+        installCurrent.value = index + 1
         if (installingIds.value.includes(sub.id)) continue
         installingIds.value.push(sub.id)
         try {
@@ -363,9 +338,10 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
             addToGitignore: pref.addToGitignore,
             subSkillId: sub.id,
             subPath: sub.subPath,
-          })
+          }, reportProgress)
           if (res.success) {
             successCount++
+            installedPaths.push(...res.installedPaths)
           } else {
             lastError = res.message
           }
@@ -375,13 +351,14 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
           installingIds.value = installingIds.value.filter(id => id !== sub.id)
         }
       }
-      closeInstallDialog()
       if (successCount === selectedSubs.length) {
-        return { success: true, message: `成功装配 ${successCount} 个子技能`, count: successCount }
+        closeInstallDialog()
+        return { success: true, message: `成功装配 ${successCount} 个子技能`, count: successCount, installedPaths }
       } else if (successCount > 0) {
-        return { success: true, message: `成功装配 ${successCount} 个子技能（部分失败: ${lastError}）`, count: successCount }
+        closeInstallDialog()
+        return { success: true, message: `成功装配 ${successCount} 个子技能（部分失败: ${lastError}）`, count: successCount, installedPaths }
       } else {
-        return { success: false, message: lastError || '安装失败', count: 0 }
+        return fail(lastError || '安装失败')
       }
     }
 
@@ -396,26 +373,31 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     }
 
     if (skillsToInstall.length === 0) {
-      return { success: false, message: '未选择待安装技能', count: 0 }
+      return fail('未选择待安装技能')
     }
 
     let successCount = 0
     let lastError = ''
+    const installedPaths: string[] = []
+    installTotal.value = skillsToInstall.length
 
-    for (const skill of skillsToInstall) {
+    for (const [index, skill] of skillsToInstall.entries()) {
+      installCurrent.value = index + 1
       if (installingIds.value.includes(skill.id)) continue
       installingIds.value.push(skill.id)
       try {
         const res = await installAgentSkill({
           skillId: skill.id,
           gitUrl: skill.gitUrl,
+          subPath: skill.subPath,
           targetMode: pref.targetMode,
           targetAgents: pref.targetAgents,
           projectCwd: pref.customProjectPath || projectCwd,
           addToGitignore: pref.addToGitignore,
-        })
+        }, reportProgress)
         if (res.success) {
           successCount++
+          installedPaths.push(...res.installedPaths)
         } else {
           lastError = res.message
         }
@@ -426,33 +408,34 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
       }
     }
 
-    closeInstallDialog()
-
     if (successCount === skillsToInstall.length) {
+      closeInstallDialog()
       return {
         success: true,
         message: `成功安装 ${successCount} 个技能`,
         count: successCount,
+        installedPaths,
       }
     } else if (successCount > 0) {
+      closeInstallDialog()
       return {
         success: true,
         message: `成功安装 ${successCount} 个技能（部分失败: ${lastError}）`,
         count: successCount,
+        installedPaths,
       }
     } else {
-      return {
-        success: false,
-        message: lastError || '安装失败',
-        count: 0,
-      }
+      return fail(lastError || '安装失败')
     }
   }
 
   // 辅助判断某技能是否已在本地安装
   function isSkillInstalled(skillId: string, installedSkills: AgentSkill[]): boolean {
     const clean = skillId.toLowerCase().trim()
-    return installedSkills.some(s => s.id.toLowerCase() === clean || s.name.toLowerCase() === clean)
+    return installedSkills.some(s => {
+      const folderName = s.path.split(/[\\/]/).pop()?.toLowerCase()
+      return folderName === clean || s.id.toLowerCase() === clean
+    })
   }
 
   // 辅助判断流水线是否已全部安装
@@ -478,7 +461,6 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     selectedStage,
     starredIds,
     starredCount,
-    userRatings,
     userCustomCategories,
     allCustomCategories,
     lastSyncTime,
@@ -491,12 +473,15 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     selectedBundleSubSkillIds,
     pendingPipeline,
     installingIds,
+    installProgress,
+    installError,
+    installCurrent,
+    installTotal,
     installPreference,
     detailDrawerVisible,
     activeDetailSkill,
     activeDetailPipeline,
     toggleStar,
-    rateSkill,
     addSkillCustomCategory,
     removeSkillCustomCategory,
     openInstallDialog,
@@ -511,16 +496,6 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     executeInstall,
     isSkillInstalled,
     getPipelineInstallStatus,
-    skillSources,
-    sourcesModalVisible,
-    githubToken,
     syncStatusMessage,
-    registryUrl,
-    updateRegistryUrl,
-    testRegistry,
-    openSourcesModal,
-    closeSourcesModal,
-    updateGitHubToken,
   }
 })
-

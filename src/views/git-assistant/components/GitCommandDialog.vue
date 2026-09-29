@@ -41,8 +41,15 @@
         </div>
         <div ref="logBox" class="log-box">
           <template v-for="(line, idx) in logLines" :key="idx">
-            <div v-if="idx > 0" class="log-separator"></div>
-            <div class="log-line" :class="`log-${line.type}`">{{ line.text }}</div>
+            <div
+              class="log-line"
+              :class="[
+                `log-${line.type}`,
+                { 'log-section-gap': idx > 0 && (line.type === 'command' || line.type === 'suggestion' || logLines[idx - 1].type === 'command') }
+              ]"
+            >
+              {{ line.text }}
+            </div>
           </template>
           <div v-if="!logLines.length && running" class="log-line log-info">
             {{ t('gitAssistant.gitCommand.waitingOutput') }}
@@ -53,7 +60,7 @@
       <footer class="dialog-actions">
         <button
           v-if="nextActionLabel"
-          class="action-btn next-action"
+          class="action-btn next-action primary"
           :disabled="running"
           type="button"
           @click="$emit('next-action')"
@@ -61,10 +68,16 @@
           {{ nextActionLabel }}
         </button>
         <span v-else class="dialog-actions__spacer"></span>
-        <button class="action-btn primary" :disabled="running" type="button" @click="$emit('close')">
+        <button
+          class="action-btn"
+          :class="{ primary: success === true && !nextActionLabel }"
+          :disabled="running"
+          type="button"
+          @click="$emit('close')"
+        >
           {{ closeLabel }}
         </button>
-        <button class="action-btn" disabled type="button">{{ abortLabel }}</button>
+        <button v-if="running" class="action-btn" disabled type="button">{{ abortLabel }}</button>
       </footer>
     </section>
   </div>
@@ -106,27 +119,122 @@ const emit = defineEmits<{
 }>()
 
 interface LogLine {
-  type: 'command' | 'stdout' | 'stderr' | 'message' | 'suggestion'
+  type: 'command' | 'stdout' | 'stderr' | 'info' | 'error' | 'warning' | 'suggestion' | 'message'
   text: string
+}
+
+function cleanTerminalOutput(raw: string): string {
+  if (!raw) return ''
+  const lines: string[] = []
+  let currentLine = ''
+
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i]
+    if (char === '\r') {
+      if (raw[i + 1] === '\n') {
+        lines.push(currentLine)
+        currentLine = ''
+        i++
+      } else {
+        currentLine = ''
+      }
+    } else if (char === '\n') {
+      lines.push(currentLine)
+      currentLine = ''
+    } else {
+      currentLine += char
+    }
+  }
+  if (currentLine) lines.push(currentLine)
+  return lines.join('\n')
+}
+
+function isGitProgressOrInfo(trimmed: string): boolean {
+  if (/^(counting|compressing|writing)\s+objects:/i.test(trimmed)) return true
+  if (/^delta compression/i.test(trimmed)) return true
+  if (/^total\s+\d+/i.test(trimmed)) return true
+  if (/^(to|from)\s+(https?:\/\/|git@|ssh:\/\/)/i.test(trimmed)) return true
+  if (/^\*\s+\[new (branch|tag)\]/i.test(trimmed)) return true
+  if (/^updating\s+[0-9a-f]+\.\.[0-9a-f]+/i.test(trimmed)) return true
+  if (/^auto-packing/i.test(trimmed)) return true
+  return false
+}
+
+function isGitError(trimmed: string): boolean {
+  if (/^(error|fatal):/i.test(trimmed)) return true
+  if (/^!\s+\[(remote\s+rejected|rejected)\]/i.test(trimmed)) return true
+  if (/remote:\s*(gitlab:|error|fatal|reject|hook declined)/i.test(trimmed)) return true
+  if (/pre-receive hook declined/i.test(trimmed)) return true
+  return false
 }
 
 const logLines = computed<LogLine[]>(() => {
   const lines: LogLine[] = []
+  const knownCommands = new Set(
+    props.command ? props.command.split('\n').map(c => c.trim()).filter(Boolean) : []
+  )
+
   if (props.command) {
     lines.push(...props.command.split('\n').map(command => ({ type: 'command' as const, text: `> ${command}` })))
   }
-  if (props.stdout.trim()) {
-    lines.push({ type: 'stdout', text: props.stdout.trim() })
+
+  const cleanedStdout = cleanTerminalOutput(props.stdout)
+  if (cleanedStdout.trim()) {
+    for (const rawLine of cleanedStdout.split('\n')) {
+      const trimmed = rawLine.trim()
+      if (!trimmed) continue
+      lines.push({ type: 'stdout', text: rawLine })
+    }
   }
-  if (props.stderr.trim()) {
-    lines.push({ type: 'stderr', text: props.stderr.trim() })
+
+  const cleanedStderr = cleanTerminalOutput(props.stderr)
+  if (cleanedStderr.trim()) {
+    for (const rawLine of cleanedStderr.split('\n')) {
+      const trimmed = rawLine.trim()
+      if (!trimmed) continue
+
+      if (trimmed.startsWith('> ')) {
+        const cmd = trimmed.slice(2).trim()
+        if (knownCommands.has(cmd)) continue
+        lines.push({ type: 'command', text: rawLine })
+        continue
+      }
+
+      if (trimmed.startsWith('建议:') || trimmed.startsWith('suggestion:')) {
+        lines.push({ type: 'suggestion', text: rawLine })
+        continue
+      }
+
+      if (isGitError(trimmed)) {
+        lines.push({ type: 'error', text: rawLine })
+      } else if (isGitProgressOrInfo(trimmed)) {
+        lines.push({ type: 'info', text: rawLine })
+      } else if (trimmed.toLowerCase().startsWith('warning:')) {
+        lines.push({ type: 'warning', text: rawLine })
+      } else if (props.success === false) {
+        lines.push({ type: 'error', text: rawLine })
+      } else {
+        lines.push({ type: 'stderr', text: rawLine })
+      }
+    }
   }
-  if (props.message.trim() && !props.stdout.includes(props.message)) {
-    lines.push({ type: 'message', text: props.message.trim() })
+
+  if (props.message.trim()) {
+    const msg = props.message.trim()
+    const isGeneric =
+      msg === t('gitAssistant.gitCommand.failed') ||
+      msg === t('gitAssistant.gitCommand.completed') ||
+      msg === t('gitAssistant.gitCommand.running') ||
+      msg === t('gitAssistant.gitCommand.ready')
+    if (!isGeneric && !props.stdout.includes(msg) && !props.stderr.includes(msg)) {
+      lines.push({ type: props.success === false ? 'error' : 'message', text: msg })
+    }
   }
-  if (props.suggestion.trim()) {
-    lines.push({ type: 'suggestion', text: props.suggestion.trim() })
+
+  if (props.suggestion.trim() && !props.stderr.includes(props.suggestion.trim())) {
+    lines.push({ type: 'suggestion', text: `建议: ${props.suggestion.trim()}` })
   }
+
   return lines
 })
 
@@ -149,7 +257,12 @@ const commandSummary = computed(() => {
   return lastCommand || props.message || 'preparing'
 })
 
-const currentActivity = computed(() => props.progressPhase || props.phase || statusLabel.value)
+const currentActivity = computed(() => {
+  if (props.progressPhase) return props.progressPhase
+  if (props.running) return props.phase || t('gitAssistant.gitCommand.running')
+  if (props.phase && props.phase !== statusLabel.value) return props.phase
+  return statusLabel.value
+})
 
 const ticker = ref(Date.now())
 const logBox = ref<HTMLElement | null>(null)
@@ -218,7 +331,7 @@ const progressStyle = computed(() => {
 .dialog-mask {
   align-items: center;
   background: var(--lumina-overlay);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(4px);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -228,8 +341,7 @@ const progressStyle = computed(() => {
 }
 
 .command-dialog {
-  background: color-mix(in srgb, var(--lumina-surface-elevated) 94%, transparent);
-  backdrop-filter: saturate(180%) blur(24px);
+  background: var(--lumina-surface-elevated);
   border: 0.5px solid var(--lumina-separator-strong);
   border-radius: 12px;
   box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--lumina-text) 8%, transparent), 0 2px 8px rgb(0 0 0 / 10%), 0 18px 52px rgb(0 0 0 / 18%);
@@ -395,41 +507,60 @@ const progressStyle = computed(() => {
   color: var(--lumina-text);
   font-family: Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.55;
   margin: 0;
   max-height: 320px;
   overflow: auto;
-  padding: 10px;
+  padding: 12px 14px;
   white-space: pre-wrap;
-}
-
-.log-separator {
-  height: 8px;
 }
 
 .log-line {
+  line-height: 1.55;
+  min-height: 1.55em;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+
+  &.log-command {
+    color: var(--lumina-text-secondary);
+    font-weight: 500;
+    opacity: 0.85;
+  }
+
+  &.log-info {
+    color: var(--lumina-text-secondary);
+  }
+
+  &.log-stdout,
+  &.log-stderr {
+    color: var(--lumina-text);
+  }
+
+  &.log-warning {
+    color: var(--lumina-warning);
+  }
+
+  &.log-error {
+    color: var(--lumina-danger);
+    font-weight: 600;
+  }
+
+  &.log-suggestion {
+    background: color-mix(in srgb, var(--lumina-warning) 10%, transparent);
+    border-left: 3px solid var(--lumina-warning);
+    border-radius: 4px;
+    color: var(--lumina-warning);
+    margin-top: 6px;
+    padding: 6px 10px;
+  }
+
+  &.log-message {
+    color: var(--lumina-text-secondary);
+  }
 }
 
-.log-command {
-  color: var(--lumina-text-secondary);
-}
-
-.log-stdout {
-  color: var(--lumina-text);
-}
-
-.log-stderr {
-  color: var(--lumina-text);
-}
-
-.log-message {
-  color: var(--lumina-text-secondary);
-}
-
-.log-suggestion {
-  color: var(--lumina-warning);
+.log-section-gap {
+  margin-top: 8px;
 }
 
 .log-panel.done {
@@ -439,7 +570,6 @@ const progressStyle = computed(() => {
 }
 
 .log-panel.failed {
-  .log-stderr,
   .log-message {
     color: var(--lumina-danger);
   }
@@ -486,18 +616,25 @@ const progressStyle = computed(() => {
   border-radius: var(--lumina-radius-sm);
   color: var(--lumina-text);
   cursor: pointer;
-  height: 28px;
-  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  height: 30px;
+  padding: 0 14px;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--lumina-button-secondary-hover);
+  }
 
   &:disabled {
     cursor: not-allowed;
-    opacity: 0.55;
+    opacity: 0.45;
   }
 }
 
 .next-action {
   margin-right: auto;
-  min-width: 132px;
+  min-width: 120px;
 }
 
 .primary {
@@ -505,6 +642,11 @@ const progressStyle = computed(() => {
   border-color: var(--lumina-primary);
   box-shadow: none;
   color: var(--lumina-on-accent);
+
+  &:hover:not(:disabled) {
+    background: var(--lumina-primary-hover);
+    border-color: var(--lumina-primary-hover);
+  }
 }
 
 </style>

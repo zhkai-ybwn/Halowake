@@ -23,7 +23,7 @@
             @click="handleCheckForUpdates"
           >
             <Icon
-              :icon="updaterStore.isChecking ? 'solar:spinner-linear' : 'solar:refresh-linear'"
+              :icon="updaterStore.isChecking ? 'solar:restart-linear' : 'solar:refresh-linear'"
               :class="{ 'spinning': updaterStore.isChecking }"
             />
             {{ updaterStore.isChecking ? t('settings.about.checkingUpdates') : t('settings.about.checkUpdates') }}

@@ -13,11 +13,14 @@ export interface AgentSkill {
   agentLabel: string
   associatedAgents?: string[]
   path: string
+  installedAt?: number
   isGitRepo: boolean
   gitRemoteUrl?: string
   gitBranch?: string
   currentCommit?: string
   isDirty: boolean
+  canUninstall: boolean
+  externallyManaged: boolean
   hasUpdate: boolean
   latestCommit?: string
   latestVersion?: string
@@ -51,6 +54,7 @@ export interface SubSkillItem {
 export interface InstallSkillArgs {
   skillId: string
   gitUrl: string
+  subPath?: string
   targetMode: InstallTargetMode
   targetAgents: string[]
   projectCwd?: string
@@ -63,6 +67,29 @@ export interface InstallSkillResult {
   success: boolean
   message: string
   installedPaths: string[]
+}
+
+export interface SkillInstallHistoryEntry {
+  id: number
+  skillId: string
+  displayName: string
+  subSkillId?: string
+  gitUrl: string
+  subPath?: string
+  targetMode: InstallTargetMode
+  targetAgents: string[]
+  projectCwd?: string
+  status: 'success' | 'skipped' | 'partial' | 'failed'
+  message: string
+  installedPaths: string[]
+  existingPaths: string[]
+  createdAt: number
+}
+
+export interface InstallSkillProgress {
+  phase: 'preparing' | 'connecting' | 'downloading' | 'retrying' | 'extracting' | 'copying' | 'saving' | 'complete' | 'failed'
+  message: string
+  percent: number | null
 }
 
 export interface SkillAuthor {
@@ -78,6 +105,17 @@ export interface SkillMetrics {
   lastCommitDaysAgo: number
   issueCloseRate: number // e.g. 92 (%)
   securityAuditPassed: boolean
+}
+
+export interface SkillUsageGuide {
+  extractorVersion?: number
+  summary: string
+  trigger?: string
+  steps: string[]
+  example?: string
+  sourceUrl: string
+  sourceHash: string
+  extractedAt: number
 }
 
 export interface CatalogSkill {
@@ -96,11 +134,10 @@ export interface CatalogSkill {
   tags: string[]
   recommendedWith: string[] // skill IDs
   howToUse: string
+  usageGuide?: SkillUsageGuide
   promptExample?: string
   compatibleAgents: string[]
   isStar?: boolean
-  userRating?: number
-  userFeedback?: 'up' | 'down' | null
   customCategory?: string
   isBundle?: boolean // 是否为多技能集合/Monorepo
   bundleCount?: number // 包含的子技能数量

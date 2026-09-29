@@ -13,9 +13,13 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   agents: string[]
 }>()
+
+const { t } = useI18n()
 
 function getLabel(agent: string): string {
   switch (agent.toLowerCase()) {
@@ -23,6 +27,8 @@ function getLabel(agent: string): string {
       return 'Antigravity'
     case 'claude':
       return 'Claude Code'
+    case 'codex':
+      return 'Codex'
     case 'cursor':
       return 'Cursor'
     case 'trae':
@@ -32,7 +38,7 @@ function getLabel(agent: string): string {
     case 'windsurf':
       return 'Windsurf'
     case 'project':
-      return '项目'
+      return t('skills.review.project')
     default:
       return agent
   }

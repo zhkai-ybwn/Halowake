@@ -84,7 +84,7 @@
           variant="primary"
           disabled
         >
-          <Icon icon="solar:spinner-linear" class="spinning" />
+          <Icon icon="solar:restart-linear" class="spinning" />
           {{ t('updater.downloading') }} ({{ updaterStore.downloadProgress }}%)
         </WorkbenchButton>
 

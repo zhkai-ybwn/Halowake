@@ -24,14 +24,15 @@
             <h2 id="skills-manager-title">{{ t('skills.title') }}</h2>
             <p>
               <template v-if="exploreStore.activeMainTab === 'installed'">
-                {{ t('skills.categoryAll') }} {{ store.skills.length }} · 本地技能管理
+                {{ t('skills.review.managerInstalledSubtitle') }}
                 <template v-if="store.updateCount > 0">
                   · <span class="highlight-warn">{{ t('skills.pillUpdatesAvailable', { count: store.updateCount }) }}</span>
                 </template>
               </template>
-              <template v-else>
-                {{ t('skills.pipelineSubtitle') }}
+              <template v-else-if="exploreStore.activeMainTab === 'explore'">
+                {{ t('skills.review.managerExploreSubtitle') }}
               </template>
+              <template v-else>{{ t('skills.review.managerHistorySubtitle') }}</template>
             </p>
           </div>
         </div>
@@ -53,12 +54,13 @@
       <!-- 2. Inner Workspace Container -->
       <div class="skills-workspace">
         <!-- Inner Sub-Navbar: Navigation Tabs (Left) & Page Actions (Right) -->
-        <nav class="skills-subnav" aria-label="技能视图与页面操作">
+        <nav class="skills-subnav" :aria-label="t('skills.review.managerNavigation')">
           <!-- Left: Segmented Main Tabs Switcher -->
           <div class="workspace-tabs" role="tablist">
             <button
               type="button"
               role="tab"
+              :aria-selected="exploreStore.activeMainTab === 'installed'"
               class="workspace-tab"
               :class="{ active: exploreStore.activeMainTab === 'installed' }"
               @click="exploreStore.activeMainTab = 'installed'"
@@ -72,13 +74,26 @@
             <button
               type="button"
               role="tab"
+              :aria-selected="exploreStore.activeMainTab === 'explore'"
               class="workspace-tab"
               :class="{ active: exploreStore.activeMainTab === 'explore' }"
               @click="exploreStore.activeMainTab = 'explore'"
             >
               <Icon icon="solar:planet-2-linear" />
               <span>{{ t('skills.tabExplore') }}</span>
-              <span class="tab-sparkle-pill">SDLC 流水线</span>
+              <span class="tab-sparkle-pill">{{ exploreStore.catalogSkills.length }}</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="exploreStore.activeMainTab === 'history'"
+              class="workspace-tab"
+              :class="{ active: exploreStore.activeMainTab === 'history' }"
+              @click="exploreStore.activeMainTab = 'history'"
+            >
+              <Icon icon="solar:history-linear" />
+              <span>{{ t('skills.review.history') }}</span>
             </button>
           </div>
 
@@ -86,6 +101,7 @@
           <div class="workspace-actions">
             <!-- 重新扫描本地磁盘 (两边都可以用) -->
             <button
+              v-if="exploreStore.activeMainTab !== 'history'"
               type="button"
               class="page-action-btn"
               :disabled="store.loading || store.checkingUpdates"
@@ -121,18 +137,8 @@
               </button>
             </template>
 
-            <!-- 探索视图下的同步开源库与数据源管理操作 -->
-            <template v-else>
-              <button
-                type="button"
-                class="page-action-btn"
-                :title="t('skills.manageSourcesTip', '管理开源技能 GitHub 数据源')"
-                @click="exploreStore.openSourcesModal"
-              >
-                <Icon icon="solar:database-linear" />
-                <span>注册表与镜像</span>
-              </button>
-
+            <!-- 探索视图下的目录同步 -->
+            <template v-else-if="exploreStore.activeMainTab === 'explore'">
               <button
                 type="button"
                 class="page-action-btn"
@@ -151,13 +157,13 @@
         <div class="skills-body-container">
           <InstalledSkillsView v-show="exploreStore.activeMainTab === 'installed'" />
           <SkillExploreView v-show="exploreStore.activeMainTab === 'explore'" />
+          <SkillInstallHistoryView v-show="exploreStore.activeMainTab === 'history'" />
         </div>
       </div>
 
       <!-- Root Modals & Drawers -->
       <SkillInstallModal />
       <SkillDetailDrawer />
-      <SkillSourcesModal />
     </section>
   </NModal>
 </template>
@@ -172,9 +178,9 @@ import { useSkillExploreStore } from '@/stores/skill-explore'
 import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 import InstalledSkillsView from './installed/InstalledSkillsView.vue'
 import SkillExploreView from './explore/SkillExploreView.vue'
+import SkillInstallHistoryView from './installed/SkillInstallHistoryView.vue'
 import SkillInstallModal from './explore/SkillInstallModal.vue'
 import SkillDetailDrawer from './explore/SkillDetailDrawer.vue'
-import SkillSourcesModal from './explore/SkillSourcesModal.vue'
 import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
 
 const { t } = useI18n()
@@ -207,6 +213,12 @@ watch(
 async function handleRescan() {
   const currentCwd = localStorage.getItem(GIT_REPO_STORAGE_KEY) || undefined
   const res = await store.scan(currentCwd)
+  if (store.errorMessage) {
+    message.error(t('skills.review.localScanFailed', { error: store.errorMessage }))
+    return
+  }
+  store.revealInstalledSkills(res.newCount === 1 ? res.newSkills[0].name : '')
+  exploreStore.activeMainTab = 'installed'
   if (res.newCount > 0) {
     message.success(t('skills.rescanWithNew', { count: res.newCount, total: res.total }))
   } else {
@@ -243,9 +255,9 @@ async function handleUpdateAll() {
 async function handleSyncRegistry() {
   try {
     const res = await exploreStore.syncRegistry()
-    message.success(res.message || `已同步最新开源技能库，当前共收录 ${res.totalCount} 个技能`)
+    message.success(res.message || t('skills.review.syncFallback', { count: res.totalCount }))
   } catch (err: unknown) {
-    message.error((err as Error)?.message || '同步开源库失败')
+    message.error((err as Error)?.message || t('skills.review.syncError'))
   }
 }
 </script>

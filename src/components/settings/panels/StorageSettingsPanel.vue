@@ -10,6 +10,18 @@
       </div>
     </header>
 
+    <nav class="storage-view-switch" role="tablist" :aria-label="t('settings.storage.title')">
+      <button type="button" role="tab" :aria-selected="activeView === 'app'" :class="{ active: activeView === 'app' }" @click="activeView = 'app'">
+        <Icon icon="solar:database-linear" />
+        {{ t('settings.storage.appStorageTab') }}
+      </button>
+      <button type="button" role="tab" :aria-selected="activeView === 'agent'" :class="{ active: activeView === 'agent' }" @click="activeView = 'agent'">
+        <Icon icon="solar:magic-stick-3-linear" />
+        {{ t('settings.storage.agentStorageTab') }}
+      </button>
+    </nav>
+
+    <div v-show="activeView === 'app'" class="storage-panel__app-content" role="tabpanel">
     <section class="storage-overview">
       <div class="storage-overview__topline">
         <div class="storage-overview__total">
@@ -110,6 +122,8 @@
         {{ t('settings.storage.cleanNow') }}
       </NButton>
     </footer>
+    </div>
+    <AgentStoragePanel v-show="activeView === 'agent'" role="tabpanel" />
   </section>
 </template>
 
@@ -118,10 +132,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useStorageStore } from '@/stores/storage'
+import AgentStoragePanel from './AgentStoragePanel.vue'
 
 const { locale, t } = useI18n({ useScope: 'global' })
 const message = useMessage()
 const storageStore = useStorageStore()
+const activeView = ref<'app' | 'agent'>('app')
 const retentionDraft = ref<number | null>(storageStore.settings.retentionDays)
 
 const usageItems = computed(() => {
@@ -228,8 +244,35 @@ function errorMessage(error: unknown) {
 .storage-panel {
   display: grid;
   gap: var(--lumina-gap-lg);
-  max-width: 820px;
+  max-width: 980px;
   padding-bottom: var(--lumina-gap-xl);
+}
+
+.storage-panel__app-content { display: grid; gap: var(--lumina-gap-lg); max-width: 820px; }
+.storage-view-switch {
+  background: var(--lumina-control-bg);
+  border: 0.5px solid var(--lumina-separator);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  width: fit-content;
+
+  button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--lumina-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 12px;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+
+    &.active { background: var(--lumina-surface-elevated); box-shadow: var(--lumina-shadow-sm); color: var(--lumina-text); font-weight: 600; }
+  }
 }
 
 .storage-panel__intro {

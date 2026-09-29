@@ -87,7 +87,7 @@ export function getProviderIcon(provider: string) {
     case 'antigravity':
       return 'solar:planet-linear'
     case 'opencode':
-      return 'solar:terminal-linear'
+      return 'solar:code-square-linear'
     default:
       return 'solar:cpu-bolt-linear'
   }

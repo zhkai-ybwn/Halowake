@@ -155,9 +155,9 @@ export function useGitRemote(
       running: false,
       success: false,
       finishedAt: Date.now(),
-      phase: t('gitAssistant.gitCommand.failed'),
+      phase: gitCommandDialog.value.phase || t('gitAssistant.gitCommand.failed'),
       progressPhase: '',
-      stderr: message,
+      stderr: normalizeGitOutput(message),
       message: t('gitAssistant.gitCommand.failed'),
       suggestion: '',
       nextActionLabel:
