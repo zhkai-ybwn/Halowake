@@ -34,6 +34,15 @@
       </p>
 
       <div class="skill-row-meta">
+        <span
+          v-if="matchReason"
+          class="skill-match-reason"
+          :class="`skill-match-reason--${matchReason.tier}`"
+          :title="matchReason.summary"
+        >
+          <Icon :icon="matchReason.tier === 'exact' ? 'solar:verified-check-bold' : 'solar:compass-linear'" />
+          <span>{{ matchReason.summary }}</span>
+        </span>
         <span class="skill-author">{{ skill.author.name }}</span>
         <span class="meta-dot" aria-hidden="true">·</span>
         <span class="skill-category">{{ skillCategoryLabel(skill.category) }}</span>
@@ -68,10 +77,16 @@
         <Icon :icon="skill.isStar ? 'solar:star-bold' : 'solar:star-linear'" />
       </button>
 
-      <span v-if="isInstalled" class="skill-row-installed-pill">
+      <button
+        v-if="isInstalled"
+        type="button"
+        class="skill-row-installed-pill"
+        :title="installedTargetSummary ? `${t('skills.installedTag')}: ${installedTargetSummary}` : t('skills.installedTag')"
+        @click.stop="exploreStore.openInstallDialog(skill)"
+      >
         <Icon icon="solar:check-circle-bold" />
-        <span>{{ t('skills.installedTag') }}</span>
-      </span>
+        <span>{{ t('skills.installedTag') }}<template v-if="installedTargets.labels.length === 1"> · {{ installedTargets.labels[0] }}</template></span>
+      </button>
       <button
         v-else
         type="button"
@@ -114,7 +129,12 @@ const visual = computed(() =>
   })
 )
 
-const isInstalled = computed(() => exploreStore.isSkillInstalled(props.skill.id, skillsStore.skills))
+const installedTargets = computed(() =>
+  exploreStore.getSkillInstalledTargets(props.skill, skillsStore.skills)
+)
+const installedTargetSummary = computed(() => installedTargets.value.labels.join(' / '))
+const isInstalled = computed(() => exploreStore.isSkillInstalled(props.skill, skillsStore.skills))
+const matchReason = computed(() => exploreStore.getSkillMatchReason(props.skill.id))
 const stars = computed(() => props.skill.metrics?.githubStars ?? props.skill.stars ?? 0)
 const formatStars = (count: number) => (count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count))
 </script>
@@ -247,6 +267,33 @@ const formatStars = (count: number) => (count >= 1000 ? `${(count / 1000).toFixe
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+.skill-match-reason {
+  align-items: center;
+  border-radius: 4px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 600;
+  gap: 3px;
+  margin-right: 4px;
+  max-width: 340px;
+  overflow: hidden;
+  padding: 1px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &--exact {
+    background: color-mix(in srgb, var(--lumina-success, #10b981) 12%, transparent);
+    border: 0.5px solid color-mix(in srgb, var(--lumina-success, #10b981) 28%, transparent);
+    color: var(--lumina-success, #10b981);
+  }
+
+  &--general {
+    background: color-mix(in srgb, #f59e0b 12%, transparent);
+    border: 0.5px solid color-mix(in srgb, #f59e0b 28%, transparent);
+    color: #d97706;
   }
 }
 

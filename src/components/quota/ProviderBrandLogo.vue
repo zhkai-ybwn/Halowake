@@ -6,7 +6,7 @@
   >
     <!-- 1. OpenAI / Codex -->
     <svg
-      v-if="normalizedProvider === 'openai' || normalizedProvider === 'codex'"
+      v-if="normalizedProvider === 'openai'"
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -34,7 +34,7 @@
 
     <!-- 3. Google Gemini (Official 4-color gradient star) -->
     <svg
-      v-else-if="normalizedProvider === 'gemini' || normalizedProvider === 'google'"
+      v-else-if="normalizedProvider === 'gemini'"
       viewBox="0 0 24 24"
       class="brand-svg gemini-svg"
       aria-label="Google Gemini"
@@ -87,7 +87,7 @@
 
     <!-- 5. Claude / Anthropic -->
     <svg
-      v-else-if="normalizedProvider === 'claude' || normalizedProvider === 'anthropic'"
+      v-else-if="normalizedProvider === 'claude'"
       viewBox="0 0 24 24"
       class="brand-svg claude-svg"
       aria-label="Claude"
@@ -131,7 +131,7 @@
 
     <!-- 9. Moonshot AI (月之暗面 / Kimi) -->
     <svg
-      v-else-if="normalizedProvider === 'moonshot' || normalizedProvider === 'kimi'"
+      v-else-if="normalizedProvider === 'moonshot'"
       viewBox="0 0 24 24"
       class="brand-svg moonshot-svg"
       aria-label="Moonshot"
@@ -145,7 +145,7 @@
 
     <!-- 10. Zhipu AI (智谱 GLM) -->
     <svg
-      v-else-if="normalizedProvider === 'zhipu' || normalizedProvider === 'glm'"
+      v-else-if="normalizedProvider === 'zhipu'"
       viewBox="0 0 24 24"
       class="brand-svg zhipu-svg"
       aria-label="Zhipu AI"
@@ -164,7 +164,7 @@
 
     <!-- 11. Qwen (通义千问) -->
     <svg
-      v-else-if="normalizedProvider === 'qwen' || normalizedProvider === 'tongyi'"
+      v-else-if="normalizedProvider === 'qwen'"
       viewBox="0 0 24 24"
       class="brand-svg qwen-svg"
       aria-label="Qwen"
@@ -205,7 +205,7 @@
 
     <!-- 14. 阿里灵码 (Qcode / Qoder CN) -->
     <img
-      v-else-if="normalizedProvider === 'qcode' || normalizedProvider === 'qoder'"
+      v-else-if="normalizedProvider === 'qcode'"
       :src="qcodeIcon"
       class="brand-img qcode-img"
       alt="阿里灵码"
@@ -320,6 +320,9 @@ const normalizedProvider = computed(() => {
   }
   if (p.includes('qwen') || p.includes('tongyi') || p.includes('bailian')) {
     return 'qwen'
+  }
+  if (p.includes('minimax')) {
+    return 'minimax'
   }
   if (p.includes('cursor')) {
     return 'cursor'

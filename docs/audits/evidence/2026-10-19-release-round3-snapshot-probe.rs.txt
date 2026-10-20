@@ -1,0 +1,19 @@
+use git_assistant_lib::storage::{AppDatabase,migrations::run_migrations,skill_registry_repository::{save_skill_registry,get_skill_registry_revision_from_conn,query_skill_registry_candidates_with_conn,SkillRegistryFilter}};
+#[test]
+fn round3_same_connection_is_not_a_snapshot_transaction(){
+ let path=std::env::temp_dir().join(format!("halowake-round3-snapshot-{}.db",std::process::id()));
+ let db=AppDatabase::from_path(path.clone());
+ let mut init=db.connect().unwrap();run_migrations(&mut init).unwrap();drop(init);
+ let mut fixture:serde_json::Value=serde_json::from_str(include_str!("fixtures/skill_registry.json")).unwrap();
+ save_skill_registry(&db,&fixture).unwrap();
+ let reader=db.connect_read().unwrap();
+ let old=get_skill_registry_revision_from_conn(&reader).unwrap();
+ fixture["updatedAt"]=serde_json::json!(1729000999999_i64);
+ fixture["skills"][0]["name"]=serde_json::json!("new-generation-name");
+ save_skill_registry(&db,&fixture).unwrap();
+ let rows=query_skill_registry_candidates_with_conn(&reader,None,&SkillRegistryFilter{stage:None,category:None,allowed_ids:None,limit:10000}).unwrap();
+ let has_new=rows.iter().any(|r|r.name=="new-generation-name");
+ println!("saved response revision={old:?}; same reader has new generation={has_new}; autocommit={}",reader.is_autocommit());
+ drop(reader);let _=std::fs::remove_file(&path);let _=std::fs::remove_file(format!("{}-wal",path.display()));let _=std::fs::remove_file(format!("{}-shm",path.display()));
+ assert!(!has_new,"revision and candidates must belong to one read snapshot");
+}

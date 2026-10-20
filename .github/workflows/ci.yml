@@ -28,8 +28,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Verify frontend
+      - name: Verify frontend (lint & typecheck)
         run: npm run lint
 
-      - name: Verify Rust tests
+      - name: Frontend unit tests
+        run: npm run test:unit
+
+      - name: Frontend production build
+        run: npm run build
+
+      - name: Verify Rust library tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Verify deterministic production search integration tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test skill_registry_search

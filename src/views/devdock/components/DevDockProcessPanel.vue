@@ -7,6 +7,15 @@
       </div>
       <div class="panel-header-actions">
         <button
+          class="port-inspector-btn"
+          type="button"
+          :title="t('devdock.portInspector.title')"
+          @click="$emit('openPortInspector')"
+        >
+          <Icon icon="solar:server-minimalistic-linear" />
+          <span>{{ t('devdock.actions.portInspector') }}</span>
+        </button>
+        <button
           v-if="completedCount > 0"
           class="clear-completed-btn"
           type="button"
@@ -81,7 +90,17 @@
               </div>
               <span class="process-meta">
                 {{ t('devdock.processes.pid', { pid: process.pid }) }}
-                <template v-if="process.ports.length"> · {{ t('devdock.processes.ports', { ports: formatPorts(process.ports) }) }}</template>
+                <template v-if="process.ports.length">
+                  ·
+                  <button
+                    type="button"
+                    class="port-tag-btn"
+                    :title="t('devdock.portInspector.title')"
+                    @click.stop="$emit('openPortInspector', process.ports[0])"
+                  >
+                    {{ t('devdock.processes.ports', { ports: formatPorts(process.ports) }) }}
+                  </button>
+                </template>
               </span>
             </div>
 
@@ -179,6 +198,7 @@ defineEmits<{
   (e: 'stop', processId: string): void
   (e: 'dismiss', processId: string): void
   (e: 'clearCompleted'): void
+  (e: 'openPortInspector', port?: number): void
   (e: 'close'): void
 }>()
 
@@ -274,7 +294,8 @@ function formatPorts(ports: number[]): string {
   gap: 6px;
 }
 
-.clear-completed-btn {
+.clear-completed-btn,
+.port-inspector-btn {
   align-items: center;
   background: var(--lumina-control-bg);
   border: 0.5px solid var(--lumina-card-border);
@@ -294,6 +315,22 @@ function formatPorts(ports: number[]): string {
 
   &:hover {
     background: var(--lumina-control-hover);
+    color: var(--lumina-text);
+  }
+}
+
+.port-tag-btn {
+  background: transparent;
+  border: none;
+  color: var(--lumina-primary);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+
+  &:hover {
     color: var(--lumina-text);
   }
 }

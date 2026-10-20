@@ -1,0 +1,14 @@
+use git_assistant_lib::storage::{migrations::run_migrations, skill_registry_repository::{save_skill_registry,search_skill_registry,SkillSearchRequest},AppDatabase};
+#[test]
+fn review_candidate_window() {
+ let path=std::env::temp_dir().join(format!("batch-b-review-{}.db",std::process::id()));
+ let db=AppDatabase::from_path(path.clone());
+ let mut conn=db.connect().unwrap(); run_migrations(&mut conn).unwrap(); drop(conn);
+ let fixture=serde_json::from_str(include_str!("fixtures/skill_registry.json")).unwrap();
+ save_skill_registry(&db,&fixture).unwrap();
+ for (offset,limit) in [(0,20),(480,20),(500,20),(0,1000)] {
+ let res=search_skill_registry(&db,&SkillSearchRequest{query:"utility".into(),sort:Some("popular".into()),offset:Some(offset),limit:Some(limit),catalog_revision:Some("invented-version".into()),..Default::default()}).unwrap();
+ println!("offset={offset} limit={limit} total={} more={} truncated={} first={:?} revision={:?}",res.total_matched,res.has_more,res.is_truncated,res.hits.first().map(|h|&h.id),res.catalog_revision);
+ }
+ let _=std::fs::remove_file(&path); let _=std::fs::remove_file(format!("{}-wal",path.display())); let _=std::fs::remove_file(format!("{}-shm",path.display()));
+}

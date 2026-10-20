@@ -21,7 +21,7 @@ interface UseGitReviewOptions {
   getRepositoryRoot: () => string
   getFiles: () => GitAssistantFileView[]
   getSnapshotStatus: () => string[] | undefined
-  getModel: () => AiModelConfig | undefined
+  getModel: () => AiModelConfig | undefined | null
   reviewSelectedRaws: { value: string[] }
   onError: (message: string) => void
   openFileDiff: (raw: string) => Promise<void>

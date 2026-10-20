@@ -47,7 +47,7 @@
               :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
-              <AppNavIcon :name="item.route" :size="20" :fallback-icon="item.icon" />
+              <AppNavIcon :name="item.route || ''" :size="20" :fallback-icon="item.icon" />
               <span class="item-title">{{ item.label }}</span>
               <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
             </button>
@@ -73,7 +73,7 @@
               :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
-              <AppNavIcon :name="item.route" :size="20" :fallback-icon="item.icon" />
+              <AppNavIcon :name="item.route || ''" :size="20" :fallback-icon="item.icon" />
               <span class="item-title">{{ item.label }}</span>
               <kbd class="shortcut-kbd">{{ shortcutLabel(item.shortcut) }}</kbd>
             </button>
@@ -246,7 +246,8 @@ const windowTitle = computed(() =>
 )
 const maximizeTitle = computed(() => isMaximized.value ? t('topbar.restore') : t('topbar.maximize'))
 
-function shortcutLabel(num: string) {
+function shortcutLabel(num?: string) {
+  if (!num) return ''
   return isMac ? `⌘${num}` : `Alt+${num}`
 }
 

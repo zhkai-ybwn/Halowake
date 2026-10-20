@@ -48,6 +48,15 @@
               </template>
             </span>
           </div>
+          <div class="sync-status-pill" :class="{ 'is-syncing': quotaStore.refreshing }">
+            <Icon
+              :icon="quotaStore.refreshing ? 'solar:restart-linear' : 'solar:clock-circle-linear'"
+              :class="{ 'spin-glyph': quotaStore.refreshing }"
+            />
+            <span>
+              {{ quotaStore.refreshing ? t('quota.refreshing') : (quotaStore.lastUpdated > 0 ? `${t('quota.lastChecked')} ${formatRelativeTime(quotaStore.lastUpdated, t)}` : '') }}
+            </span>
+          </div>
         </div>
 
         <div class="workspace-actions">
@@ -332,6 +341,7 @@ import {
   type ProviderType,
 } from '@/services/quota/quota-service'
 import { hasPrimaryModifier, isMacPlatform } from '@/utils/platform-shortcuts'
+import { formatRelativeTime } from '@/utils/quota'
 
 const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
@@ -420,13 +430,14 @@ const editModalOpen = ref(false)
 const manageModalOpen = ref(false)
 const selectedEditAccount = ref<AccountConfig | null>(null)
 
-const autoRefreshInterval = ref<number>(300) // 默认 5 分钟 (300 秒)
-let timerId: number | null = null
+const autoRefreshInterval = computed(() => quotaStore.autoRefreshInterval)
 
 const autoRefreshOptions = computed(() => [
   { label: t('quota.autoRefreshOff'), value: 0 },
+  { label: `1 ${t('quota.minutes')}`, value: 60 },
+  { label: `2 ${t('quota.minutes')}`, value: 120 },
   { label: `5 ${t('quota.minutes')}`, value: 300 },
-  { label: `15 ${t('quota.minutes')}`, value: 900 },
+  { label: `10 ${t('quota.minutes')}`, value: 600 },
   { label: `30 ${t('quota.minutes')}`, value: 1800 },
 ])
 
@@ -445,7 +456,7 @@ const autoRefreshDropdownOptions = computed<DropdownOption[]>(() =>
 function handleRefreshIntervalSelect(key: string | number) {
   const seconds = Number(key)
   if (Number.isFinite(seconds)) {
-    autoRefreshInterval.value = seconds
+    quotaStore.setAutoRefreshInterval(seconds)
   }
 }
 
@@ -486,7 +497,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleFindShortcut, true)
-  clearAutoRefresh()
 })
 
 watch(
@@ -494,37 +504,12 @@ watch(
   visible => {
     if (visible) {
       void quotaStore.ensureFresh(5000)
-      setupAutoRefresh()
       void nextTick(() => {
         searchInputRef.value?.focus()
       })
-    } else {
-      clearAutoRefresh()
     }
   }
 )
-
-watch(autoRefreshInterval, () => {
-  if (quotaStore.modalVisible) {
-    setupAutoRefresh()
-  }
-})
-
-function setupAutoRefresh() {
-  clearAutoRefresh()
-  if (autoRefreshInterval.value > 0) {
-    timerId = window.setInterval(() => {
-      void handleRefreshAll(true)
-    }, autoRefreshInterval.value * 1000)
-  }
-}
-
-function clearAutoRefresh() {
-  if (timerId !== null) {
-    clearInterval(timerId)
-    timerId = null
-  }
-}
 
 function openAddModal() {
   selectedEditAccount.value = null
@@ -814,6 +799,19 @@ async function handleLaunchClient(accountId: string, providerType: ProviderType)
   .highlight-warn {
     color: var(--lumina-warning, #b76500);
     font-weight: 600;
+  }
+}
+
+.sync-status-pill {
+  align-items: center;
+  color: var(--lumina-text-tertiary);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  padding: 0 4px;
+
+  &.is-syncing {
+    color: var(--lumina-accent);
   }
 }
 

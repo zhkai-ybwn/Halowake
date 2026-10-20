@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useLocale } from '@/composables/useLocale'
 import { loadGitSnapshot, type GitSnapshot } from '@/services/git/git-service'
 import { ensureGitProjectProfile } from '@/services/git/git-profile-service'
+import { useWorkspaceStore } from '@/stores/workspace'
 import {
   GIT_RECENT_REPOS_STORAGE_KEY,
   GIT_REPO_STORAGE_KEY,
@@ -19,6 +20,7 @@ export interface RecentGitRepo {
 
 export function useGitSnapshot() {
   const { t } = useLocale()
+  const workspaceStore = useWorkspaceStore()
 
   const loading = ref(false)
   const error = ref('')
@@ -90,7 +92,8 @@ export function useGitSnapshot() {
 
       snapshot.value = result
       reviewSelectedRaws.value = []
-      localStorage.setItem(GIT_REPO_STORAGE_KEY, path)
+      workspaceStore.setCurrentProjectPath(result.repoRoot || path)
+      localStorage.setItem(GIT_REPO_STORAGE_KEY, result.repoRoot || path)
       rememberRecentRepo(result.repoRoot || path)
 
       try {

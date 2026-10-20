@@ -147,6 +147,8 @@ pub fn run() {
             commands::project_process::load_project_process_logs,
             commands::project_process::open_project_url,
             commands::project_process::check_pid_alive,
+            commands::project_process::find_processes_by_port,
+            commands::project_process::kill_process_by_pid,
             commands::storage::load_storage_settings,
             commands::storage::save_storage_settings,
             commands::storage::get_storage_overview,
@@ -180,6 +182,8 @@ pub fn run() {
             commands::skills::uninstall_agent_skill,
             commands::skill_registry::load_skill_registry,
             commands::skill_registry::save_skill_registry,
+            commands::skill_registry::search_skill_registry,
+            commands::skill_registry::rebuild_skill_registry_fts,
             log_frontend_error
         ])
         .run(tauri::generate_context!())

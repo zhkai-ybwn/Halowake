@@ -5,7 +5,11 @@
       <!-- Tier 1: Search (Left) + Filters & View Mode (Right) -->
       <div class="explore-primary-row">
         <div class="macos-search-box">
-          <Icon icon="solar:magnifer-linear" class="search-glyph" />
+          <Icon
+            :icon="exploreStore.isSearching ? 'solar:restart-linear' : 'solar:magnifer-linear'"
+            class="search-glyph"
+            :class="{ 'spin-glyph': exploreStore.isSearching }"
+          />
           <input
             ref="searchInputRef"
             v-model="exploreStore.searchQuery"
@@ -165,6 +169,30 @@
             {{ currentSectionHeading }}
             <span class="section-count">({{ sortedSkills.length }})</span>
           </span>
+          <span
+            v-if="exploreStore.searchQuery.trim() && !exploreStore.isSearching"
+            class="search-tier-pill"
+            :class="`search-tier-pill--${exploreStore.searchMatchTier}`"
+          >
+            <Icon
+              :icon="
+                exploreStore.searchMatchTier === 'exact'
+                  ? 'solar:verified-check-bold'
+                  : exploreStore.searchMatchTier === 'general_fallback'
+                    ? 'solar:Compass-linear'
+                    : 'solar:Minimalistic-Magnifer-linear'
+              "
+            />
+            <span>
+              {{
+                exploreStore.searchMatchTier === 'exact'
+                  ? '完全相关'
+                  : exploreStore.searchMatchTier === 'general_fallback'
+                    ? '通用可用推荐'
+                    : '无合适结果'
+              }}
+            </span>
+          </span>
         </h3>
       </div>
       <div class="catalog-heading-hint">
@@ -202,6 +230,24 @@
 
       <!-- Section 2: 全流程技能矩阵 (按 SDLC 阶段卡片网格呈现) -->
       <section class="explore-section">
+        <div
+          v-if="exploreStore.searchQuery.trim() && exploreStore.searchFallbackNotice && sortedSkills.length > 0"
+          class="search-fallback-banner"
+          role="status"
+        >
+          <Icon icon="solar:info-circle-bold" class="fallback-banner-icon" />
+          <span>{{ exploreStore.searchFallbackNotice }}</span>
+        </div>
+
+        <div
+          v-if="exploreStore.isTruncated && sortedSkills.length > 0"
+          class="search-truncated-banner"
+          role="status"
+        >
+          <Icon icon="solar:info-circle-bold" class="fallback-banner-icon" />
+          <span>{{ t('skills.review.truncatedNotice', { count: totalSkillsCount }) }}</span>
+        </div>
+
         <!-- 空状态 / 同步中状态 -->
         <div v-if="exploreStore.isSyncing && sortedSkills.length === 0" class="empty-explore-state">
           <Icon icon="solar:restart-linear" class="empty-glyph spin-glyph" />
@@ -212,6 +258,9 @@
           <Icon icon="solar:box-minimalistic-linear" class="empty-glyph" />
           <template v-if="exploreStore.catalogSkills.length > 0">
             <p>{{ t('skills.noMatchingSkills') }}</p>
+            <p v-if="exploreStore.searchQuery.trim()" class="empty-search-subhint">
+              未找到与「{{ exploreStore.searchQuery.trim() }}」任务直接匹配的技能，已拦截不相关的泛化噪声结果
+            </p>
             <button type="button" class="empty-action-btn empty-action-btn--secondary" @click="clearDiscoveryFilters">{{ t('skills.review.clearFilters') }}</button>
           </template>
           <div v-else class="empty-sync-actions">
@@ -230,6 +279,22 @@
           </div>
         </div>
 
+        <!-- 页面级别：后续页加载失败状态（当当前页无内容且有错误时展示大提示） -->
+        <div v-else-if="exploreStore.loadMoreError && visibleSkills.length === 0" class="empty-explore-state page-error-state" role="alert">
+          <Icon icon="solar:danger-triangle-linear" class="empty-glyph error-glyph" />
+          <p class="error-msg">{{ exploreStore.loadMoreError }}</p>
+          <button type="button" class="empty-action-btn empty-action-btn--primary" @click="retryLoadCurrentPage">
+            <Icon icon="solar:restart-linear" />
+            <span>{{ t('skills.review.retry') }}</span>
+          </button>
+        </div>
+
+        <!-- 页面级别：后续页获取中状态（当前页暂无数据） -->
+        <div v-else-if="exploreStore.isLoadingMore && visibleSkills.length === 0" class="empty-explore-state page-loading-state" role="status">
+          <Icon icon="solar:restart-linear" class="empty-glyph spin-glyph" />
+          <p>{{ t('skills.review.pageLoading') }}</p>
+        </div>
+
         <!-- 技能卡片网格 -->
         <div v-else-if="viewMode === 'list'" class="skills-catalog-list">
           <SkillCompactRow v-for="skill in visibleSkills" :key="skill.id" :skill="skill" />
@@ -245,10 +310,21 @@
     </div>
     <nav v-if="sortedSkills.length > 0" class="catalog-pagination" :aria-label="t('skills.review.pagination')">
       <div class="page-summary">
-        <strong>{{ sortedSkills.length }}</strong>
+        <strong>{{ totalSkillsCount }}</strong>
         <span>{{ t('skills.review.skillsUnit') }}</span>
         <span class="page-summary-divider" aria-hidden="true"></span>
-        <span>{{ t('skills.review.showing', { start: (currentPage - 1) * pageSize + 1, end: Math.min(currentPage * pageSize, sortedSkills.length) }) }}</span>
+        <span>{{ t('skills.review.showing', { start: (currentPage - 1) * pageSize + 1, end: Math.min(currentPage * pageSize, totalSkillsCount) }) }}</span>
+        <span v-if="exploreStore.isLoadingMore" class="page-loading-inline" role="status">
+          <Icon icon="solar:restart-linear" class="spin-glyph" />
+          <span>{{ t('skills.review.loadingMore') }}</span>
+        </span>
+        <span v-else-if="exploreStore.loadMoreError" class="page-error-inline" role="alert">
+          <Icon icon="solar:danger-triangle-linear" class="error-glyph" />
+          <span class="error-text">{{ exploreStore.loadMoreError }}</span>
+          <button type="button" class="page-retry-inline-btn" @click="retryLoadCurrentPage">
+            {{ t('skills.review.retry') }}
+          </button>
+        </span>
       </div>
       <div class="page-actions">
         <div class="page-controls">
@@ -279,14 +355,25 @@ import PipelineCard from './PipelineCard.vue'
 import SkillCard from './SkillCard.vue'
 import SkillCompactRow from './SkillCompactRow.vue'
 import { skillCategoryLabel } from '@/utils/skill-category-label'
+import { computeRelevanceScore, expandSearchTerms } from '@/utils/skill-synonyms'
 
 const { t } = useI18n()
 const exploreStore = useSkillExploreStore()
 const skillsStore = useSkillsStore()
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const viewportRef = ref<HTMLElement | null>(null)
-const selectedCategory = ref('all')
-const sortBy = ref<'relevance' | 'popular' | 'name'>('relevance')
+const selectedCategory = computed({
+  get: () => exploreStore.selectedCategory,
+  set: (val: string) => {
+    exploreStore.selectedCategory = val
+  },
+})
+const sortBy = computed({
+  get: () => exploreStore.activeSort,
+  set: (val: 'relevance' | 'popular' | 'name') => {
+    exploreStore.activeSort = val
+  },
+})
 const viewMode = ref<'list' | 'grid'>('list')
 const currentPage = ref(1)
 const pageSize = ref(24)
@@ -295,37 +382,67 @@ const isMac = navigator.platform.toLowerCase().includes('mac')
 
 const availableCategories = computed(() => {
   const counts = new Map<string, number>()
-  for (const skill of exploreStore.filteredSkills) {
+  for (const skill of exploreStore.catalogSkills) {
     counts.set(skill.category, (counts.get(skill.category) || 0) + 1)
   }
   return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 })
 
-function matchScore(skill: (typeof exploreStore.filteredSkills)[number], terms: string[]): number {
-  const name = skill.name.toLowerCase()
-  const title = skill.titleZh.toLowerCase()
-  const category = `${skill.category} ${skillCategoryLabel(skill.category)}`.toLowerCase()
-  const tags = skill.tags.join(' ').toLowerCase()
-  return terms.reduce((score, term) => score +
-    (name === term ? 120 : name.startsWith(term) ? 80 : name.includes(term) ? 60 : 0) +
-    (title.includes(term) ? 30 : 0) +
-    (category.includes(term) ? 20 : 0) +
-    (tags.includes(term) ? 15 : 0), 0)
-}
-
 const sortedSkills = computed(() => {
   const skills = exploreStore.filteredSkills.filter(skill => selectedCategory.value === 'all' || skill.category === selectedCategory.value)
-  const terms = exploreStore.searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const query = exploreStore.searchQuery.trim()
+  const rawTerms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const expandedGroups = query ? expandSearchTerms(query) : []
+  const hasBackendRanking = Boolean(query && exploreStore.ftsSearchSkills !== null)
+  const backendOrderMap = hasBackendRanking
+    ? new Map((exploreStore.ftsSearchSkills || []).map((s, idx) => [s.id, idx]))
+    : null
+
   return [...skills].sort((a, b) => {
-    if (sortBy.value === 'name') return a.name.localeCompare(b.name)
-    if (sortBy.value === 'relevance' && terms.length) {
-      const difference = matchScore(b, terms) - matchScore(a, terms)
-      if (difference) return difference
+    if (sortBy.value === 'name') {
+      const cmp = a.name.localeCompare(b.name)
+      if (cmp !== 0) return cmp
+      return a.id.localeCompare(b.id)
     }
-    return (b.metrics?.githubStars ?? b.stars ?? 0) - (a.metrics?.githubStars ?? a.stars ?? 0) || a.name.localeCompare(b.name)
+
+    // 1. 若有搜索词且选择按相关度排序，优先使用 v3.2 FTS5 + 字段权威度得分；若处于本地回退模式则使用本地相关度得分
+    if (sortBy.value === 'relevance' && query) {
+      if (hasBackendRanking && backendOrderMap) {
+        const scoreB = exploreStore.getSkillSearchScore(b.id) ?? 0
+        const scoreA = exploreStore.getSkillSearchScore(a.id) ?? 0
+        if (scoreB !== scoreA) return scoreB - scoreA
+        const idxA = backendOrderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER
+        const idxB = backendOrderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER
+        if (idxA !== idxB) return idxA - idxB
+        return a.id.localeCompare(b.id)
+      } else if (rawTerms.length) {
+        const diff = computeRelevanceScore(b, rawTerms, expandedGroups) - computeRelevanceScore(a, rawTerms, expandedGroups)
+        if (diff !== 0) return diff
+      }
+    }
+
+    // 2. 热门排序 (popular) 或默认浏览排序：按明确热度指标降序，同分稳定兜底
+    const starsA = a.metrics?.githubStars ?? a.stars ?? 0
+    const starsB = b.metrics?.githubStars ?? b.stars ?? 0
+    if (starsB !== starsA) return starsB - starsA
+
+    const localStarsA = a.stars ?? 0
+    const localStarsB = b.stars ?? 0
+    if (localStarsB !== localStarsA) return localStarsB - localStarsA
+
+    const nameCmp = a.name.localeCompare(b.name)
+    if (nameCmp !== 0) return nameCmp
+
+    return a.id.localeCompare(b.id)
   })
 })
-const pageCount = computed(() => Math.max(1, Math.ceil(sortedSkills.value.length / pageSize.value)))
+const totalSkillsCount = computed(() => {
+  if (exploreStore.searchQuery.trim() && exploreStore.totalMatched > 0) {
+    return exploreStore.totalMatched
+  }
+  return sortedSkills.value.length
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(totalSkillsCount.value / pageSize.value)))
 const visibleSkills = computed(() => sortedSkills.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 const pageButtons = computed<(number | '…')[]>(() => {
   const pages = new Set([1, pageCount.value])
@@ -339,8 +456,12 @@ const pageButtons = computed<(number | '…')[]>(() => {
 })
 
 function goToPage(page: number) {
-  currentPage.value = Math.min(Math.max(1, page), pageCount.value)
+  const targetPage = Math.min(Math.max(1, page), pageCount.value)
+  currentPage.value = targetPage
   viewportRef.value?.scrollTo({ top: 0, behavior: 'instant' })
+  if (targetPage * pageSize.value > sortedSkills.value.length && exploreStore.hasMore) {
+    void exploreStore.loadMoreSearchResults(targetPage * pageSize.value)
+  }
 }
 
 function submitJumpPage() {
@@ -349,10 +470,14 @@ function submitJumpPage() {
   jumpPage.value = ''
 }
 
+function retryLoadCurrentPage() {
+  if (exploreStore.hasMore) {
+    void exploreStore.loadMoreSearchResults(currentPage.value * pageSize.value)
+  }
+}
+
 function clearDiscoveryFilters() {
-  exploreStore.searchQuery = ''
-  selectedCategory.value = 'all'
-  exploreStore.selectedStage = 'all'
+  exploreStore.clearDiscoveryFilters()
 }
 
 watch(() => [exploreStore.searchQuery, exploreStore.selectedStage, selectedCategory.value, sortBy.value, pageSize.value], () => {
@@ -360,6 +485,11 @@ watch(() => [exploreStore.searchQuery, exploreStore.selectedStage, selectedCateg
   viewportRef.value?.scrollTo({ top: 0 })
 })
 watch(pageCount, count => { if (currentPage.value > count) currentPage.value = count })
+watch(currentPage, page => {
+  if (page * pageSize.value > sortedSkills.value.length && exploreStore.hasMore) {
+    void exploreStore.loadMoreSearchResults(page * pageSize.value)
+  }
+})
 
 function handleSearchShortcut(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f' && skillsStore.modalVisible && exploreStore.activeMainTab === 'explore') {
@@ -893,6 +1023,64 @@ const currentSectionHeading = computed(() => {
   }
 }
 
+.search-tier-pill {
+  align-items: center;
+  border-radius: 9999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 9px;
+
+  &--exact {
+    background: color-mix(in srgb, var(--lumina-success, #10b981) 14%, transparent);
+    border: 0.5px solid color-mix(in srgb, var(--lumina-success, #10b981) 30%, transparent);
+    color: var(--lumina-success, #10b981);
+  }
+
+  &--general_fallback {
+    background: color-mix(in srgb, #f59e0b 14%, transparent);
+    border: 0.5px solid color-mix(in srgb, #f59e0b 32%, transparent);
+    color: #d97706;
+  }
+
+  &--none {
+    background: var(--lumina-fill-quaternary);
+    border: 0.5px solid var(--lumina-separator);
+    color: var(--lumina-text-secondary);
+  }
+}
+
+.search-fallback-banner,
+.search-truncated-banner {
+  align-items: center;
+  background: color-mix(in srgb, #f59e0b 10%, var(--lumina-surface-base));
+  border: 0.5px solid color-mix(in srgb, #f59e0b 30%, var(--lumina-separator));
+  border-radius: 8px;
+  color: var(--lumina-text);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+
+  .fallback-banner-icon {
+    color: #d97706;
+    flex-shrink: 0;
+    font-size: 15px;
+  }
+}
+
+.empty-search-subhint {
+  color: var(--lumina-text-tertiary);
+  font-size: 11.5px;
+  margin: -4px 0 4px;
+  max-width: 440px;
+  text-align: center;
+}
+
 .spin-glyph {
   animation: spin 1s linear infinite;
 }
@@ -903,6 +1091,70 @@ const currentSectionHeading = computed(() => {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+.page-loading-inline,
+.page-error-inline {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.page-loading-inline {
+  color: var(--lumina-text-tertiary);
+}
+
+.page-error-inline {
+  color: var(--lumina-error, #ef4444);
+
+  .error-glyph {
+    color: var(--lumina-error, #ef4444);
+    font-size: 13px;
+  }
+
+  .error-text {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.page-retry-inline-btn {
+  align-items: center;
+  background: var(--lumina-primary-soft);
+  border: 0.5px solid var(--lumina-primary);
+  border-radius: 4px;
+  color: var(--lumina-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10.5px;
+  font-weight: 600;
+  height: 20px;
+  padding: 0 8px;
+  transition: all 120ms ease;
+
+  &:hover {
+    background: var(--lumina-primary);
+    color: var(--lumina-on-accent, #ffffff);
+  }
+}
+
+.page-error-state {
+  .error-glyph {
+    color: var(--lumina-error, #ef4444);
+    font-size: 32px;
+  }
+
+  .error-msg {
+    color: var(--lumina-text-secondary);
+    font-size: 13px;
+    margin: 0;
+    max-width: 480px;
+    text-align: center;
   }
 }
 </style>

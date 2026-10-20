@@ -9,6 +9,7 @@ import {
   continueGitRebase,
   fetchGitChanges,
   type GitCommandResult,
+  type GitRepositoryState,
   markGitFilesResolved,
   pullGitChanges,
   pushGitChanges,
@@ -52,7 +53,7 @@ interface GitCommandProgressEvent {
 
 export function useGitRemote(
   getDisplayRepoPath: () => string,
-  getRepositoryState: () => { remoteName?: string; hasCommits?: boolean; upstreamGone?: boolean; upstream?: string; ahead?: number; behind?: number; remoteUrl?: string } | null,
+  getRepositoryState: () => GitRepositoryState | null,
   setError: (msg: string) => void,
   loadSnapshotByPath: (path: string) => Promise<void>,
   clearReviewSelection: () => void,

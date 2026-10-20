@@ -243,6 +243,27 @@ const MIGRATIONS: &[&str] = &[
       SET display_name = COALESCE(NULLIF(sub_skill_id, ''), skill_id)
       WHERE display_name = '';
     "#,
+    r#"
+    CREATE INDEX IF NOT EXISTS idx_skill_registry_category
+      ON skill_registry_entries(category, stage);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS skill_registry_fts USING fts5(
+      id UNINDEXED,
+      name_tokens,
+      title_tokens,
+      task_tokens,
+      guide_tokens,
+      desc_tokens,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS skill_registry_fts_vocab
+      USING fts5vocab(skill_registry_fts, 'row');
+    "#,
+    r#"
+    -- Migration 11: Add operationId, itemKey, targetOutcomesJson, retryOfOperationId to skill_install_history
+    SELECT 1;
+    "#,
 ];
 
 pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
@@ -264,23 +285,101 @@ pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
 
 fn apply_migration(transaction: &Transaction<'_>, version: usize, sql: &str) -> Result<(), String> {
     if version == 9 {
+        let table_exists: bool = transaction
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'skill_install_history'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if table_exists {
+            let mut statement = transaction
+                .prepare("PRAGMA table_info(skill_install_history)")
+                .map_err(|error| format!("检查技能安装记录字段失败: {error}"))?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?;
+            if !columns.iter().any(|column| column == "display_name") {
+                transaction
+                    .execute_batch("ALTER TABLE skill_install_history ADD COLUMN display_name TEXT NOT NULL DEFAULT '';")
+                    .map_err(|error| format!("补齐技能安装记录名称字段失败: {error}"))?;
+            }
+        }
+    }
+    if version == 10 {
         let mut statement = transaction
-            .prepare("PRAGMA table_info(skill_install_history)")
-            .map_err(|error| format!("检查技能安装记录字段失败: {error}"))?;
+            .prepare("PRAGMA table_info(skill_registry_entries)")
+            .map_err(|error| format!("检查技能目录表结构失败: {error}"))?;
         let columns = statement
             .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?
+            .map_err(|error| format!("读取技能目录表字段失败: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?;
-        if !columns.iter().any(|column| column == "display_name") {
-            transaction
-                .execute_batch("ALTER TABLE skill_install_history ADD COLUMN display_name TEXT NOT NULL DEFAULT '';")
-                .map_err(|error| format!("补齐技能安装记录名称字段失败: {error}"))?;
+            .map_err(|error| format!("解析技能目录表字段失败: {error}"))?;
+
+        let required_columns: &[(&str, &str)] = &[
+            ("title_zh", "TEXT NOT NULL DEFAULT ''"),
+            ("category", "TEXT NOT NULL DEFAULT 'general'"),
+            ("tags_text", "TEXT NOT NULL DEFAULT ''"),
+            ("guide_text", "TEXT NOT NULL DEFAULT ''"),
+            ("repo_key", "TEXT NOT NULL DEFAULT ''"),
+            ("repo_stars", "INTEGER NOT NULL DEFAULT 0"),
+            ("spec_score", "INTEGER NOT NULL DEFAULT 0"),
+        ];
+        for (col_name, col_def) in required_columns {
+            if !columns.iter().any(|c| c == col_name) {
+                let alter_sql = format!(
+                    "ALTER TABLE skill_registry_entries ADD COLUMN {col_name} {col_def};"
+                );
+                transaction
+                    .execute_batch(&alter_sql)
+                    .map_err(|error| format!("补齐技能目录字段 {col_name} 失败: {error}"))?;
+            }
+        }
+    }
+    if version == 11 {
+        let table_exists: bool = transaction
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'skill_install_history'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if table_exists {
+            let mut statement = transaction
+                .prepare("PRAGMA table_info(skill_install_history)")
+                .map_err(|error| format!("检查技能安装记录表结构失败: {error}"))?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|error| format!("读取技能安装记录字段失败: {error}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("解析技能安装记录字段失败: {error}"))?;
+
+            let history_columns: &[(&str, &str)] = &[
+                ("operation_id", "TEXT"),
+                ("item_key", "TEXT"),
+                ("target_outcomes_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("retry_of_operation_id", "TEXT"),
+            ];
+            for (col_name, col_def) in history_columns {
+                if !columns.iter().any(|c| c == col_name) {
+                    let alter_sql = format!(
+                        "ALTER TABLE skill_install_history ADD COLUMN {col_name} {col_def};"
+                    );
+                    transaction
+                        .execute_batch(&alter_sql)
+                        .map_err(|error| format!("补齐技能安装记录字段 {col_name} 失败: {error}"))?;
+                }
+            }
         }
     }
     transaction
         .execute_batch(sql)
         .map_err(|error| format!("执行 SQLite migration v{version} 失败: {error}"))?;
+    if version == 10 {
+        crate::storage::skill_registry_repository::backfill_skill_registry_fts_tx(transaction)?;
+    }
     transaction
         .pragma_update(None, "user_version", version)
         .map_err(|error| format!("更新 SQLite schema 版本失败: {error}"))
@@ -328,12 +427,35 @@ mod tests {
             .unwrap()
             .any(|column| column.unwrap() == "display_name");
         assert!(display_name_exists);
+
+        let fts_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('skill_registry_fts', 'skill_registry_fts_vocab')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fts table count");
+        assert_eq!(fts_exists, 2);
     }
 
     #[test]
     fn migration_repairs_existing_install_history_without_losing_rows() {
         let mut connection = Connection::open_in_memory().unwrap();
         connection.execute_batch(r#"
+            CREATE TABLE skill_registry_snapshot (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              version TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              description TEXT,
+              pipelines_json TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE TABLE skill_registry_entries (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              description TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              payload_json TEXT NOT NULL
+            );
             CREATE TABLE skill_install_history (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               skill_id TEXT NOT NULL,
@@ -362,6 +484,62 @@ mod tests {
         assert_eq!(name, "native-ui");
         assert_eq!(source, "https://example.com/native");
         run_migrations(&mut connection).unwrap();
-        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 9);
+        assert_eq!(connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 11);
+    }
+
+    #[test]
+    fn migration_v10_upgrades_legacy_v9_skill_registry_and_backfills_fts5() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(r#"
+            CREATE TABLE skill_registry_snapshot (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              version TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              description TEXT,
+              pipelines_json TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE TABLE skill_registry_entries (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              description TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              payload_json TEXT NOT NULL
+            );
+            INSERT INTO skill_registry_entries (id, name, description, stage, payload_json)
+              VALUES (
+                'legacy-i18n-1',
+                'vue-i18n-translator',
+                'Translate Vue3 and Angular locale files',
+                'coding',
+                '{"id":"legacy-i18n-1","name":"vue-i18n-translator","titleZh":"Vue3 与 Angular 国际化配置助手","description":"Translate Vue3 and Angular locale files","stage":"coding","category":"frontend","tags":["i18n","locale"],"source":{"repoKey":"acme/vue-i18n-translator"},"metrics":{"github":{"stars":42},"quality":{"specCompleteness":90}}}'
+              );
+            PRAGMA user_version = 9;
+        "#).unwrap();
+
+        run_migrations(&mut connection).unwrap();
+
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 11);
+
+        let (title_zh, category, repo_stars, spec_score): (String, String, i64, i64) = connection
+            .query_row(
+                "SELECT title_zh, category, repo_stars, spec_score FROM skill_registry_entries WHERE id = 'legacy-i18n-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(title_zh, "Vue3 与 Angular 国际化配置助手");
+        assert_eq!(category, "frontend");
+        assert_eq!(repo_stars, 42);
+        assert_eq!(spec_score, 90);
+
+        let fts_match_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM skill_registry_fts WHERE skill_registry_fts MATCH '\"angular\" AND \"国际 际化\"'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_match_count, 1, "Legacy v9 entries must be searchable in FTS5 immediately after v10 migration");
     }
 }

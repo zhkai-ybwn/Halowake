@@ -104,6 +104,7 @@ import QuotaCardCredits from './card/QuotaCardCredits.vue'
 import QuotaCardPace from './card/QuotaCardPace.vue'
 import { openExternalUrl } from '@/services/app-service'
 import type { ProviderQuota, QuotaKind } from '@/services/quota/quota-service'
+import { formatRelativeTime as formatRelativeTimeHelper } from '@/utils/quota'
 
 const props = defineProps<{
   quota: ProviderQuota
@@ -243,12 +244,7 @@ const hasOtherQuotas = computed(() => {
 })
 
 function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return t('quota.justNow')
-  if (mins < 60) return `${mins} ${t('quota.minsAgo')}`
-  const hours = Math.floor(mins / 60)
-  return `${hours} ${t('quota.hoursAgo')}`
+  return formatRelativeTimeHelper(timestamp, t)
 }
 
 async function handleOpenExternal(url: string) {

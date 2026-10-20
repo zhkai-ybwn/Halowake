@@ -253,6 +253,12 @@
           <span :style="exploreStore.installProgress.percent === null ? undefined : { width: `${exploreStore.installProgress.percent}%` }"></span>
         </div>
         <p v-if="exploreStore.installError" class="install-feedback__error">{{ exploreStore.installError }}</p>
+        <div
+          v-if="exploreStore.lastInstallBatchResult && exploreStore.lastInstallBatchResult.installedPaths.length > 0 && exploreStore.installError"
+          class="install-feedback__partial-paths"
+        >
+          <small>已完成路径（{{ exploreStore.lastInstallBatchResult.installedPaths.length }}）：{{ exploreStore.lastInstallBatchResult.installedPaths.join('、') }}</small>
+        </div>
       </div>
 
       <!-- Sheet Footer Actions -->
@@ -267,10 +273,20 @@
         </button>
 
         <button
+          v-if="hasRetryableFailedItems && !isInstalling"
+          type="button"
+          class="sheet-btn sheet-btn--ghost"
+          @click="handleConfirm(true)"
+        >
+          <Icon icon="solar:restart-linear" />
+          <span>重试失败项 ({{ exploreStore.lastInstallBatchResult?.failedCount }})</span>
+        </button>
+
+        <button
           type="button"
           class="sheet-btn sheet-btn--primary"
           :disabled="isInstalling || isConfirmDisabled"
-          @click="handleConfirm"
+          @click="handleConfirm(false)"
         >
           <Icon
             :icon="isInstalling ? 'solar:refresh-linear' : 'solar:cloud-download-linear'"
@@ -290,27 +306,42 @@ import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillExploreStore } from '@/stores/skill-explore'
 import { useSkillsStore } from '@/stores/skills'
-import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { InstallPreference } from '@/types/skills'
 
 const { t } = useI18n()
 const message = useMessage()
 const exploreStore = useSkillExploreStore()
 const skillsStore = useSkillsStore()
+const workspaceStore = useWorkspaceStore()
 
-const localPref = ref<InstallPreference>({ ...exploreStore.installPreference })
+function createDraftPreference(): InstallPreference {
+  const base = exploreStore.reinstallPreferenceOverride ?? exploreStore.installPreference
+  return {
+    ...base,
+    targetAgents: Array.isArray(base.targetAgents) ? [...base.targetAgents] : ['codex'],
+  }
+}
+
+const localPref = ref<InstallPreference>(createDraftPreference())
 
 watch(
   () => exploreStore.installModalVisible,
   visible => {
     if (visible) {
-      localPref.value = { ...exploreStore.installPreference }
+      workspaceStore.refreshFromStorage()
+      localPref.value = createDraftPreference()
     }
   }
 )
 
 const activeProjectCwd = computed(() => {
-  return localStorage.getItem(GIT_REPO_STORAGE_KEY) || ''
+  return (localPref.value.customProjectPath || workspaceStore.currentProjectPath || '').trim()
+})
+
+const hasRetryableFailedItems = computed(() => {
+  const last = exploreStore.lastInstallBatchResult
+  return !!last && (last.status === 'partial' || last.status === 'failed') && last.failedCount > 0
 })
 
 const isPipeline = computed(() => !!exploreStore.pendingPipeline)
@@ -381,7 +412,7 @@ function toggleSubChecked(subId: string) {
   if (cur.includes(subId)) {
     exploreStore.selectedBundleSubSkillIds = cur.filter(id => id !== subId)
   } else {
-    exploreStore.selectedBundleSubSkillIds.push(subId)
+    exploreStore.selectedBundleSubSkillIds = [...cur, subId]
   }
 }
 
@@ -406,16 +437,27 @@ function toggleAgent(agentKey: string) {
       localPref.value.targetAgents = cur.filter(a => a !== agentKey)
     }
   } else {
-    localPref.value.targetAgents.push(agentKey)
+    localPref.value.targetAgents = [...cur, agentKey]
   }
 }
 
-async function handleConfirm() {
-  exploreStore.updateInstallPreference(localPref.value)
+async function handleConfirm(onlyFailed = false) {
   const currentCwd = activeProjectCwd.value || undefined
 
-  const res = await exploreStore.executeInstall(currentCwd)
-  if (res.success) {
+  const res = await exploreStore.executeInstall({
+    projectCwd: currentCwd,
+    preference: localPref.value,
+    persistPreference: localPref.value.remember,
+    onlyFailed,
+  })
+
+  if (res.status === 'skipped') {
+    await skillsStore.scan(currentCwd)
+    message.info(res.message)
+    return
+  }
+
+  if (res.status === 'installed') {
     const scan = await skillsStore.scan(currentCwd)
     if (skillsStore.errorMessage) {
       message.warning(t('skills.review.install.scanFailed', { error: skillsStore.errorMessage }))
@@ -434,8 +476,11 @@ async function handleConfirm() {
       .map(skill => skill.name))
     skillsStore.revealInstalledSkills(matchingNames.size === 1 ? [...matchingNames][0] : '')
     exploreStore.activeMainTab = 'installed'
+  } else if (res.status === 'partial') {
+    await skillsStore.scan(currentCwd)
+    message.warning(res.message)
   } else {
-    message.error(t('skills.review.install.failedHint'))
+    message.error(res.message || t('skills.review.install.failedHint'))
   }
 }
 </script>

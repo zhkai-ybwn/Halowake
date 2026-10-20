@@ -8,10 +8,7 @@ use super::{
 };
 
 pub(super) fn load_file_actions(repo_path: &str) -> BTreeMap<String, String> {
-    let Ok(status_raw) = runner::run_git_raw(
-        repo_path,
-        &["status", "--porcelain=v1", "--untracked-files=all"],
-    ) else {
+    let Ok(status_raw) = runner::load_git_status(repo_path) else {
         return BTreeMap::new();
     };
 

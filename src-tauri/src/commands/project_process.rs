@@ -14,7 +14,10 @@ use crate::storage::AppDatabase;
 use tauri::{Manager, State};
 
 mod log_parser;
+mod port_inspector;
 mod process_runtime;
+
+pub use port_inspector::PortProcessInfo;
 
 #[cfg(test)]
 use log_parser::{
@@ -198,6 +201,22 @@ fn open_url(url: &str) -> Result<(), String> {
             .map_err(|e| format!("打开链接失败: {}", e))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn find_processes_by_port(
+    port: u16,
+    state: State<'_, ProjectProcessState>,
+) -> Result<Vec<PortProcessInfo>, String> {
+    port_inspector::find_processes(port, &state)
+}
+
+#[tauri::command]
+pub async fn kill_process_by_pid(
+    pid: u32,
+    state: State<'_, ProjectProcessState>,
+) -> Result<bool, String> {
+    port_inspector::kill_process(pid, &state)
 }
 
 #[cfg(test)]

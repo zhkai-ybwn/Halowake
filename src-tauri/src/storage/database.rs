@@ -44,12 +44,20 @@ impl AppDatabase {
         Ok(connection)
     }
 
+    pub fn connect_read(&self) -> Result<Connection, String> {
+        let connection = Connection::open(&self.path)
+            .map_err(|error| format!("打开 SQLite 数据库失败 {}: {error}", self.path.display()))?;
+        connection
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(|error| format!("设置 SQLite busy timeout 失败: {error}"))?;
+        Ok(connection)
+    }
+
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_path(path: PathBuf) -> Self {
+    pub fn from_path(path: PathBuf) -> Self {
         Self { path }
     }
 }

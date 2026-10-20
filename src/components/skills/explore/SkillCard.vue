@@ -29,9 +29,13 @@
     <div class="card-identity-header" @click="exploreStore.openDetail(skill)">
       <div class="identity-primary-row">
         <span class="skill-code-name">{{ skill.name }}</span>
-        <span v-if="isInstalled" class="installed-mini-pill">
+        <span
+          v-if="installedTargets.count > 0"
+          class="installed-mini-pill"
+          :title="installedTargetSummary ? `${t('skills.installedTag')}: ${installedTargetSummary}` : t('skills.installedTag')"
+        >
           <Icon icon="solar:check-circle-bold" />
-          <span>{{ t('skills.installedTag') }}</span>
+          <span>{{ t('skills.installedTag') }}<template v-if="installedTargets.labels.length === 1"> · {{ installedTargets.labels[0] }}</template></span>
         </span>
       </div>
 
@@ -99,6 +103,16 @@
       {{ skill.description }}
     </p>
 
+    <div
+      v-if="matchReason"
+      class="card-match-reason"
+      :class="`card-match-reason--${matchReason.tier}`"
+      :title="matchReason.summary"
+    >
+      <Icon :icon="matchReason.tier === 'exact' ? 'solar:verified-check-bold' : 'solar:compass-linear'" />
+      <span>{{ matchReason.summary }}</span>
+    </div>
+
     <!-- 5. Tags & Stats Row -->
     <div class="card-tags-row">
       <span v-for="tag in customTags" :key="tag" class="micro-custom-tag" :title="t('skills.review.card.customCategory', { tag })">
@@ -132,7 +146,8 @@
           v-if="isInstalled"
           type="button"
           class="card-action-btn card-action-btn--installed"
-          disabled
+          :title="installedTargetSummary ? `${t('skills.installedTag')}: ${installedTargetSummary}` : t('skills.installedTag')"
+          @click="exploreStore.openInstallDialog(skill)"
         >
           <Icon icon="solar:check-read-linear" />
           <span>{{ t('skills.installedTag') }}</span>
@@ -182,12 +197,24 @@ const skillsStore = useSkillsStore()
 
 const isSubSkillsOpen = ref(false)
 
+const installedTargets = computed(() => {
+  return exploreStore.getSkillInstalledTargets(props.skill, skillsStore.skills)
+})
+
+const installedTargetSummary = computed(() => {
+  return installedTargets.value.labels.join(' / ')
+})
+
 const isInstalled = computed(() => {
-  return exploreStore.isSkillInstalled(props.skill.id, skillsStore.skills)
+  return exploreStore.isSkillInstalled(props.skill, skillsStore.skills)
+})
+
+const matchReason = computed(() => {
+  return exploreStore.getSkillMatchReason(props.skill.id)
 })
 
 const customTags = computed(() => {
-  return exploreStore.userCustomCategories[props.skill.id] || []
+  return exploreStore.getSkillCustomCategories(props.skill)
 })
 
 const displayTags = computed(() => {
@@ -574,7 +601,33 @@ const formattedStars = computed(() => {
     background: color-mix(in srgb, var(--lumina-success, #27853f) 12%, transparent);
     border: 0.5px solid color-mix(in srgb, var(--lumina-success, #27853f) 20%, transparent);
     color: var(--lumina-success, #27853f);
-    cursor: default;
+    cursor: pointer;
+  }
+}
+
+.card-match-reason {
+  align-items: center;
+  border-radius: 5px;
+  display: inline-flex;
+  font-size: 10.5px;
+  font-weight: 600;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &--exact {
+    background: color-mix(in srgb, var(--lumina-success, #10b981) 12%, transparent);
+    border: 0.5px solid color-mix(in srgb, var(--lumina-success, #10b981) 28%, transparent);
+    color: var(--lumina-success, #10b981);
+  }
+
+  &--general {
+    background: color-mix(in srgb, #f59e0b 12%, transparent);
+    border: 0.5px solid color-mix(in srgb, #f59e0b 28%, transparent);
+    color: #d97706;
   }
 }
 </style>

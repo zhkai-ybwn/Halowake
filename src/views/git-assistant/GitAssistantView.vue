@@ -280,7 +280,7 @@
               <div class="recent-repo-item__main">
                 <div v-if="editingAliasPath === repo.path" class="recent-repo-alias-edit">
                   <input
-                    :ref="el => setAliasInputRef(el, repo.path)"
+                    :ref="el => setAliasInputRef(el as HTMLInputElement | null, repo.path)"
                     class="recent-repo-alias-input"
                     type="text"
                     :value="repo.name"
@@ -686,6 +686,11 @@ import {
   formatHistoryTime,
 } from '@/composables/git-assistant/utils'
 import type { GitFileStatus } from '@/types/git'
+import type {
+  GitAssistantStatusFilter,
+  GitAssistantFileView,
+  GitAssistantFileGroup,
+} from './git-assistant.types'
 
 const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffViewer.vue'))
 

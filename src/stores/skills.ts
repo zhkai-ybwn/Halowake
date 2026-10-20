@@ -60,8 +60,13 @@ export const useSkillsStore = defineStore('skills', () => {
   const installationRevealCount = ref(0)
   const installationRevealQuery = ref('')
   let scanRequestId = 0
+  let checkRequestId = 0
+  let scopeGeneration = 0
+  let activeProjectCwd: string | undefined
 
-  const updateCount = computed(() => skills.value.filter(s => s.hasUpdate).length)
+  const updateCount = computed(() =>
+    skills.value.filter(s => s.hasUpdate && s.management !== 'unmanaged' && s.management !== 'external').length
+  )
   const hasUpdates = computed(() => updateCount.value > 0)
 
   const availableCategories = computed(() => {
@@ -118,24 +123,30 @@ export const useSkillsStore = defineStore('skills', () => {
   })
 
   async function scan(projectCwd?: string) {
+    activeProjectCwd = projectCwd
+    const gen = ++scopeGeneration
     const requestId = ++scanRequestId
     loading.value = true
     errorMessage.value = null
     const prevIds = new Set(skills.value.map(s => s.id))
     try {
       const scanned = await scanAgentSkills(projectCwd)
-      if (requestId !== scanRequestId) {
+      if (requestId !== scanRequestId || gen !== scopeGeneration) {
         return { total: skills.value.length, newCount: 0, newSkills: [] }
       }
       // 保留已有的更新状态（如果存在）
       const updateMap = new Map(skills.value.map(s => [s.id, s.hasUpdate]))
       const summaryMap = new Map(skills.value.map(s => [s.id, s.updateSummary]))
       const behindMap = new Map(skills.value.map(s => [s.id, s.commitsBehind]))
+      const statusMap = new Map(skills.value.map(s => [s.id, s.updateStatus]))
+      const errorMap = new Map(skills.value.map(s => [s.id, s.updateError]))
       scanned.forEach(s => {
         if (updateMap.has(s.id)) {
           s.hasUpdate = updateMap.get(s.id) || false
           s.updateSummary = summaryMap.get(s.id)
           s.commitsBehind = behindMap.get(s.id) || 0
+          s.updateStatus = statusMap.get(s.id) ?? s.updateStatus
+          s.updateError = errorMap.get(s.id) ?? s.updateError
         }
         computeSkillMetadata(s)
       })
@@ -143,26 +154,46 @@ export const useSkillsStore = defineStore('skills', () => {
       skills.value = scanned
       return { total: scanned.length, newCount: newSkills.length, newSkills }
     } catch (err: unknown) {
-      if (requestId !== scanRequestId) {
+      if (requestId !== scanRequestId || gen !== scopeGeneration) {
         return { total: skills.value.length, newCount: 0, newSkills: [] }
       }
       console.warn('Failed to scan agent skills:', err)
       errorMessage.value = String(err)
       return { total: skills.value.length, newCount: 0, newSkills: [] }
     } finally {
-      if (requestId === scanRequestId) loading.value = false
+      if (requestId === scanRequestId && gen === scopeGeneration) loading.value = false
     }
   }
 
   async function checkUpdates(projectCwd?: string) {
-    if (checkingUpdates.value) {
-      return { total: skills.value.length, newCount: 0, newSkills: [], updateCount: updateCount.value }
+    if (checkingUpdates.value && projectCwd === activeProjectCwd) {
+      return {
+        total: skills.value.length,
+        newCount: 0,
+        newSkills: [],
+        updateCount: updateCount.value,
+        unknownCount: 0,
+        unsupportedCount: 0,
+      }
     }
+    activeProjectCwd = projectCwd
+    const gen = ++scopeGeneration
+    const reqId = ++checkRequestId
     checkingUpdates.value = true
     errorMessage.value = null
     const prevIds = new Set(skills.value.map(s => s.id))
     try {
       const updated = await checkSkillsUpdates(projectCwd)
+      if (gen !== scopeGeneration || reqId !== checkRequestId) {
+        return {
+          total: skills.value.length,
+          newCount: 0,
+          newSkills: [],
+          updateCount: updateCount.value,
+          unknownCount: 0,
+          unsupportedCount: 0,
+        }
+      }
       updated.forEach(computeSkillMetadata)
       const newSkills = prevIds.size > 0 ? updated.filter(s => !prevIds.has(s.id)) : []
       skills.value = updated
@@ -171,44 +202,85 @@ export const useSkillsStore = defineStore('skills', () => {
         total: updated.length,
         newCount: newSkills.length,
         newSkills,
-        updateCount: updated.filter(s => s.hasUpdate).length,
+        updateCount: updated.filter(s => s.hasUpdate && s.management !== 'unmanaged' && s.management !== 'external').length,
+        unknownCount: updated.filter(s => s.updateStatus === 'unknown' || s.updateStatus === 'error').length,
+        unsupportedCount: updated.filter(s => s.updateStatus === 'unsupported').length,
       }
     } catch (err: unknown) {
+      if (gen !== scopeGeneration || reqId !== checkRequestId) {
+        return {
+          total: skills.value.length,
+          newCount: 0,
+          newSkills: [],
+          updateCount: updateCount.value,
+          unknownCount: 0,
+          unsupportedCount: 0,
+        }
+      }
       console.warn('Failed to check agent skills updates:', err)
       errorMessage.value = String(err)
-      return { total: skills.value.length, newCount: 0, newSkills: [], updateCount: updateCount.value }
+      return {
+        total: skills.value.length,
+        newCount: 0,
+        newSkills: [],
+        updateCount: updateCount.value,
+        unknownCount: 0,
+        unsupportedCount: 0,
+      }
     } finally {
-      checkingUpdates.value = false
+      if (reqId === checkRequestId) checkingUpdates.value = false
     }
   }
 
   async function updateSingle(skill: AgentSkill, force = false): Promise<SkillUpdateResult> {
-    if (updatingPaths.value.includes(skill.path)) {
-      return { skillId: skill.id, success: false, message: '正在更新中' }
+    if (skill.management === 'unmanaged' || skill.management === 'external' || skill.externallyManaged) {
+      return {
+        skillId: skill.id,
+        success: false,
+        message: '未受管或外部管理技能不支持自动更新，请打开目录手动管理',
+      }
+    }
+    if (updatingPaths.value.includes(skill.path) || uninstallingPaths.value.includes(skill.path)) {
+      return { skillId: skill.id, success: false, message: '正在执行其他操作，请稍候' }
     }
 
+    const gen = scopeGeneration
     updatingPaths.value.push(skill.path)
     try {
       const res = await updateAgentSkill(skill.path, force)
-      if (res.success) {
+      if (res.success && gen === scopeGeneration) {
         // 更新本地状态
         const idx = skills.value.findIndex(s => s.path === skill.path)
         if (idx !== -1) {
           skills.value[idx].hasUpdate = false
+          skills.value[idx].updateStatus = 'up_to_date'
+          skills.value[idx].updateError = undefined
           skills.value[idx].commitsBehind = 0
           skills.value[idx].currentCommit = res.newCommit || skills.value[idx].currentCommit
           skills.value[idx].isDirty = false
           skills.value[idx].updateSummary = undefined
+          if (skills.value[idx].latestVersion) {
+            skills.value[idx].version = skills.value[idx].latestVersion
+            skills.value[idx].latestVersion = undefined
+          }
         }
       }
       return res
+    } catch (err: unknown) {
+      return {
+        skillId: skill.id,
+        success: false,
+        message: err instanceof Error ? err.message : String(err),
+      }
     } finally {
       updatingPaths.value = updatingPaths.value.filter(p => p !== skill.path)
     }
   }
 
   async function updateAll(): Promise<SkillUpdateResult[]> {
-    const toUpdate = skills.value.filter(s => s.hasUpdate && s.isGitRepo)
+    const toUpdate = skills.value.filter(
+      s => s.hasUpdate && s.management !== 'unmanaged' && s.management !== 'external' && !s.externallyManaged
+    )
     const results: SkillUpdateResult[] = []
 
     for (const skill of toUpdate) {
@@ -221,10 +293,17 @@ export const useSkillsStore = defineStore('skills', () => {
 
   async function uninstallSingle(skill: AgentSkill, projectCwd?: string): Promise<void> {
     if (uninstallingPaths.value.includes(skill.path)) return
+    if (updatingPaths.value.includes(skill.path)) {
+      throw new Error('技能正在更新中，无法同时卸载')
+    }
+    const gen = scopeGeneration
+    const targetCwd = projectCwd !== undefined ? projectCwd : activeProjectCwd
     uninstallingPaths.value.push(skill.path)
     try {
-      await uninstallAgentSkill(skill.path, projectCwd)
-      await scan(projectCwd)
+      await uninstallAgentSkill(skill.path, targetCwd)
+      if (gen === scopeGeneration) {
+        await scan(targetCwd)
+      }
     } finally {
       uninstallingPaths.value = uninstallingPaths.value.filter(path => path !== skill.path)
     }

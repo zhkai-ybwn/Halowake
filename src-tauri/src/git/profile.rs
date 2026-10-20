@@ -223,7 +223,7 @@ pub fn ensure_project_profile(repo_path: &str) -> Result<GitProjectProfileFile, 
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -233,7 +233,14 @@ mod tests {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let repo = std::env::temp_dir().join(format!("halowake-profile-test-{unique}"));
         fs::create_dir_all(&repo).unwrap();
-        assert!(Command::new("git").arg("init").arg(&repo).status().unwrap().success());
+        assert!(Command::new("git")
+            .arg("init")
+            .arg(&repo)
+            .stdin(Stdio::null())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .status()
+            .unwrap()
+            .success());
 
         ensure_project_profile(repo.to_str().unwrap()).unwrap();
         ensure_project_profile(repo.to_str().unwrap()).unwrap();

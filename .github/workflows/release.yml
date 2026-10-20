@@ -9,7 +9,45 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Release Gate Verification
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify frontend (lint & typecheck)
+        run: npm run lint
+
+      - name: Frontend unit tests
+        run: npm run test:unit
+
+      - name: Frontend production build
+        run: npm run build
+
+      - name: Verify Rust library tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Verify deterministic production search integration tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test skill_registry_search
+
   release:
+    name: Build and Release Tauri App
+    needs: [verify]
     permissions:
       contents: write
     strategy:
@@ -58,7 +96,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Halowake ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download Halowake for your platform.'
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}

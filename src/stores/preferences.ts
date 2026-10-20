@@ -10,25 +10,26 @@ const STORAGE_KEYS = {
   closeAction: 'lumina.preferences.closeAction',
 } as const
 
-let systemThemeMedia: MediaQueryList | null = null
-
-function resolveSystemTheme() {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
 export const usePreferencesStore = defineStore('preferences', {
   state: () => ({
     locale: (localStorage.getItem(STORAGE_KEYS.locale) as AppLocale | null) ?? 'zh-CN',
     themeMode: (localStorage.getItem(STORAGE_KEYS.themeMode) as ThemeMode | null) ?? 'system',
     closeAction: (localStorage.getItem(STORAGE_KEYS.closeAction) as CloseAction | null) ?? 'ask',
+    systemTheme: (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light') as 'light' | 'dark',
   }),
 
   getters: {
-    resolvedTheme: state => (state.themeMode === 'system' ? resolveSystemTheme() : state.themeMode),
+    resolvedTheme: (state): 'light' | 'dark' =>
+      state.themeMode === 'system' ? state.systemTheme : state.themeMode,
   },
 
   actions: {
     initPreferences() {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        this.systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      }
       this.syncLocale()
       this.syncThemeToDom()
       this.bindSystemTheme()
@@ -62,10 +63,11 @@ export const usePreferencesStore = defineStore('preferences', {
     },
 
     bindSystemTheme() {
-      if (systemThemeMedia) return
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
 
-      systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)')
-      systemThemeMedia.addEventListener('change', () => {
+      const media = window.matchMedia('(prefers-color-scheme: dark)')
+      media.addEventListener('change', (e: { matches: boolean }) => {
+        this.systemTheme = e.matches ? 'dark' : 'light'
         if (this.themeMode === 'system') {
           this.syncThemeToDom()
         }

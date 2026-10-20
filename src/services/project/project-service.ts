@@ -216,3 +216,24 @@ export async function clearDevDockRunHistory(
     projectPath: projectPath || null,
   })
 }
+
+export interface PortProcessInfo {
+  pid: number
+  name: string
+  path?: string | null
+  protocol: string
+  localAddress: string
+  state: string
+  isDevdockManaged: boolean
+  managedProcessId?: string | null
+  projectName?: string | null
+  commandName?: string | null
+}
+
+export async function findProcessesByPort(port: number): Promise<PortProcessInfo[]> {
+  return await invoke<PortProcessInfo[]>('find_processes_by_port', { port })
+}
+
+export async function killProcessByPid(pid: number): Promise<boolean> {
+  return await invoke<boolean>('kill_process_by_pid', { pid })
+}

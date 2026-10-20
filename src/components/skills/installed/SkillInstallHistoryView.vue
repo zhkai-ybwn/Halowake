@@ -76,6 +76,14 @@
               <span class="history-status" :class="`history-status--${entry.status}`">{{ statusLabel(entry.status) }}</span>
               <time :datetime="new Date(entry.createdAt).toISOString()">{{ formatTime(entry.createdAt) }}</time>
               <button v-if="entry.existingPaths.length" type="button" class="history-manage" @click="goToInstalled(entry)">{{ t('skills.review.viewInstalled') }}</button>
+              <button
+                v-if="entry.status === 'failed' || entry.status === 'partial'"
+                type="button"
+                class="history-manage"
+                @click="reinstallEntry(entry)"
+              >
+                {{ t('skills.review.retry', '重新安装') }}
+              </button>
             </div>
             <p class="history-target">{{ targetLabel(entry) }}</p>
             <p class="history-source" :title="sourceLabel(entry)">{{ t('skills.review.source', { source: sourceLabel(entry) }) }}</p>
@@ -142,6 +150,12 @@ watch(() => exploreStore.activeMainTab, tab => {
   if (tab === 'history') void loadHistory()
 }, { immediate: true })
 
+watch(() => exploreStore.installModalVisible, (visible, prevVisible) => {
+  if (!visible && prevVisible && exploreStore.activeMainTab === 'history') {
+    void loadHistory()
+  }
+})
+
 function statusLabel(status: SkillInstallHistoryEntry['status']) {
   return t(`skills.review.${status === 'success' ? 'statusSuccess' : status === 'skipped' ? 'statusSkipped' : status === 'partial' ? 'statusPartial' : 'statusFailed'}`)
 }
@@ -172,6 +186,10 @@ async function openPath(path: string) {
 function goToInstalled(entry: SkillInstallHistoryEntry) {
   skillsStore.revealInstalledSkills(entry.displayName)
   exploreStore.activeMainTab = 'installed'
+}
+
+function reinstallEntry(entry: SkillInstallHistoryEntry) {
+  exploreStore.openReinstallFromHistory(entry)
 }
 </script>
 

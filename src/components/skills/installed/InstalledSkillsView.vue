@@ -37,7 +37,7 @@
               type="button"
               class="dimension-toggle-btn"
               :class="{ active: categoryDimension === 'agent' }"
-              @click="categoryDimension = 'agent'"
+              @click="switchDimension('agent')"
             >
               <Icon icon="solar:users-group-rounded-linear" class="dim-icon" />
               <span>{{ t('skills.review.byAgent') }}</span>
@@ -46,7 +46,7 @@
               type="button"
               class="dimension-toggle-btn"
               :class="{ active: categoryDimension === 'sdlc' }"
-              @click="categoryDimension = 'sdlc'"
+              @click="switchDimension('sdlc')"
             >
               <Icon icon="solar:layers-minimalistic-linear" class="dim-icon" />
               <span>{{ t('skills.review.byStage') }}</span>
@@ -70,8 +70,8 @@
           type="button"
           role="tab"
           class="segmented-pill"
-          :class="{ active: selectedFilter === 'all' }"
-          @click="selectedFilter = 'all'"
+          :class="{ active: filterState.kind === 'all' }"
+          @click="setFilter('all')"
         >
           <span>{{ t('skills.categoryAll') }}</span>
           <span class="tab-badge">{{ store.skills.length }}</span>
@@ -82,8 +82,8 @@
           type="button"
           role="tab"
           class="segmented-pill segmented-pill--warning"
-          :class="{ active: selectedFilter === 'updates' }"
-          @click="selectedFilter = 'updates'"
+          :class="{ active: filterState.kind === 'updates' }"
+          @click="setFilter('updates')"
         >
           <span class="dot-indicator"></span>
           <span>{{ t('skills.categoryUpdates') }}</span>
@@ -98,8 +98,8 @@
             type="button"
             role="tab"
             class="segmented-pill"
-            :class="{ active: selectedFilter === cat }"
-            @click="selectedFilter = cat"
+            :class="{ active: filterState.kind === 'agent' && filterState.value === cat }"
+            @click="setFilter('agent', cat)"
           >
             <span>{{ getCategoryLabel(cat) }}</span>
             <span class="tab-badge">{{ store.categoryCounts[cat] ?? 0 }}</span>
@@ -114,8 +114,8 @@
             type="button"
             role="tab"
             class="segmented-pill"
-            :class="{ active: selectedFilter === stage.key }"
-            @click="selectedFilter = stage.key"
+            :class="{ active: filterState.kind === 'stage' && filterState.value === stage.key }"
+            @click="setFilter('stage', stage.key)"
           >
             <span>{{ t(stage.label) }}</span>
             <span class="tab-badge">{{ stageCounts[stage.key] || 0 }}</span>
@@ -129,8 +129,8 @@
           type="button"
           role="tab"
           class="segmented-pill segmented-pill--custom"
-          :class="{ active: selectedFilter === cat }"
-          @click="selectedFilter = cat"
+          :class="{ active: filterState.kind === 'tag' && filterState.value === cat }"
+          @click="setFilter('tag', cat)"
         >
           <span>#{{ cat }}</span>
         </button>
@@ -192,13 +192,35 @@
                 <strong :title="skill.name">{{ skill.name }}</strong>
                 <span v-if="skill.version" class="skill-ver-pill">v{{ skill.version }}</span>
                 <span v-if="isRecentlyAdded(skill)" class="installed-new-badge">{{ t('skills.review.recent') }}</span>
-                <span v-if="skill.hasUpdate" class="installed-status installed-status--update" :title="skill.updateSummary || undefined">
+                <span
+                  v-if="skill.hasUpdate && skill.management !== 'unmanaged' && skill.management !== 'external'"
+                  class="installed-status installed-status--update"
+                  :title="skill.updateSummary || undefined"
+                >
                   <Icon icon="solar:cloud-download-linear" />
-                  {{ t('skills.review.updateReady') }}
+                  {{ t('skills.review.updateReady') }}<template v-if="skill.latestVersion"> (v{{ skill.latestVersion }})</template>
                 </span>
-                <span v-else-if="skill.isDirty" class="installed-status installed-status--dirty">
+                <span
+                  v-else-if="skill.updateStatus === 'error' || skill.updateStatus === 'unknown'"
+                  class="installed-status installed-status--dirty"
+                  :title="skill.updateError || skill.updateSummary || undefined"
+                >
+                  <Icon icon="solar:danger-triangle-linear" />
+                  {{ skill.updateStatus === 'error' ? '检查失败' : '状态未知' }}
+                </span>
+                <span
+                  v-if="skill.isDirty"
+                  class="installed-status installed-status--dirty"
+                >
                   <Icon icon="solar:pen-linear" />
                   {{ t('skills.review.locallyModified') }}
+                </span>
+                <span
+                  v-if="skill.management === 'unmanaged'"
+                  class="skill-ver-pill"
+                  title="本地自定义或手动放入的技能，不支持自动覆盖更新"
+                >
+                  手动管理
                 </span>
               </div>
               <p class="installed-skill-description" :title="skill.cleanDesc || cleanDescription(skill.description) || undefined">
@@ -209,7 +231,7 @@
                   {{ skill.displayAgentTag || getPrimaryAgentTag(skill) }}
                 </span>
                 <SkillStageBadge :stage="getSkillSdlcStage(skill)" />
-                <span v-for="tag in getCustomTags(skill.id)" :key="tag" class="custom-tag-micro">#{{ tag }}</span>
+                <span v-for="tag in getCustomTags(skill)" :key="tag" class="custom-tag-micro">#{{ tag }}</span>
                 <input
                   v-if="editingTagSkillId === skill.path"
                   ref="tagInputRef"
@@ -242,7 +264,7 @@
 
             <div class="installed-skill-actions" @click.stop>
               <button
-                v-if="skill.hasUpdate && skill.isGitRepo"
+                v-if="skill.hasUpdate && skill.management !== 'unmanaged' && skill.management !== 'external' && !skill.externallyManaged"
                 type="button"
                 class="installed-update-btn"
                 :disabled="store.updatingPaths.includes(skill.path) || store.uninstallingPaths.includes(skill.path)"
@@ -314,9 +336,10 @@ import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillsStore } from '@/stores/skills'
 import { useSkillExploreStore } from '@/stores/skill-explore'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { inferSkillStage } from '@/services/skills/skill-catalog-service'
+import { findMatchingCatalogSkill } from '@/services/skills/skill-identity'
 import type { AgentSkill, CatalogSkill, SdlcStage } from '@/types/skills'
-import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
 import { getSkillVisuals } from '@/utils/skill-visuals'
 import SkillStageBadge from '../common/SkillStageBadge.vue'
 
@@ -325,13 +348,62 @@ const message = useMessage()
 const dialog = useDialog()
 const store = useSkillsStore()
 const exploreStore = useSkillExploreStore()
+const workspaceStore = useWorkspaceStore()
 
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const localSearch = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
+export type InstalledFilterKind = 'all' | 'updates' | 'agent' | 'stage' | 'tag'
+
+export interface InstalledFilterState {
+  kind: InstalledFilterKind
+  value?: string
+}
+
+const availableStages: Array<{ key: SdlcStage; label: string }> = [
+  { key: 'requirement', label: 'skills.stageRequirement' },
+  { key: 'design', label: 'skills.stageDesign' },
+  { key: 'coding', label: 'skills.stageCoding' },
+  { key: 'testing', label: 'skills.stageTesting' },
+  { key: 'delivery', label: 'skills.stageDelivery' },
+]
+
 const categoryDimension = ref<'agent' | 'sdlc'>('agent')
-const selectedFilter = ref<string>('all')
+const filterState = ref<InstalledFilterState>({ kind: 'all' })
+
+function setFilter(kind: InstalledFilterKind, value?: string) {
+  filterState.value = { kind, value }
+}
+
+function switchDimension(dim: 'agent' | 'sdlc') {
+  categoryDimension.value = dim
+  // 切换维度时清除不适用的旧条件，避免隐藏的残留筛选
+  if (filterState.value.kind === 'agent' || filterState.value.kind === 'stage') {
+    filterState.value = { kind: 'all' }
+  }
+}
+
+const selectedFilter = computed({
+  get: () => {
+    if (filterState.value.kind === 'all') return 'all'
+    if (filterState.value.kind === 'updates') return 'updates'
+    return filterState.value.value || 'all'
+  },
+  set: (val: string) => {
+    if (val === 'all') {
+      filterState.value = { kind: 'all' }
+    } else if (val === 'updates') {
+      filterState.value = { kind: 'updates' }
+    } else if (exploreStore.allCustomCategories.includes(val)) {
+      filterState.value = { kind: 'tag', value: val }
+    } else if (categoryDimension.value === 'sdlc' || availableStages.some(s => s.key === val)) {
+      filterState.value = { kind: 'stage', value: val }
+    } else {
+      filterState.value = { kind: 'agent', value: val }
+    }
+  },
+})
 const sortMode = ref<'recent' | 'name'>('recent')
 const editingTagSkillId = ref<string | null>(null)
 const tagDraft = ref('')
@@ -356,7 +428,7 @@ function confirmUninstall(skill: AgentSkill) {
     positiveButtonProps: { type: 'error' },
     onPositiveClick: async () => {
       try {
-        const projectCwd = localStorage.getItem(GIT_REPO_STORAGE_KEY) || undefined
+        const projectCwd = workspaceStore.refreshFromStorage() || undefined
         await store.uninstallSingle(skill, projectCwd)
         message.success(t('skills.uninstallSuccess', { name: skill.name }))
       } catch (error) {
@@ -367,47 +439,49 @@ function confirmUninstall(skill: AgentSkill) {
   })
 }
 
-const availableStages: Array<{ key: SdlcStage; label: string }> = [
-  { key: 'requirement', label: 'skills.stageRequirement' },
-  { key: 'design', label: 'skills.stageDesign' },
-  { key: 'coding', label: 'skills.stageCoding' },
-  { key: 'testing', label: 'skills.stageTesting' },
-  { key: 'delivery', label: 'skills.stageDelivery' },
-]
+
 
 function getSkillSdlcStage(skill: AgentSkill): SdlcStage {
-  const match = exploreStore.catalogSkills.find(
-    s => s.id.toLowerCase() === skill.id.toLowerCase() || s.name.toLowerCase() === skill.name.toLowerCase()
-  )
+  const match = findMatchingCatalogSkill(skill, exploreStore.catalogSkills)
   if (match) return match.stage
   return inferSkillStage(skill.name, skill.description)
 }
 
-function getCustomTags(skillId: string): string[] {
-  return exploreStore.userCustomCategories[skillId] || []
+function getCustomTags(skill: AgentSkill | string): string[] {
+  return exploreStore.getSkillCustomCategories(skill)
 }
 
 function openSkillDetails(skill: AgentSkill) {
-  const match = exploreStore.catalogSkills.find(
-    s => s.id.toLowerCase() === skill.id.toLowerCase() || s.name.toLowerCase() === skill.name.toLowerCase()
-  )
+  const match = findMatchingCatalogSkill(skill, exploreStore.catalogSkills)
   if (match) {
     exploreStore.openDetail(match)
   } else {
     const fallback: CatalogSkill = {
-      id: skill.id || skill.name,
+      id: skill.catalogId || skill.id || skill.name,
       name: skill.name,
       titleZh: skill.name,
       description: skill.cleanDesc || cleanDescription(skill.description) || t('skills.review.noDescription'),
-      category: skill.category || 'general',
+      category: skill.customCategory || 'general',
       stage: getSkillSdlcStage(skill),
       author: { name: skill.displayAgentTag || getPrimaryAgentTag(skill) || 'Local' },
-      gitUrl: skill.path,
-      tags: getCustomTags(skill.id),
+      gitUrl: skill.gitRemoteUrl || skill.path,
+      subPath: skill.subPath,
+      tags: getCustomTags(skill),
       stars: 0,
+      halowakeScore: 0,
+      badge: 'community',
+      metrics: {
+        githubStars: 0,
+        forks: 0,
+        lastCommitDaysAgo: 0,
+        issueCloseRate: 0,
+        securityAuditPassed: false,
+      },
+      recommendedWith: [],
+      compatibleAgents: skill.associatedAgents || [skill.agentType],
       howToUse: skill.path,
       isBundle: false,
-    } as unknown as CatalogSkill
+    }
     exploreStore.openDetail(fallback)
   }
 }
@@ -428,7 +502,7 @@ function saveTag(skill: AgentSkill) {
   const tag = tagDraft.value.trim()
   cancelTag()
   if (!tag) return
-  exploreStore.addSkillCustomCategory(skill.id, tag)
+  exploreStore.addSkillCustomCategory(skill.catalogId || skill.id, tag)
   message.success(t('skills.review.tagAdded', { name: skill.name, tag }))
 }
 
@@ -445,30 +519,29 @@ const displaySkills = computed(() => {
   let list = store.skills
 
   // 1. 过滤分类
-  if (selectedFilter.value === 'updates') {
+  const filter = filterState.value
+  if (filter.kind === 'updates') {
     list = list.filter(s => s.hasUpdate)
-  } else if (selectedFilter.value !== 'all') {
-    if (categoryDimension.value === 'agent') {
-      list = list.filter(
-        s =>
-          s.agentType === selectedFilter.value ||
-          (s.associatedAgents && s.associatedAgents.includes(selectedFilter.value))
-      )
-    } else if (categoryDimension.value === 'sdlc') {
-      list = list.filter(s => getSkillSdlcStage(s) === selectedFilter.value)
-    }
-
-    // 检查是否选中的是自定义分类
-    if (exploreStore.allCustomCategories.includes(selectedFilter.value)) {
-      list = list.filter(s => getCustomTags(s.id).includes(selectedFilter.value))
-    }
+  } else if (filter.kind === 'agent' && filter.value) {
+    const agentVal = filter.value
+    list = list.filter(
+      s =>
+        s.agentType === agentVal ||
+        (s.associatedAgents && s.associatedAgents.includes(agentVal))
+    )
+  } else if (filter.kind === 'stage' && filter.value) {
+    const stageVal = filter.value
+    list = list.filter(s => getSkillSdlcStage(s) === stageVal)
+  } else if (filter.kind === 'tag' && filter.value) {
+    const tagVal = filter.value
+    list = list.filter(s => getCustomTags(s).includes(tagVal))
   }
 
   // 2. 搜索查询
   const q = localSearch.value.trim().toLowerCase()
   if (q) {
     list = list.filter(s => {
-      const tags = getCustomTags(s.id).join(' ').toLowerCase()
+      const tags = getCustomTags(s).join(' ').toLowerCase()
       return (
         s.name.toLowerCase().includes(q) ||
         s.description.toLowerCase().includes(q) ||
@@ -607,8 +680,32 @@ const formattedLastChecked = computed(() => {
 })
 
 async function handleUpdateSingle(skill: AgentSkill) {
+  if (skill.management === 'unmanaged' || skill.management === 'external' || skill.externallyManaged) {
+    message.warning('未受管或外部管理技能不支持自动更新，请打开目录手动管理')
+    return
+  }
+
   if (skill.isDirty) {
-    message.warning(t('skills.dirtyWarning'))
+    dialog.warning({
+      title: `${skill.name} — ${t('skills.review.locallyModified')}`,
+      content: `${t('skills.dirtyWarning')} 确认强制更新后，原本地修改将自动备份到同级备份目录或 Git stash。`,
+      positiveText: '备份并强制更新',
+      negativeText: t('common.cancel'),
+      positiveButtonProps: { type: 'warning' },
+      onPositiveClick: async () => {
+        const res = await store.updateSingle(skill, true)
+        if (res.success) {
+          message.success(
+            res.backupPath
+              ? `${skill.name}: ${res.message || t('skills.updateSuccess')}（已备份至 ${res.backupPath}）`
+              : `${skill.name}: ${res.message || t('skills.updateSuccess')}`
+          )
+        } else {
+          message.error(`${skill.name}: ${res.message || t('skills.updateFailed')}`)
+          return false
+        }
+      },
+    })
     return
   }
 

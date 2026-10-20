@@ -1,4 +1,4 @@
-use std::thread;
+use std::{collections::HashSet, thread};
 
 use crate::git::models::{
     GitFileActionPayload, GitFileDiffResponse, GitFileStat, GitSnapshot,
@@ -8,6 +8,45 @@ use super::branches::load_branches;
 use super::process::{run_git, run_git_raw, silent_command};
 use super::sync::load_repository_state;
 
+pub fn load_git_status(repo_path: &str) -> Result<String, String> {
+    let status = run_git_raw(
+        repo_path,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )?;
+    if !status.lines().any(|line| line.starts_with(" M ")) {
+        return Ok(status);
+    }
+
+    // Status can report a stat/EOL mismatch even when Git's clean conversion
+    // produces the indexed content. Use names, not numstat: binary files and
+    // mode-only changes have no added/removed lines but must remain visible.
+    let changed = run_git_raw(
+        repo_path,
+        &[
+            "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff",
+            "--no-textconv", "--ignore-submodules=none", "--",
+        ],
+    )?;
+    let changed: HashSet<&str> = changed.split('\0').filter(|path| !path.is_empty()).collect();
+    Ok(status
+        .lines()
+        .filter(|line| {
+            if !line.starts_with(" M ") {
+                return true;
+            }
+            let path = line.get(3..).unwrap_or_default();
+            if path.starts_with('"') {
+                // Keep unfamiliar Git C-style escapes conservatively.
+                return serde_json::from_str::<String>(path)
+                    .map(|path| changed.contains(path.as_str()))
+                    .unwrap_or(true);
+            }
+            changed.contains(path)
+        })
+        .map(|line| format!("{line}\n"))
+        .collect())
+}
+
 pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
     let (repo_root, branch, repository_state, status_raw, staged_files_raw, file_stats, branches) =
         thread::scope(|scope| {
@@ -15,12 +54,7 @@ pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
                 scope.spawn(|| run_git(repo_path, &["rev-parse", "--show-toplevel"]));
             let branch = scope.spawn(|| run_git(repo_path, &["branch", "--show-current"]));
             let repository_state = scope.spawn(|| load_repository_state(repo_path));
-            let status_raw = scope.spawn(|| {
-                run_git_raw(
-                    repo_path,
-                    &["status", "--porcelain=v1", "--untracked-files=all"],
-                )
-            });
+            let status_raw = scope.spawn(|| load_git_status(repo_path));
             let staged_files_raw =
                 scope.spawn(|| run_git(repo_path, &["diff", "--cached", "--name-only"]));
             let file_stats = scope.spawn(|| load_file_stats(repo_path));
@@ -204,6 +238,13 @@ fn load_selected_file_diff_with_context(
     }
 
     if result.trim().is_empty() {
+        let untracked = run_git_raw(
+            repo_path,
+            &["ls-files", "--others", "--exclude-standard", "-z", "--", file_path],
+        )?;
+        if !untracked.split('\0').any(|path| path == file_path) {
+            return Ok(String::new());
+        }
         return load_untracked_file_diff(repo_path, file_path, unified);
     }
 

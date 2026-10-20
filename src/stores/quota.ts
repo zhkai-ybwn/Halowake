@@ -10,6 +10,21 @@ import {
 
 export type OverallStatusTone = 'healthy' | 'warning' | 'danger' | 'idle'
 
+const STORAGE_KEY_AUTO_REFRESH = 'lumina.quota.autoRefreshInterval'
+
+function getSavedAutoRefreshInterval(): number {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_AUTO_REFRESH)
+    if (saved !== null) {
+      const num = Number(saved)
+      if (Number.isFinite(num) && num >= 0) return num
+    }
+  } catch {
+    // fallback
+  }
+  return 120 // 默认 2 分钟 (120 秒)
+}
+
 function isAggregateCreditUnit(unit?: string): boolean {
   if (!unit?.trim()) return true
   return ['点', '积分', 'credit', 'credits', 'point', 'points'].includes(unit.trim().toLowerCase())
@@ -51,6 +66,10 @@ function recalculateSummary(quotas: ProviderQuota[]): QuotaSummary {
   }
 }
 
+// 模块级全局定时器与事件监听器引用，确保生命周期跨组件持久存在
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+let isWindowListenersAttached = false
+
 export const useQuotaStore = defineStore('quota', {
   state: () => ({
     quotas: [] as ProviderQuota[],
@@ -65,6 +84,7 @@ export const useQuotaStore = defineStore('quota', {
     refreshing: false,
     lastUpdated: 0,
     modalVisible: false,
+    autoRefreshInterval: getSavedAutoRefreshInterval(),
   }),
 
   getters: {
@@ -129,10 +149,161 @@ export const useQuotaStore = defineStore('quota', {
     statusDotClass(): string {
       return this.statusTone
     },
+
+    /**
+     * 获取最受关注的主限额（优先展示 Codex 等本地核心客户端的限额，其次展示剩余比例最低的限额）
+     */
+    primaryRateLimit(state): {
+      accountName: string
+      providerType: string
+      periodLabel: string
+      usedPercent: number
+      remainingPercent: number
+      resetsInSeconds?: number
+      resetsAt?: number
+    } | null {
+      const list = state.quotas
+      if (!list.length) return null
+
+      // 1. 优先寻找活跃健康的 Codex 账号的主限额
+      const codexAccount = list.find(q => q.providerType === 'codex' && q.isHealthy)
+      if (codexAccount) {
+        const rl = codexAccount.quotas.find(
+          (item): item is Extract<QuotaKind, { type: 'rateLimit' }> => item.type === 'rateLimit'
+        )
+        if (rl) {
+          return {
+            accountName: codexAccount.name,
+            providerType: codexAccount.providerType,
+            periodLabel: rl.periodLabel,
+            usedPercent: rl.usedPercent,
+            remainingPercent: Math.max(0, 100 - rl.usedPercent),
+            resetsInSeconds: rl.resetsInSeconds,
+            resetsAt: rl.resetsAt,
+          }
+        }
+      }
+
+      // 2. 否则在所有健康账号中寻找剩余百分比最低的限额项
+      let lowest: {
+        accountName: string
+        providerType: string
+        periodLabel: string
+        usedPercent: number
+        remainingPercent: number
+        resetsInSeconds?: number
+        resetsAt?: number
+      } | null = null
+
+      for (const q of list) {
+        if (!q.isHealthy) continue
+        for (const item of q.quotas) {
+          if (item.type === 'rateLimit') {
+            const rem = Math.max(0, 100 - item.usedPercent)
+            if (lowest === null || rem < lowest.remainingPercent) {
+              lowest = {
+                accountName: q.name,
+                providerType: q.providerType,
+                periodLabel: item.periodLabel,
+                usedPercent: item.usedPercent,
+                remainingPercent: rem,
+                resetsInSeconds: item.resetsInSeconds,
+                resetsAt: item.resetsAt,
+              }
+            }
+          }
+        }
+      }
+
+      return lowest
+    },
+
+    /**
+     * 顶栏胶囊直观显示的概要额度（如：85%、$12、¥88）
+     */
+    primaryQuotaDisplay(): string | null {
+      const rl = this.primaryRateLimit
+      if (rl) {
+        return `${Math.round(rl.remainingPercent)}%`
+      }
+      if (this.summary.totalUsdBalance > 0) {
+        return `$${this.summary.totalUsdBalance.toFixed(0)}`
+      }
+      if (this.summary.totalCnyBalance > 0) {
+        return `¥${this.summary.totalCnyBalance.toFixed(0)}`
+      }
+      if (this.summary.totalCredits > 0) {
+        return `${this.summary.totalCredits}点`
+      }
+      return null
+    },
   },
 
   actions: {
+    /**
+     * 初始化全局自动刷新与智能感知（窗口聚焦/切回时自动检测刷新）
+     */
+    initAutoRefresh(): void {
+      if (!isWindowListenersAttached && typeof window !== 'undefined') {
+        const onWindowFocus = () => {
+          // 用户从 Codex / IDE 切回 Lumina 时，若距离上次拉取超过 15 秒，则静默自动刷新
+          void this.ensureFresh(15000)
+        }
+        const onVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+            void this.ensureFresh(15000)
+          }
+        }
+
+        window.addEventListener('focus', onWindowFocus)
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        isWindowListenersAttached = true
+      }
+
+      this.startAutoRefresh()
+      void this.ensureFresh(15000)
+    },
+
+    /**
+     * 启动或重启后台定时自动刷新
+     */
+    startAutoRefresh(): void {
+      this.stopAutoRefresh()
+      if (this.autoRefreshInterval > 0) {
+        autoRefreshTimer = setInterval(() => {
+          void this.fetchAll(true)
+        }, this.autoRefreshInterval * 1000)
+      }
+    },
+
+    /**
+     * 停止定时刷新
+     */
+    stopAutoRefresh(): void {
+      if (autoRefreshTimer !== null) {
+        clearInterval(autoRefreshTimer)
+        autoRefreshTimer = null
+      }
+    },
+
+    /**
+     * 修改自动刷新周期并持久化
+     */
+    setAutoRefreshInterval(seconds: number): void {
+      this.autoRefreshInterval = seconds
+      try {
+        localStorage.setItem(STORAGE_KEY_AUTO_REFRESH, String(seconds))
+      } catch {
+        // ignore
+      }
+      this.startAutoRefresh()
+    },
+
     async fetchAll(silent = false): Promise<[ProviderQuota[], QuotaSummary]> {
+      if (this.refreshing) {
+        return [this.quotas, this.summary]
+      }
+
       if (!silent) this.loading = true
       this.refreshing = true
       try {
@@ -143,7 +314,8 @@ export const useQuotaStore = defineStore('quota', {
         return [list, sum]
       } catch (err) {
         console.warn('Failed to fetch all quotas in store:', err)
-        throw err
+        if (!silent) throw err
+        return [this.quotas, this.summary]
       } finally {
         if (!silent) this.loading = false
         this.refreshing = false

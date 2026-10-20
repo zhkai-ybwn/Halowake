@@ -151,6 +151,19 @@ pub struct ProjectProcessState {
     job_handle: Option<WindowsJobHandle>,
 }
 
+impl ProjectProcessState {
+    pub(super) fn find_managed_meta_by_pid(&self, pid: u32) -> Option<(String, String, String)> {
+        let processes = self.processes.lock().ok()?;
+        processes.values().find(|p| p.meta.pid == pid).map(|p| {
+            (
+                p.meta.id.clone(),
+                p.meta.project_name.clone(),
+                p.meta.command_name.clone().unwrap_or_else(|| p.meta.script_name.clone()),
+            )
+        })
+    }
+}
+
 impl Default for ProjectProcessState {
     fn default() -> Self {
         Self {
@@ -240,6 +253,21 @@ pub(super) fn stop_process_by_id(
     let process = find_process(state, process_id)?;
     stop_process(&process)?;
     Ok(snapshot_process(&process))
+}
+
+pub(super) fn stop_process_by_pid(state: &ProjectProcessState, pid: u32) -> Result<bool, String> {
+    let managed = {
+        let processes = state
+            .processes
+            .lock()
+            .map_err(|_| "读取进程状态失败。".to_string())?;
+        processes.values().find(|p| p.meta.pid == pid).map(clone_process)
+    };
+    if let Some(process) = managed {
+        stop_process(&process)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 pub(super) fn stop_all_processes(
@@ -770,7 +798,7 @@ fn hide_command_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_command_window(_command: &mut Command) {}
 
-fn kill_process_tree(pid: u32) {
+pub(super) fn kill_process_tree(pid: u32) {
     #[cfg(target_os = "windows")]
     {
         let _ = silent_command("taskkill")

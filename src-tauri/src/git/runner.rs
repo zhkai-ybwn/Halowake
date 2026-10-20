@@ -32,10 +32,14 @@ pub use branches::{
     repair_upstream, set_branch_upstream, switch_branch,
 };
 pub use diff::{
-    load_file_diff, load_file_head_diff, load_git_snapshot, load_selected_file_diff,
+    load_file_diff, load_file_head_diff, load_git_snapshot, load_git_status, load_selected_file_diff,
 };
 pub use history::{load_git_commit_detail, load_git_commit_file_diff, load_git_log};
-pub use process::{run_git, run_git_raw};
+pub use process::{
+    kill_process_tree, run_command_with_timeout, run_git, run_git_raw, run_git_with_timeout,
+    DEFAULT_GIT_COMMAND_TIMEOUT, DEFAULT_HEAVY_GIT_TIMEOUT, DEFAULT_NETWORK_GIT_TIMEOUT,
+    GIT_CLONE_TIMEOUT, ProcessJobGuard,
+};
 pub use sync::{
     abort_merge, abort_rebase, continue_merge, continue_rebase, fetch_changes,
     fetch_changes_with_progress, merge_branch, pull_changes, pull_changes_with_progress,
@@ -132,10 +136,12 @@ fn validate_selected_files(repo_path: &str, selected_files: &[String]) -> Result
 }
 
 fn is_git_ignored(repo_path: &str, file_path: &str) -> bool {
-    git_command(repo_path)
-        .args(["check-ignore", "--no-index", "--quiet", "--", file_path])
-        .status()
-        .is_ok_and(|status| status.success())
+    let mut cmd = git_command(repo_path);
+    cmd.args(["check-ignore", "--no-index", "--quiet", "--", file_path]);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    run_command_with_timeout(cmd, std::time::Duration::from_secs(5), "git check-ignore")
+        .is_ok_and(|out| out.status.success())
 }
 
 fn stage_selected_files_for_commit(repo_path: &str, selected_files: &[SelectedCommitFile]) -> Result<Vec<GitCommandResult>, String> {
@@ -535,6 +541,8 @@ mod tests {
         let output = Command::new("git")
             .args(args)
             .current_dir(repo_path)
+            .stdin(std::process::Stdio::null())
+            .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .expect("run git");
 
@@ -729,6 +737,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         let tracked = Command::new("git")
             .args(["ls-files", "--error-unmatch", "--", ".lumina/commit-prompt-debug.json"])
             .current_dir(&repo)
+            .stdin(std::process::Stdio::null())
+            .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .expect("run git ls-files");
         assert!(!tracked.status.success());
@@ -973,6 +983,73 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.remote"]).unwrap(), "origin");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.merge"]).unwrap(), "refs/heads/release");
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn snapshot_omits_eol_phantoms_and_tracked_empty_diff_stays_empty() {
+        let repo = temp_repo("phantom-status");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
+        git(&repo, &["config", "user.email", "halowake@example.test"]);
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        write_file(&repo.join(".gitattributes"), "*.ts text eol=crlf\n");
+        write_file(&repo.join("file.ts"), "export const a = 1;\r\n");
+        write_file(&repo.join("space name.ts"), "export const b = 1;\r\n");
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "initial"]);
+        let repo_path = repo.to_string_lossy();
+        let index_path = repo.join(".git/index");
+        write_file(&repo.join("file.ts"), "export const a = 1;\n");
+        write_file(&repo.join("space name.ts"), "export const b = 1;\n");
+        assert!(run_git_raw(&repo_path, &["status", "--porcelain"]).unwrap().contains("file.ts"));
+        let index_before = fs::read(&index_path).unwrap();
+
+        assert!(load_git_snapshot(&repo_path).unwrap().status.is_empty());
+        assert!(load_selected_file_diff(&repo_path, "file.ts").unwrap().is_empty());
+        assert_eq!(fs::read(&index_path).unwrap(), index_before);
+        assert_eq!(fs::read(repo.join("file.ts")).unwrap(), b"export const a = 1;\n");
+
+        write_file(&repo.join("new.ts"), "export const added = 1;\n");
+        let untracked_diff = load_selected_file_diff(&repo_path, "new.ts").unwrap();
+        assert!(untracked_diff.contains("new file mode"));
+        assert!(untracked_diff.contains("+export const added = 1;"));
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn status_preserves_real_binary_staged_deleted_and_untracked_changes() {
+        let repo = temp_repo("real-status");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
+        git(&repo, &["config", "user.email", "halowake@example.test"]);
+        for name in ["file.ts", "space name.ts", "中文.ts", "staged.ts", "deleted.ts", "mode.ts"] {
+            write_file(&repo.join(name), "initial\n");
+        }
+        fs::write(repo.join("binary.dat"), b"\0initial").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "initial"]);
+        for name in ["file.ts", "space name.ts", "中文.ts", "staged.ts"] {
+            write_file(&repo.join(name), "changed\n");
+        }
+        fs::remove_file(repo.join("deleted.ts")).unwrap();
+        fs::write(repo.join("binary.dat"), b"\0changed").unwrap();
+        write_file(&repo.join("new.ts"), "new\n");
+        // Simulate a worktree executable-bit difference, including on Windows.
+        git(&repo, &["update-index", "--chmod=+x", "mode.ts"]);
+        git(&repo, &["commit", "-m", "executable"]);
+        git(&repo, &["config", "core.filemode", "true"]);
+        git(&repo, &["add", "staged.ts"]);
+        let repo_path = repo.to_string_lossy();
+        let raw = run_git_raw(&repo_path, &["status", "--porcelain=v1", "--untracked-files=all"]).unwrap();
+        let filtered = load_git_status(&repo_path).unwrap();
+        assert_eq!(filtered, raw);
+        assert!(filtered.contains("binary.dat"));
+        assert!(filtered.contains("space name.ts"));
+        assert!(filtered.contains("?? new.ts"));
+        assert!(filtered.contains("M  staged.ts"));
+        assert!(filtered.contains(" D deleted.ts"));
+        assert!(filtered.contains(" M mode.ts"));
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 

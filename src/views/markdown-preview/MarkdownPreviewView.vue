@@ -28,7 +28,7 @@
       <!-- Actions -->
       <div class="md-topbar-actions">
         <!-- Open File -->
-        <WorkbenchButton size="small" :title="t('markdownPreview.openFileHint')" @click="selectAndOpenFile">
+        <WorkbenchButton size="default" :title="t('markdownPreview.openFileHint')" @click="selectAndOpenFile">
           <Icon icon="solar:folder-open-linear" />
           <span>{{ t('markdownPreview.openFile') }}</span>
         </WorkbenchButton>

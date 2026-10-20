@@ -30,6 +30,8 @@ import { computed, onMounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useQuotaStore } from '@/stores/quota'
+import type { QuotaKind } from '@/services/quota/quota-service'
+import { formatRelativeTime } from '@/utils/quota'
 import { isMacPlatform } from '@/utils/platform-shortcuts'
 import QuotaManagerModal from './QuotaManagerModal.vue'
 
@@ -38,29 +40,69 @@ const quotaStore = useQuotaStore()
 const isMac = isMacPlatform
 
 const pillLabel = computed(() => {
+  const display = quotaStore.primaryQuotaDisplay
+  if (display) {
+    return `${t('workbench.aiQuota')} ${display}`
+  }
   return t('workbench.aiQuota')
 })
 
 const statusTooltip = computed(() => {
-  const parts: string[] = []
+  const lines: string[] = []
+
+  // 1. 整体运行与健康状态
+  let statusText = t('quota.statusHealthy')
   if (quotaStore.statusTone === 'danger') {
-    parts.push(`${t('workbench.aiQuota')} (${t('quota.statusDanger')})`)
+    statusText = t('quota.statusDanger')
   } else if (quotaStore.statusTone === 'warning') {
-    parts.push(`${t('workbench.aiQuota')} (${t('quota.statusWarning')})`)
+    statusText = t('quota.statusWarning')
+  }
+  lines.push(`${t('workbench.aiQuota')} · ${statusText}`)
+
+  // 2. 核心限额项 (Codex / 本地客户端限额等)
+  for (const q of quotaStore.quotas) {
+    if (!q.isHealthy) continue
+    const rateLimits = q.quotas.filter(
+      (item): item is Extract<QuotaKind, { type: 'rateLimit' }> => item.type === 'rateLimit'
+    )
+    for (const rl of rateLimits) {
+      const remaining = Math.max(0, 100 - Math.round(rl.usedPercent))
+      let info = `• ${q.name}: ${rl.periodLabel} 剩余 ${remaining}%`
+      if (rl.resetsInSeconds && rl.resetsInSeconds > 0) {
+        const h = Math.floor(rl.resetsInSeconds / 3600)
+        const m = Math.floor((rl.resetsInSeconds % 3600) / 60)
+        const timeStr = h > 0 ? `${h}h${m}m` : `${m}m`
+        info += ` (${timeStr}${t('quota.untilReset')})`
+      }
+      lines.push(info)
+    }
+  }
+
+  // 3. 法币余额与算力积分
+  if (quotaStore.summary.totalCnyBalance > 0 || quotaStore.summary.totalUsdBalance > 0) {
+    lines.push(`• 余额: ¥${quotaStore.summary.totalCnyBalance.toFixed(2)} / $${quotaStore.summary.totalUsdBalance.toFixed(2)}`)
+  }
+  if (quotaStore.summary.totalCredits > 0) {
+    lines.push(`• 积分: ${quotaStore.summary.totalCredits.toLocaleString()} ${t('quota.creditsUnit')}`)
+  }
+
+  // 4. 同步时间与自动刷新配置
+  if (quotaStore.lastUpdated > 0) {
+    lines.push(`• ${t('quota.lastChecked')}: ${formatRelativeTime(quotaStore.lastUpdated, t)}`)
+  }
+  if (quotaStore.autoRefreshInterval > 0) {
+    const mins = Math.round(quotaStore.autoRefreshInterval / 60)
+    lines.push(`• ${t('quota.autoRefreshSettings')}: ${mins} ${t('quota.minutes')}`)
   } else {
-    parts.push(t('workbench.aiQuota'))
+    lines.push(`• ${t('quota.autoRefreshSettings')}: ${t('quota.autoRefreshOff')}`)
   }
 
-  if (quotaStore.quotas.length > 0) {
-    parts.push(`¥${quotaStore.summary.totalCnyBalance.toFixed(2)} / $${quotaStore.summary.totalUsdBalance.toFixed(2)}`)
-  }
-
-  parts.push(isMac ? '⌘5' : 'Alt+5')
-  return parts.join(' · ')
+  lines.push(`点击打开中心 (${isMac ? '⌘5' : 'Alt+5'})`)
+  return lines.join('\n')
 })
 
 onMounted(() => {
-  void quotaStore.ensureFresh(15000)
+  quotaStore.initAutoRefresh()
 })
 </script>
 

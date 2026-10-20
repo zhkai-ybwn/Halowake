@@ -1483,30 +1483,47 @@ mod tests {
 
     #[test]
     fn test_sep_11_sessions_loads_continued_codex_sessions() {
-        let home = match get_home_dir() {
-            Ok(h) => h,
-            Err(_) => return,
-        };
-        let codex_sep_11 = home.join(".codex").join("sessions").join("2026").join("09").join("11");
-        if !codex_sep_11.exists() {
-            // Skip when running in clean CI runner environment without local test data
-            return;
-        }
+        // 1. Hermetic fixture test for continued session collection and date pruning
+        let temp_dir = std::env::temp_dir().join(format!("halowake_codex_continued_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let session_dir = temp_dir.join("2026").join("09").join("10");
+        fs::create_dir_all(&session_dir).expect("create temp dir");
 
-        // 2026-09-11 in Beijing time (UTC+8): 2026-09-10T16:00:00Z ~ 2026-09-11T15:59:59.999Z
-        let query = CodexReportQuery {
-            from: "2026-09-10T16:00:00.000Z".to_string(),
-            to: "2026-09-11T15:59:59.999Z".to_string(),
-            providers: None,
-        };
-        let res = load_codex_report_sessions_sync(query).expect("load 9-11 sessions");
-        println!("Loaded {} sessions for 2026-09-11:", res.len());
-        for s in &res {
-            println!("  [{}] {} ({}) - {} msgs", s.provider, s.project_name, s.started_at, s.user_messages.len());
+        let file_path = session_dir.join("rollout-2026-09-10T10-00-00-01a08e23-47ef-7f10-873d-9e9690da3839.jsonl");
+        let mut file = File::create(&file_path).expect("create test file");
+        writeln!(file, r#"{{"timestamp":"2026-09-10T10:00:00.000Z","type":"session_meta","payload":{{"session_id":"01a08e23-47ef-7f10-873d-9e9690da3839","cwd":"D:\\ly_project\\ecogrid-mdm"}}}}"#).unwrap();
+        writeln!(file, r#"{{"timestamp":"2026-09-11T02:00:00.000Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"继续排查电表数据"}}]}}}}"#).unwrap();
+        drop(file);
+
+        let mut collected = Vec::new();
+        collect_codex_jsonl_files_pruned(&temp_dir, "2026-09-11", &mut collected);
+        assert_eq!(collected.len(), 1, "Should collect continued historical session file into current date");
+
+        let session = parse_codex_session(&file_path, "2026-09-10T16:00:00.000Z", "2026-09-11T15:59:59.999Z")
+            .expect("should parse continued session");
+        assert_eq!(session.project_name, "ecogrid-mdm");
+        assert_eq!(session.user_messages.len(), 1);
+        assert!(session.user_messages[0].contains("继续排查电表数据"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        // 2. Optional check on host machine sessions if full historical developer dataset is present
+        if let Ok(home) = get_home_dir() {
+            let codex_sep_11 = home.join(".codex").join("sessions").join("2026").join("09").join("11");
+            if codex_sep_11.exists() {
+                let query = CodexReportQuery {
+                    from: "2026-09-10T16:00:00.000Z".to_string(),
+                    to: "2026-09-11T15:59:59.999Z".to_string(),
+                    providers: None,
+                };
+                if let Ok(res) = load_codex_report_sessions_sync(query) {
+                    println!("Loaded {} host sessions for 2026-09-11", res.len());
+                    // Only assert projects if historical datasets ecogrid-mdm and ami-insight are actually present in host files
+                    if res.iter().any(|s| s.project_name == "ecogrid-mdm") {
+                        assert!(res.iter().any(|s| s.project_name == "ami-insight"), "ami-insight should accompany ecogrid-mdm on 9-11");
+                    }
+                }
+            }
         }
-        // Should include ecogrid-mdm and ami-insight which were continued on 9-11
-        assert!(res.iter().any(|s| s.project_name == "ecogrid-mdm"), "ecogrid-mdm should be found on 9-11");
-        assert!(res.iter().any(|s| s.project_name == "ami-insight"), "ami-insight should be found on 9-11");
     }
 }
 

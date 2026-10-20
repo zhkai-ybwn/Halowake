@@ -1,21 +1,23 @@
 {
   "name": "halowake",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "type": "module",
   "scripts": {
     "predev": "node scripts/generate-icon-collection.mjs",
     "dev": "vite",
     "prebuild": "node scripts/generate-icon-collection.mjs",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint:css": "stylelint '**/*.{css,scss,vue}'",
     "format:css": "stylelint '**/*.{css,scss,vue}' --fix",
-    "lint": "vue-tsc --noEmit && eslint . && stylelint '**/*.{css,scss,vue}'",
-    "format": "prettier --write . && stylelint '**/*.{css,scss,vue}' --fix"
+    "typecheck": "vue-tsc -p tsconfig.app.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit",
+    "lint": "npm run typecheck && eslint . && stylelint '**/*.{css,scss,vue}'",
+    "format": "prettier --write . && stylelint '**/*.{css,scss,vue}' --fix",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@iconify-json/mdi": "^1.2.3",
@@ -45,10 +47,12 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.6.0",
+    "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.8.1",
     "eslint": "^9.38.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.5.1",
+    "happy-dom": "^21.0.1",
     "postcss-html": "^1.8.1",
     "postcss-scss": "^4.0.9",
     "prettier": "^3.6.2",
@@ -59,6 +63,7 @@
     "stylelint-order": "^5.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.1.7",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.1.0"
   },
   "overrides": {

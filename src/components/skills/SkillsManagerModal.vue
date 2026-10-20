@@ -41,8 +41,8 @@
           <button
             class="maximize-button"
             type="button"
-            :title="maximized ? t('workbench.restore', '还原窗口') : t('workbench.maximize', '最大化窗口')"
-            :aria-label="maximized ? t('workbench.restore', '还原窗口') : t('workbench.maximize', '最大化窗口')"
+            :title="maximized ? t('common.restore') : t('common.maximize')"
+            :aria-label="maximized ? t('common.restore') : t('common.maximize')"
             @click.stop="toggleMaximized"
           >
             <Icon :icon="maximized ? 'solar:minimize-square-3-linear' : 'solar:maximize-square-3-linear'" />
@@ -175,17 +175,18 @@ import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillsStore } from '@/stores/skills'
 import { useSkillExploreStore } from '@/stores/skill-explore'
+import { useWorkspaceStore } from '@/stores/workspace'
 import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 import InstalledSkillsView from './installed/InstalledSkillsView.vue'
 import SkillExploreView from './explore/SkillExploreView.vue'
 import SkillInstallHistoryView from './installed/SkillInstallHistoryView.vue'
 import SkillInstallModal from './explore/SkillInstallModal.vue'
 import SkillDetailDrawer from './explore/SkillDetailDrawer.vue'
-import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
 
 const { t } = useI18n()
 const store = useSkillsStore()
 const exploreStore = useSkillExploreStore()
+const workspaceStore = useWorkspaceStore()
 const message = useMessage()
 
 const maximized = ref(false)
@@ -204,14 +205,23 @@ watch(
   () => store.modalVisible,
   visible => {
     if (visible) {
-      const currentCwd = localStorage.getItem(GIT_REPO_STORAGE_KEY) || undefined
+      const currentCwd = workspaceStore.refreshFromStorage() || undefined
       void store.scan(currentCwd)
     }
   }
 )
 
+watch(
+  () => workspaceStore.currentProjectPath,
+  newPath => {
+    if (store.modalVisible) {
+      void store.scan(newPath || undefined)
+    }
+  }
+)
+
 async function handleRescan() {
-  const currentCwd = localStorage.getItem(GIT_REPO_STORAGE_KEY) || undefined
+  const currentCwd = workspaceStore.refreshFromStorage() || undefined
   const res = await store.scan(currentCwd)
   if (store.errorMessage) {
     message.error(t('skills.review.localScanFailed', { error: store.errorMessage }))
@@ -227,14 +237,26 @@ async function handleRescan() {
 }
 
 async function handleCheckUpdates() {
-  const currentCwd = localStorage.getItem(GIT_REPO_STORAGE_KEY) || undefined
+  const currentCwd = workspaceStore.refreshFromStorage() || undefined
   const res = await store.checkUpdates(currentCwd)
+  if (store.errorMessage) {
+    message.error(store.errorMessage)
+    return
+  }
   if (res.updateCount > 0) {
-    if (res.newCount > 0) {
+    if (res.unknownCount && res.unknownCount > 0) {
+      message.warning(
+        `${t('skills.pillUpdatesAvailable', { count: res.updateCount })}（另有 ${res.unknownCount} 项检查失败）`
+      )
+    } else if (res.newCount > 0) {
       message.info(t('skills.checkUpdatesWithNew', { newCount: res.newCount, updateCount: res.updateCount }))
     } else {
       message.info(t('skills.pillUpdatesAvailable', { count: res.updateCount }))
     }
+  } else if (res.unknownCount && res.unknownCount > 0) {
+    message.warning(`部分技能检查失败（${res.unknownCount} 项无法连接远端或状态未知）`)
+  } else if (res.unsupportedCount && res.unsupportedCount === res.total && res.total > 0) {
+    message.info('当前技能均为本地手动或 CLI 管理，不支持自动更新检查')
   } else {
     if (res.newCount > 0) {
       message.success(t('skills.rescanWithNew', { count: res.newCount, total: res.total }))
@@ -247,7 +269,12 @@ async function handleCheckUpdates() {
 async function handleUpdateAll() {
   const results = await store.updateAll()
   const successCount = results.filter(r => r.success).length
-  if (successCount > 0) {
+  const failed = results.filter(r => !r.success)
+  if (failed.length > 0 && successCount > 0) {
+    message.warning(`已更新 ${successCount} 项，${failed.length} 项失败：${failed[0].message || ''}`)
+  } else if (failed.length > 0) {
+    message.error(`${t('skills.updateFailed')}: ${failed[0].message || ''}`)
+  } else if (successCount > 0) {
     message.success(`${t('skills.updateSuccess')}: ${successCount}`)
   }
 }
@@ -255,7 +282,13 @@ async function handleUpdateAll() {
 async function handleSyncRegistry() {
   try {
     const res = await exploreStore.syncRegistry()
-    message.success(res.message || t('skills.review.syncFallback', { count: res.totalCount }))
+    if (res.status === 'synced') {
+      message.success(res.message || t('skills.review.syncFallback', { count: res.totalCount }))
+    } else if (res.status === 'persist_failed' || res.status === 'cached_fallback') {
+      message.warning(res.message)
+    } else {
+      message.error(res.message || t('skills.review.syncError'))
+    }
   } catch (err: unknown) {
     message.error((err as Error)?.message || t('skills.review.syncError'))
   }

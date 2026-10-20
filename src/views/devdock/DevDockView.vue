@@ -10,6 +10,12 @@
 
       <template #actions>
         <WorkbenchButton
+          :aria-pressed="portModalOpen"
+          @click="openPortModal()"
+        >
+          {{ t('devdock.actions.portInspector') }}
+        </WorkbenchButton>
+        <WorkbenchButton
           :aria-pressed="processInspectorOpen"
           @click="processInspectorOpen = !processInspectorOpen"
         >
@@ -72,6 +78,7 @@
         @stop="stopProcess"
         @dismiss="dismissProcess"
         @clear-completed="handleClearCompletedProcesses"
+        @open-port-inspector="openPortModal"
         @close="processInspectorOpen = false"
       />
     </section>
@@ -95,6 +102,14 @@
     />
 
     <DevDockLogModal :logs="processLogs" :show="logModalOpen" @after-leave="stopLogPolling" @close="closeProcessLogs" />
+
+    <DevDockPortModal
+      v-model:show="portModalOpen"
+      :active-ports="allActivePorts"
+      :initial-port="selectedPortForInspection"
+      @close="portModalOpen = false"
+      @process-killed="handleProcessKilled"
+    />
   </div>
 </template>
 
@@ -127,6 +142,7 @@ import {
   type DevDockRunHistoryRecord,
 } from '@/services/project/project-service'
 import DevDockLogModal from './components/DevDockLogModal.vue'
+import DevDockPortModal from './components/DevDockPortModal.vue'
 import DevDockCommandConfigDrawer from './components/DevDockCommandConfigDrawer.vue'
 import DevDockProcessPanel from './components/DevDockProcessPanel.vue'
 import DevDockProjectList from './components/DevDockProjectList.vue'
@@ -166,7 +182,20 @@ const scriptSearch = ref('')
 const scriptSort = ref<ScriptSort>(loadScriptSort())
 const pinEditing = ref(false)
 const processInspectorOpen = ref(false)
+const portModalOpen = ref(false)
+const selectedPortForInspection = ref<number | null>(null)
 const configProject = ref<DevDockProject | null>(null)
+
+const allActivePorts = computed(() => processes.value.flatMap(p => p.ports || []))
+
+function openPortModal(port?: number) {
+  selectedPortForInspection.value = port ?? null
+  portModalOpen.value = true
+}
+
+function handleProcessKilled() {
+  refreshProcesses()
+}
 let isFirstMount = true
 let logPollTimer: ReturnType<typeof window.setInterval> | undefined
 let processPollTimer: ReturnType<typeof window.setInterval> | undefined

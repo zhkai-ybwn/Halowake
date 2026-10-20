@@ -185,7 +185,7 @@
                 <strong>{{ t('skills.review.detail.trigger') }}</strong>
                 <p>{{ skill.usageGuide.trigger }}</p>
               </div>
-              <div v-if="skill.usageGuide.steps.length" class="usage-field">
+              <div v-if="Array.isArray(skill.usageGuide.steps) && skill.usageGuide.steps.length" class="usage-field">
                 <strong>{{ t('skills.review.detail.steps') }}</strong>
                 <ol><li v-for="(step, index) in skill.usageGuide.steps" :key="index">{{ step }}</li></ol>
               </div>
@@ -296,10 +296,11 @@
             v-if="isInstalled"
             type="button"
             class="action-btn action-btn--installed"
-            disabled
+            :title="installedTargetSummary ? `${t('skills.installedTag')}: ${installedTargetSummary}` : t('skills.installedTag')"
+            @click="exploreStore.openInstallDialog(skill)"
           >
             <Icon icon="solar:check-circle-bold" />
-            <span>{{ t('skills.installedTag') }}</span>
+            <span>{{ t('skills.installedTag') }}<template v-if="installedTargets.labels.length === 1"> · {{ installedTargets.labels[0] }}</template></span>
           </button>
 
           <button
@@ -384,14 +385,23 @@ async function loadGuides(current: typeof skill.value) {
 
 watch(skill, current => { void loadGuides(current) })
 
+const installedTargets = computed(() => {
+  if (!skill.value) {
+    return { isInstalled: false, count: 0, agentTypes: [], labels: [], skills: [] }
+  }
+  return exploreStore.getSkillInstalledTargets(skill.value, skillsStore.skills)
+})
+
+const installedTargetSummary = computed(() => installedTargets.value.labels.join(' / '))
+
 const isInstalled = computed(() => {
   if (!skill.value) return false
-  return exploreStore.isSkillInstalled(skill.value.id, skillsStore.skills)
+  return exploreStore.isSkillInstalled(skill.value, skillsStore.skills)
 })
 
 const currentSkillCustomTags = computed(() => {
   if (!skill.value) return []
-  return exploreStore.userCustomCategories[skill.value.id] || []
+  return exploreStore.getSkillCustomCategories(skill.value)
 })
 
 const companionSkills = computed(() => {

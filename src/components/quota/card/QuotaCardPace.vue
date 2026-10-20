@@ -34,6 +34,8 @@ function getPaceLabel(level: PaceLevel): string {
       return t('quota.paceTight')
     case 'overPace':
       return t('quota.paceOver')
+    default:
+      return ''
   }
 }
 
