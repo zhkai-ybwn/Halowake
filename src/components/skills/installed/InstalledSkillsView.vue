@@ -178,13 +178,13 @@
             <span
               class="installed-skill-icon"
               :style="{
-                color: getSkillVisuals(skill).color,
-                backgroundColor: getSkillVisuals(skill).bg,
-                borderColor: getSkillVisuals(skill).border,
+                color: getCachedSkillVisuals(skill).color,
+                backgroundColor: getCachedSkillVisuals(skill).bg,
+                borderColor: getCachedSkillVisuals(skill).border,
               }"
               aria-hidden="true"
             >
-              <Icon :icon="getSkillVisuals(skill).icon" />
+              <Icon :icon="getCachedSkillVisuals(skill).icon" />
             </span>
 
             <div class="installed-skill-main">
@@ -340,7 +340,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { inferSkillStage } from '@/services/skills/skill-catalog-service'
 import { findMatchingCatalogSkill } from '@/services/skills/skill-identity'
 import type { AgentSkill, CatalogSkill, SdlcStage } from '@/types/skills'
-import { getSkillVisuals } from '@/utils/skill-visuals'
+import { getSkillVisuals, type SkillVisual } from '@/utils/skill-visuals'
 import SkillStageBadge from '../common/SkillStageBadge.vue'
 
 const { locale, t } = useI18n()
@@ -441,10 +441,23 @@ function confirmUninstall(skill: AgentSkill) {
 
 
 
+const sdlcStageCache = new WeakMap<AgentSkill, SdlcStage>()
 function getSkillSdlcStage(skill: AgentSkill): SdlcStage {
+  const cached = sdlcStageCache.get(skill)
+  if (cached) return cached
   const match = findMatchingCatalogSkill(skill, exploreStore.catalogSkills)
-  if (match) return match.stage
-  return inferSkillStage(skill.name, skill.description)
+  const stage = match ? match.stage : inferSkillStage(skill.name, skill.description)
+  sdlcStageCache.set(skill, stage)
+  return stage
+}
+
+const skillVisualCache = new WeakMap<AgentSkill, SkillVisual>()
+function getCachedSkillVisuals(skill: AgentSkill): SkillVisual {
+  const cached = skillVisualCache.get(skill)
+  if (cached) return cached
+  const res = getSkillVisuals(skill)
+  skillVisualCache.set(skill, res)
+  return res
 }
 
 function getCustomTags(skill: AgentSkill | string): string[] {

@@ -408,6 +408,53 @@ export function getInstalledTargetsForCandidate(
   }
 }
 
+export interface CatalogIndex {
+  byRepo: Map<string, CatalogSkill[]>
+  byId: Map<string, CatalogSkill>
+  byName: Map<string, CatalogSkill[]>
+}
+
+const catalogIndexCache = new WeakMap<CatalogSkill[], CatalogIndex>()
+
+export function getCatalogIndex(catalogSkills: CatalogSkill[]): CatalogIndex {
+  let index = catalogIndexCache.get(catalogSkills)
+  if (index) return index
+
+  const byRepo = new Map<string, CatalogSkill[]>()
+  const byId = new Map<string, CatalogSkill>()
+  const byName = new Map<string, CatalogSkill[]>()
+
+  for (const skill of catalogSkills) {
+    if (skill.id) {
+      byId.set(skill.id.toLowerCase(), skill)
+    }
+    if (skill.name) {
+      const lowerName = skill.name.toLowerCase()
+      let list = byName.get(lowerName)
+      if (!list) {
+        list = []
+        byName.set(lowerName, list)
+      }
+      list.push(skill)
+    }
+    if (skill.gitUrl) {
+      const repo = normalizeGitUrl(skill.gitUrl)
+      if (repo) {
+        let list = byRepo.get(repo)
+        if (!list) {
+          list = []
+          byRepo.set(repo, list)
+        }
+        list.push(skill)
+      }
+    }
+  }
+
+  index = { byRepo, byId, byName }
+  catalogIndexCache.set(catalogSkills, index)
+  return index
+}
+
 /**
  * Finds the matching `CatalogSkill` for a local `AgentSkill`, verifying repository + subPath identity.
  */
@@ -415,7 +462,21 @@ export function findMatchingCatalogSkill(
   installed: AgentSkill,
   catalogSkills: CatalogSkill[]
 ): CatalogSkill | undefined {
-  for (const cat of catalogSkills) {
+  if (!catalogSkills || catalogSkills.length === 0) return undefined
+
+  const identity = resolveInstalledSkillIdentity(installed)
+  if (identity.source.kind === 'unknown' || !identity.source.gitUrl) {
+    return undefined
+  }
+
+  const installedRepo = normalizeGitUrl(identity.source.gitUrl)
+  if (!installedRepo) return undefined
+
+  const index = getCatalogIndex(catalogSkills)
+  const candidates = index.byRepo.get(installedRepo)
+  if (!candidates || candidates.length === 0) return undefined
+
+  for (const cat of candidates) {
     if (cat.isBundle && Array.isArray(cat.subSkills) && cat.subSkills.length > 0) {
       const matchesSub = cat.subSkills.some(
         sub =>
@@ -462,15 +523,14 @@ export function getSkillLookupKeys(
 
   if (typeof skill === 'string') {
     addKey(skill)
-    if (catalogSkills) {
+    if (catalogSkills && catalogSkills.length > 0) {
       const lower = skill.trim().toLowerCase()
       const cleanAfterColon = lower.includes(':') ? lower.split(':').pop()! : lower
-      const matched = catalogSkills.find(
-        c =>
-          c.id.toLowerCase() === lower ||
-          c.id.toLowerCase() === cleanAfterColon ||
-          c.name.toLowerCase() === cleanAfterColon
-      )
+      const index = getCatalogIndex(catalogSkills)
+      const matched =
+        index.byId.get(lower) ||
+        index.byId.get(cleanAfterColon) ||
+        index.byName.get(cleanAfterColon)?.[0]
       if (matched) {
         addKey(matched.id)
         addKey(matched.name)
@@ -481,14 +541,13 @@ export function getSkillLookupKeys(
     addKey(skill.id)
     addKey(skill.canonicalName)
     addKey(skill.name)
-    if (catalogSkills) {
-      const lowerId = skill.catalogId?.toLowerCase() || skill.id.toLowerCase()
+    if (catalogSkills && catalogSkills.length > 0) {
+      const lowerId = (skill.catalogId || skill.id || '').toLowerCase()
       const lowerName = (skill.canonicalName || skill.name || '').toLowerCase()
-      const matched = catalogSkills.find(
-        c =>
-          c.id.toLowerCase() === lowerId ||
-          (lowerName && c.name.toLowerCase() === lowerName)
-      )
+      const index = getCatalogIndex(catalogSkills)
+      const matched =
+        (lowerId ? index.byId.get(lowerId) : undefined) ||
+        (lowerName ? index.byName.get(lowerName)?.[0] : undefined)
       if (matched) {
         addKey(matched.id)
         addKey(matched.name)
@@ -520,12 +579,15 @@ export function resolveStableCatalogKey(
   const cleanId = rawId.includes(':') ? rawId.split(':').pop()! : rawId
   const lowerClean = cleanId.toLowerCase()
 
-  const exactIdMatch = catalogSkills.find(c => c.id.toLowerCase() === lowerClean)
-  if (exactIdMatch) return exactIdMatch.id
+  if (catalogSkills && catalogSkills.length > 0) {
+    const index = getCatalogIndex(catalogSkills)
+    const exactIdMatch = index.byId.get(lowerClean)
+    if (exactIdMatch) return exactIdMatch.id
 
-  const nameMatches = catalogSkills.filter(c => c.name.toLowerCase() === lowerClean)
-  if (nameMatches.length === 1) {
-    return nameMatches[0].id
+    const nameMatches = index.byName.get(lowerClean)
+    if (nameMatches && nameMatches.length === 1) {
+      return nameMatches[0].id
+    }
   }
 
   return rawId

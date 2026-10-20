@@ -122,11 +122,14 @@ export const useSkillsStore = defineStore('skills', () => {
     return result
   })
 
-  async function scan(projectCwd?: string) {
+  async function scan(projectCwd?: string, options?: { silent?: boolean }) {
     activeProjectCwd = projectCwd
     const gen = ++scopeGeneration
     const requestId = ++scanRequestId
-    loading.value = true
+    const isSilent = Boolean(options?.silent && skills.value.length > 0)
+    if (!isSilent) {
+      loading.value = true
+    }
     errorMessage.value = null
     const prevIds = new Set(skills.value.map(s => s.id))
     try {
@@ -161,7 +164,7 @@ export const useSkillsStore = defineStore('skills', () => {
       errorMessage.value = String(err)
       return { total: skills.value.length, newCount: 0, newSkills: [] }
     } finally {
-      if (requestId === scanRequestId && gen === scopeGeneration) loading.value = false
+      if (requestId === scanRequestId && gen === scopeGeneration && !isSilent) loading.value = false
     }
   }
 

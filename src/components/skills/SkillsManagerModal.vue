@@ -206,7 +206,7 @@ watch(
   visible => {
     if (visible) {
       const currentCwd = workspaceStore.refreshFromStorage() || undefined
-      void store.scan(currentCwd)
+      void store.scan(currentCwd, { silent: store.skills.length > 0 })
     }
   }
 )

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, triggerRef, watch } from 'vue'
 import {
   FALLBACK_SEED_PIPELINES,
   FALLBACK_SEED_SKILLS,
@@ -86,6 +86,7 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
           name?: string
         }
   ): boolean {
+    if (starredIds.value.size === 0) return false
     const keys = getSkillLookupKeys(skill)
     return keys.some(key => starredIds.value.has(key))
   }
@@ -123,11 +124,15 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
           name?: string
         }
   ): string[] {
+    const cats = userCustomCategories.value
+    if (!cats || Object.keys(cats).length === 0) {
+      return []
+    }
     const aliases = getSkillLookupKeys(skill, catalogSkills.value)
-    const keys = collectMatchingCategoryKeys(aliases, userCustomCategories.value)
+    const keys = collectMatchingCategoryKeys(aliases, cats)
     const merged: string[] = []
     for (const key of keys) {
-      const list = userCustomCategories.value[key]
+      const list = cats[key]
       if (Array.isArray(list)) {
         for (const tag of list) {
           if (tag && !merged.includes(tag)) {
@@ -148,7 +153,7 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
     })
   }
 
-  const catalogSkills = ref<CatalogSkill[]>(
+  const catalogSkills = shallowRef<CatalogSkill[]>(
     decorateSkills(FALLBACK_SEED_SKILLS.map(skill => ({ ...skill })))
   )
   const pipelines = ref<SkillPipeline[]>(FALLBACK_SEED_PIPELINES)
@@ -689,6 +694,7 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
         ftsTarget.isStar = isNowStar
       }
     }
+    triggerRef(catalogSkills)
     if (selectedStage.value === 'starred' && searchQuery.value.trim()) {
       scheduleSearch(true)
     }
