@@ -187,7 +187,7 @@ export const useSkillExploreStore = defineStore('skillExplore', () => {
 
   // 目录版本序号（仅在 SQLite / 缓存落盘成功后再递增并发布）
   const catalogRevision = ref(0)
-  const snapshotVersion = ref<string | null>('1.4.2')
+  const snapshotVersion = ref<string | null>('1.4.3')
 
   // 安装向导状态
   const installModalVisible = ref(false)

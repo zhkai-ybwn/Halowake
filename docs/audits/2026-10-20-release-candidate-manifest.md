@@ -1,39 +1,39 @@
 # Halowake 候选发布产物清单与构建来源审计报告
 
 **记录日期**：2026-10-20  
-**产物版本**：**v1.4.2**（用户已批准正式版本号使用 1.4.2，首发仅限 Windows x64）  
+**产物版本**：**v1.4.3**（为适配客户端在线升级逻辑并包含 Tab 切换卡顿优化，版本号已升级至 1.4.3，首发仅限 Windows x64）  
 **产物定位**：**Windows x64 本地离线功能人工验收候选包**  
-**核心声明**：本产物已在各配置文件中完成 1.4.2 版本号对齐，并通过全套本地工程门禁与搜索质量基准测试（Strict P@1 = 88.5%）。当前产物交付给负责人进行 Windows 沙箱人工实机验收。未完成沙箱验收与 CI 签名构建前，暂不对外公开发布。  
+**核心声明**：本产物已在各配置文件中完成 1.4.3 版本号对齐，并通过全套本地工程门禁与搜索质量基准测试（Strict P@1 = 88.5%）。当前产物交付给负责人进行 Windows 沙箱人工实机验收。未完成沙箱验收与 CI 签名构建前，暂不对外公开发布。  
 
 ---
 
 ## 一、当前候选产物文件元数据（本轮实测独立核验）
 
-通过 PowerShell `Get-Item` 与 `Get-FileHash` 对本地最新编译生成的 1.4.2 二进制产物进行核验记录：
+通过 PowerShell `Get-Item` 与 `Get-FileHash` 对本地最新编译生成的 1.4.3 二进制产物进行核验记录：
 
 | 属性 | 产物 1：可执行文件 | 产物 2：Windows 安装向导包 |
 | :--- | :--- | :--- |
-| **文件名** | `Halowake.exe` | `Halowake_1.4.2_x64-setup.exe` |
-| **绝对文件路径** | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\Halowake.exe` | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\bundle\nsis\Halowake_1.4.2_x64-setup.exe` |
-| **文件大小（字节）** | **27,292,160** 字节 (26.03 MB) | **8,195,269** 字节 (7.82 MB) |
-| **SHA-256 校验和** | `BB276CF9ABB113B0F4CBE6EF3D57935DC4A8D7DF73A5618E6B9B9B80643C9939` | `BEAA70A04E534ACD2E3A8BAED390E33EFDBB34AC94F1A7D9DE44BF1A570C2791` |
-| **真实文件生成时间** | 2026/10/20 11:26:49 (Asia/Shanghai) | 2026/10/20 11:26:59 (Asia/Shanghai) |
+| **文件名** | `Halowake.exe` | `Halowake_1.4.3_x64-setup.exe` |
+| **绝对文件路径** | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\Halowake.exe` | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\bundle\nsis\Halowake_1.4.3_x64-setup.exe` |
+| **文件大小（字节）** | **27,286,528** 字节 (26.02 MB) | **8,196,353** 字节 (7.82 MB) |
+| **SHA-256 校验和** | `76E9EEB704CACD57DF22AC97A553B1AFC1449B8F275FE2B73D6A5E82CD7179DF` | `B8228E75668FD7DFA47C9A31C108D907BFE1A0A5F10E9D870D212BFBF7BCD27C` |
+| **真实文件生成时间** | 2026/10/20 11:38:20 (Asia/Shanghai) | 2026/10/20 11:38:30 (Asia/Shanghai) |
 | **产物格式/打包技术** | 独立 PE32+ 可执行文件 (MSVC) | NSIS Nullsoft Installer (含中英文向导与卸载脚本) |
 
 ---
 
 ## 二、构建来源与版本对齐核查
 
-- **Git HEAD 提交**：`bbd5efe` (包含技能中心 10,502 项注册数据 Tab 切换 O(1) 索引与静默扫描优化)
-- **本地历史标签**：`v1.4.1` 保持原样指向历史 HEAD，**未被移动、覆盖或删除**。
-- **发布标签**：`v1.4.2` 已更新指向 `bbd5efe`。
-- **1.4.2 版本文件全量对齐情况**：
-  1. `package.json`：`"version": "1.4.2"`
-  2. `package-lock.json`：`"version": "1.4.2"`
-  3. `src-tauri/Cargo.toml`：`version = "1.4.2"`
-  4. `src-tauri/Cargo.lock`：`halowake v1.4.2`
-  5. `src-tauri/tauri.conf.json`：`"version": "1.4.2"`
-  6. `src/stores/skill-explore.ts`：`snapshotVersion = ref<string | null>('1.4.2')`
+- **Git HEAD 提交**：包含技能中心 10,502 项注册数据 Tab 切换 O(1) 索引与静默扫描优化，版本全量对齐为 1.4.3
+- **本地历史标签**：`v1.4.1`、`v1.4.2` 保持原样指向历史提交，**未被覆盖或破坏**。
+- **发布标签**：`v1.4.3`
+- **1.4.3 版本文件全量对齐情况**：
+  1. `package.json`：`"version": "1.4.3"`
+  2. `package-lock.json`：`"version": "1.4.3"`
+  3. `src-tauri/Cargo.toml`：`version = "1.4.3"`
+  4. `src-tauri/Cargo.lock`：`halowake v1.4.3`
+  5. `src-tauri/tauri.conf.json`：`"version": "1.4.3"`
+  6. `src/stores/skill-explore.ts`：`snapshotVersion = ref<string | null>('1.4.3')`
 - **构建命令与模式**：
   - 构建命令：`npm run tauri:build`
   - 前置编译：`npm run build`（`vue-tsc` 严格类型检查 + `vite build` 打包 `dist/`，4,814 模块）
