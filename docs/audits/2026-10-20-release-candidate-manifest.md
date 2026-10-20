@@ -15,17 +15,18 @@
 | :--- | :--- | :--- |
 | **文件名** | `Halowake.exe` | `Halowake_1.4.2_x64-setup.exe` |
 | **绝对文件路径** | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\Halowake.exe` | `C:\Users\user\Desktop\templates\Lumina\src-tauri\target\release\bundle\nsis\Halowake_1.4.2_x64-setup.exe` |
-| **文件大小（字节）** | **27,292,160** 字节 (26.03 MB) | **8,200,961** 字节 (7.82 MB) |
-| **SHA-256 校验和** | `FDC3F1341CD2574C0D8D22F561D5DD327322F07007608D191BABA4E98591A6D7` | `9FB26A016B9F827BEFF124CD1FAB637EBBF6630D438F5C51132012147B5B4C0B` |
-| **真实文件生成时间** | 2026/10/20 09:35:15 (Asia/Shanghai) | 2026/10/20 09:35:24 (Asia/Shanghai) |
+| **文件大小（字节）** | **27,292,160** 字节 (26.03 MB) | **8,195,269** 字节 (7.82 MB) |
+| **SHA-256 校验和** | `BB276CF9ABB113B0F4CBE6EF3D57935DC4A8D7DF73A5618E6B9B9B80643C9939` | `BEAA70A04E534ACD2E3A8BAED390E33EFDBB34AC94F1A7D9DE44BF1A570C2791` |
+| **真实文件生成时间** | 2026/10/20 11:26:49 (Asia/Shanghai) | 2026/10/20 11:26:59 (Asia/Shanghai) |
 | **产物格式/打包技术** | 独立 PE32+ 可执行文件 (MSVC) | NSIS Nullsoft Installer (含中英文向导与卸载脚本) |
 
 ---
 
 ## 二、构建来源与版本对齐核查
 
-- **Git HEAD 提交**：`3fb23f5d57bb5937fce49a4cfccd472a41caeef4`
+- **Git HEAD 提交**：`bbd5efe` (包含技能中心 10,502 项注册数据 Tab 切换 O(1) 索引与静默扫描优化)
 - **本地历史标签**：`v1.4.1` 保持原样指向历史 HEAD，**未被移动、覆盖或删除**。
+- **发布标签**：`v1.4.2` 已更新指向 `bbd5efe`。
 - **1.4.2 版本文件全量对齐情况**：
   1. `package.json`：`"version": "1.4.2"`
   2. `package-lock.json`：`"version": "1.4.2"`
