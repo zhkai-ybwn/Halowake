@@ -60,6 +60,10 @@
         </div>
 
         <div class="workspace-actions">
+          <button type="button" class="page-action-btn" @click="scheduleModalOpen = true">
+            <Icon icon="solar:clock-circle-linear" />
+            <span>{{ t('codexSchedule.title') }}</span>
+          </button>
           <!-- 1. 扫描本地客户端凭据 -->
           <button
             type="button"
@@ -308,6 +312,7 @@
   </NModal>
 
   <!-- 新增/编辑账号弹窗 -->
+  <CodexScheduleModal v-model:show="scheduleModalOpen" />
   <AccountEditModal
     v-model:show="editModalOpen"
     :account="selectedEditAccount"
@@ -329,6 +334,7 @@ import { useI18n } from 'vue-i18n'
 import QuotaCard from './QuotaCard.vue'
 import AccountEditModal from './AccountEditModal.vue'
 import AccountManageModal from './AccountManageModal.vue'
+import CodexScheduleModal from './CodexScheduleModal.vue'
 import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 import { useQuotaStore } from '@/stores/quota'
 import {
@@ -353,6 +359,7 @@ const summary = computed(() => quotaStore.summary)
 const loading = computed(() => quotaStore.loading)
 
 const maximized = ref(false)
+const scheduleModalOpen = ref(false)
 
 function toggleMaximized() {
   maximized.value = !maximized.value

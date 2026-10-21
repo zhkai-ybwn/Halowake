@@ -2,8 +2,8 @@
   <aside class="process-panel">
     <header class="panel-header">
       <div class="panel-header-title">
-        <span>{{ t('devdock.processes.title') }}</span>
-        <strong>{{ t('devdock.processes.subtitle') }}</strong>
+        <strong class="panel-title-text">{{ t('devdock.processes.title') }}</strong>
+        <span class="panel-title-sub" :title="t('devdock.processes.subtitle')">{{ t('devdock.processes.subtitle') }}</span>
       </div>
       <div class="panel-header-actions">
         <button
@@ -25,7 +25,7 @@
           <Icon icon="solar:trash-bin-trash-linear" />
           <span>{{ t('devdock.processes.clearCompleted') }}</span>
         </button>
-        <WorkbenchCloseButton @close="$emit('close')" />
+        <WorkbenchCloseButton size="sm" @close="$emit('close')" />
       </div>
     </header>
 
@@ -268,29 +268,44 @@ function formatPorts(ports: number[]): string {
   align-items: center;
   border-bottom: 1px solid var(--lumina-card-border);
   display: flex;
+  gap: 8px;
   justify-content: space-between;
   min-height: 48px;
-  padding: 8px 12px;
+  padding: 8px 10px;
 }
 
 .panel-header-title {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 2px;
+  justify-content: center;
+  min-width: 0;
 
-  span {
-    color: var(--lumina-text-secondary);
-    font-size: 11px;
+  .panel-title-text {
+    color: var(--lumina-text);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  strong {
-    font-size: 14px;
-    color: var(--lumina-text);
+  .panel-title-sub {
+    color: var(--lumina-text-secondary);
+    font-size: 11px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
 .panel-header-actions {
   align-items: center;
   display: flex;
+  flex-shrink: 0;
   gap: 6px;
 }
 
@@ -303,14 +318,24 @@ function formatPorts(ports: number[]): string {
   color: var(--lumina-text-secondary);
   cursor: pointer;
   display: inline-flex;
+  flex-shrink: 0;
   font-size: 11px;
   gap: 4px;
   height: 26px;
-  padding: 0 8px;
+  line-height: 1;
+  padding: 0 7px;
   transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
 
   svg {
+    flex-shrink: 0;
     font-size: 12px;
+  }
+
+  span {
+    line-height: 1;
+    white-space: nowrap;
   }
 
   &:hover {

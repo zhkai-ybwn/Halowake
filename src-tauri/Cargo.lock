@@ -1387,8 +1387,9 @@ dependencies = [
 
 [[package]]
 name = "halowake"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
+ "chrono",
  "encoding_rs",
  "libc",
  "log",
@@ -1403,6 +1404,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
 ]
 

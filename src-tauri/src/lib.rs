@@ -47,6 +47,7 @@ pub fn run() {
             review::repository::mark_running_sessions_interrupted(&database)
                 .map_err(std::io::Error::other)?;
             app.manage(database);
+            quota::scheduler::start(app.handle()).map_err(std::io::Error::other)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(tauri::include_image!("icons/window-icon.png"))?;
             }
@@ -75,6 +76,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            quota::scheduler::load_codex_schedule,
+            quota::scheduler::save_codex_schedule,
+            quota::scheduler::run_codex_warmup_now,
             commands::git::load_git_snapshot,
             commands::git::load_git_file_diff,
             commands::git::load_git_file_head_diff,

@@ -956,7 +956,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   min-height: 0;
 
   &.inspector-open {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
   }
 }
 
@@ -969,7 +969,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 
 @media (max-width: 980px) {
   .devdock-shell.inspector-open {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   }
 }
 </style>
