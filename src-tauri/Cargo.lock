@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "halowake"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "chrono",
  "encoding_rs",

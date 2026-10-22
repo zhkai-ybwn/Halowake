@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager, State};
 use tokio::sync::Notify;
 
 use crate::storage::AppDatabase;
-use codex::{Client, Failure, Snapshot};
+use codex::{Client, Failure, Snapshot, WarmupEvidence};
 
 const STORAGE_KEY: &str = "codex_quota_scheduler_v1";
 
@@ -73,10 +73,30 @@ pub struct Run {
     pub next_check_at: i64,
     pub requested_at: Option<i64>,
     pub request_completed: bool,
+    #[serde(default)]
+    pub request_finished_at: Option<i64>,
+    #[serde(default)]
+    pub request_error: Option<String>,
+    #[serde(default)]
+    pub request_evidence: WarmupEvidence,
+    #[serde(default)]
+    pub observation: Option<WindowObservation>,
+    #[serde(default)]
+    pub verified_reset: Option<i64>,
+    #[serde(default)]
+    pub verification_version: u32,
     pub baseline_reset: Option<i64>,
     pub baseline_used: f64,
     pub account_id: String,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowObservation {
+    at: i64,
+    resets_at: i64,
+    used_percent: f64,
 }
 
 impl Run {
@@ -166,6 +186,9 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
             "waiting"
         }
         .into();
+    }
+    if repair_legacy_confirmations(&mut data) {
+        persist(&db, &data)?;
     }
     app.manage(Scheduler {
         data: Mutex::new(data),
@@ -269,6 +292,12 @@ fn new_run(id: String, at: i64, deadline: i64, account_id: String) -> Run {
         next_check_at: at,
         requested_at: None,
         request_completed: false,
+        request_finished_at: None,
+        request_error: None,
+        request_evidence: WarmupEvidence::default(),
+        observation: None,
+        verified_reset: None,
+        verification_version: 2,
         baseline_reset: None,
         baseline_used: 0.0,
         account_id,
@@ -340,7 +369,8 @@ async fn worker(app: AppHandle) {
                 if now.timestamp() >= run.deadline || clock_expired {
                     run.finish("expired", "waitExpired", now.timestamp());
                 } else if run
-                    .requested_at
+                    .request_finished_at
+                    .or(run.requested_at)
                     .is_some_and(|at| now.timestamp() >= at + 180)
                 {
                     run.finish("failed", "unconfirmed", now.timestamp());
@@ -398,7 +428,7 @@ async fn worker(app: AppHandle) {
             let started = Instant::now();
             let result = tokio::select! {
                 _ = &mut changed => { continue; }
-                result = tokio::time::timeout(Duration::from_secs(remaining.min(100)), attempt(&app,&mut run)) => {
+                result = tokio::time::timeout(Duration::from_secs(remaining.min(240)), attempt(&app,&mut run)) => {
                     result.unwrap_or(Err(Failure("requestTimeout",true)))
                 }
             };
@@ -423,6 +453,17 @@ async fn worker(app: AppHandle) {
                         };
                     }
                     Err(Failure(code, retryable)) => {
+                        if run.requested_at.is_some()
+                            && !run.request_completed
+                            && run.request_error.is_none()
+                        {
+                            run.request_error = Some(code.into());
+                        }
+                        log::warn!(
+                            "Codex scheduler attempt stopped: stage={} code={}",
+                            run.request_evidence.stage,
+                            code
+                        );
                         run.failures += 1;
                         if !retryable || code == "rateLimited" || run.failures >= 5 {
                             run.finish("failed", code, now);
@@ -468,11 +509,79 @@ fn same_confirmed_window(previous: &Run, current: &Run, reset: i64, now: i64) ->
     previous.id != current.id
         && previous.account_id == current.account_id
         && matches!(previous.status.as_str(), "success" | "ready")
+        && previous.verification_version == 2
         && reset > now
         && reset - 18000 >= current.scheduled_at - 120
         && previous
-            .baseline_reset
+            .verified_reset
             .is_some_and(|old| (old - reset).abs() <= 15)
+}
+
+fn repair_legacy_confirmations(data: &mut SchedulerData) -> bool {
+    let mut changed = false;
+    for run in &mut data.runs {
+        if run.status == "success" && run.verification_version < 2 {
+            run.status = "failed".into();
+            run.detail = "legacyUnconfirmed".into();
+            run.verified_reset = None;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn window_confirmed(snapshot: &Snapshot, run: &Run, now: i64) -> bool {
+    let evidence = &run.request_evidence;
+    if !run.request_completed
+        || evidence.stage != "completed"
+        || !(evidence.reply_received || evidence.output_tokens.is_some_and(|n| n > 0))
+    {
+        return false;
+    }
+    let window = &snapshot.session;
+    if window.resets_at <= now || window.resets_at > now + 18015 || snapshot.allowed == Some(false)
+    {
+        return false;
+    }
+    if window.used_percent > run.baseline_used {
+        return true;
+    }
+    // 0% can be a rounded value. Only a completed inference plus a fixed countdown
+    // observed for a full minute can confirm it; a sliding now+5h reset never can.
+    run.observation.as_ref().is_some_and(|old| {
+        now - old.at >= 60
+            && (window.resets_at - old.resets_at).abs() <= 5
+            && window.resets_at <= now + 18000 - 60
+    })
+}
+
+fn verify_window(
+    snapshot: &Snapshot,
+    run: &mut Run,
+    now: i64,
+) -> Result<(&'static str, &'static str), Failure> {
+    if window_confirmed(snapshot, run, now) {
+        run.verified_reset = Some(snapshot.session.resets_at);
+        run.verification_version = 2;
+        return Ok(("success", "confirmed"));
+    }
+    let expired = run
+        .request_finished_at
+        .or(run.requested_at)
+        .is_some_and(|at| now >= at + 180);
+    if expired {
+        return Err(Failure("unconfirmed", false));
+    }
+    if run.observation.as_ref().map_or(true, |old| {
+        (old.resets_at - snapshot.session.resets_at).abs() > 5
+    }) {
+        run.observation = Some(WindowObservation {
+            at: now,
+            resets_at: snapshot.session.resets_at,
+            used_percent: snapshot.session.used_percent,
+        });
+    }
+    Ok(("verifying", "verifying"))
 }
 
 fn decide(snapshot: &Snapshot, run: &Run, now: i64) -> Result<Decision, Failure> {
@@ -507,28 +616,17 @@ fn decide(snapshot: &Snapshot, run: &Run, now: i64) -> Result<Decision, Failure>
 }
 
 async fn attempt(app: &AppHandle, run: &mut Run) -> Result<(&'static str, &'static str), Failure> {
+    if run.requested_at.is_none() {
+        run.request_evidence.stage = "connecting".into();
+    }
     let mut client = Client::open(&run.account_id).await?;
+    if run.requested_at.is_none() {
+        run.request_evidence.stage = "readingQuota".into();
+    }
     let snapshot = client.snapshot().await?;
     let now = Local::now().timestamp();
-    if let Some(requested) = run.requested_at {
-        let window = &snapshot.session;
-        let changed = window.used_percent > run.baseline_used
-            || run
-                .baseline_reset
-                .is_some_and(|old| window.resets_at > old + 60)
-            || (run.request_completed
-                && now >= requested + 60
-                && run
-                    .baseline_reset
-                    .is_some_and(|old| (window.resets_at - old).abs() <= 15));
-        if window.resets_at > now && changed {
-            run.baseline_reset = Some(window.resets_at);
-            return Ok(("success", "confirmed"));
-        }
-        if now >= requested + 180 {
-            return Err(Failure("unconfirmed", false));
-        }
-        return Ok(("verifying", "verifying"));
+    if run.requested_at.is_some() {
+        return verify_window(&snapshot, run, now);
     }
     let decision = decide(&snapshot, run, now)?;
     let already_confirmed = {
@@ -543,17 +641,26 @@ async fn attempt(app: &AppHandle, run: &mut Run) -> Result<(&'static str, &'stat
     };
     if already_confirmed && matches!(&decision, Decision::Warm) {
         run.baseline_reset = Some(snapshot.session.resets_at);
+        run.verified_reset = Some(snapshot.session.resets_at);
         return Ok(("ready", "existingWindow"));
     }
     match decision {
         Decision::Ready => {
             run.baseline_reset = Some(snapshot.session.resets_at);
+            run.verified_reset = Some(snapshot.session.resets_at);
             return Ok(("ready", "existingWindow"));
         }
         Decision::Wait => return Ok(("waiting", "waitingReset")),
         Decision::Warm => {}
     }
+    let prepared = client.prepare_warmup(&mut run.request_evidence).await?;
+    let now = Local::now().timestamp();
+    if now >= run.deadline {
+        return Err(Failure("waitExpired", false));
+    }
     run.requested_at = Some(now);
+    run.request_error = None;
+    run.request_evidence.stage = "startingTurn".into();
     run.baseline_reset = Some(snapshot.session.resets_at);
     run.baseline_used = snapshot.session.used_percent;
     run.status = "warming".into();
@@ -587,10 +694,17 @@ async fn attempt(app: &AppHandle, run: &mut Run) -> Result<(&'static str, &'stat
             .map_err(|_| Failure("storageError",false))?;
     }
     // The marker is persisted BEFORE dispatch. Even timeout/crash cannot cause a second request.
-    let result = client.warm().await;
+    let result = client.warm(prepared, &mut run.request_evidence).await;
+    run.request_finished_at = Some(Local::now().timestamp());
     run.request_completed = result.is_ok();
+    if let Err(error) = result {
+        run.request_error = Some(error.0.into());
+    }
     match result {
-        Ok(()) => Ok(("verifying", "verifying")),
+        Ok(()) => {
+            let after = client.snapshot().await?;
+            verify_window(&after, run, Local::now().timestamp())
+        }
         Err(Failure("requestTimeout" | "connectionError", _)) => Ok(("verifying", "verifying")),
         Err(error) => Err(error),
     }
@@ -699,6 +813,7 @@ mod tests {
         let mut morning = new_run("morning".into(), 28800, 30600, "account".into());
         morning.status = "success".into();
         morning.baseline_reset = Some(46980); // 08:03 start, 13:03 reset.
+        morning.verified_reset = Some(46980);
         let afternoon = new_run("afternoon".into(), 46800, 48600, "account".into());
         assert!(!same_confirmed_window(&morning, &afternoon, 46980, 46800));
         let nearby = new_run("nearby".into(), 28920, 30720, "account".into());
@@ -726,5 +841,106 @@ mod tests {
         };
         enqueue(&mut expired, at + chrono::Duration::minutes(31));
         assert!(expired.runs.is_empty());
+    }
+
+    fn completed_run() -> Run {
+        let mut run = new_run("node".into(), 20000, 21800, "account".into());
+        run.requested_at = Some(20004);
+        run.request_finished_at = Some(20010);
+        run.request_completed = true;
+        run.baseline_reset = Some(38004);
+        run.request_evidence.stage = "completed".into();
+        run.request_evidence.reply_received = true;
+        run
+    }
+
+    #[test]
+    fn regression_oct22_timeout_and_sliding_reset_cannot_confirm() {
+        let mut run = completed_run();
+        run.request_completed = false;
+        run.request_evidence = WarmupEvidence::default();
+        assert!(!window_confirmed(&snapshot(38103, 0.0), &run, 20104));
+        assert!(!window_confirmed(&snapshot(38103, 1.0), &run, 20104));
+        assert_eq!(
+            verify_window(&snapshot(38103, 0.0), &mut run, 20104)
+                .unwrap()
+                .0,
+            "verifying"
+        );
+        assert!(run.verified_reset.is_none());
+    }
+
+    #[test]
+    fn completed_request_with_sliding_zero_usage_window_stays_unconfirmed() {
+        let mut run = completed_run();
+        for now in [20010, 20040, 20070, 20100, 20130, 20160] {
+            assert_eq!(
+                verify_window(&snapshot(now + 18000, 0.0), &mut run, now)
+                    .unwrap()
+                    .0,
+                "verifying"
+            );
+        }
+        assert_eq!(
+            verify_window(&snapshot(38190, 0.0), &mut run, 20190)
+                .err()
+                .unwrap()
+                .0,
+            "unconfirmed"
+        );
+    }
+
+    #[test]
+    fn positive_quota_usage_requires_a_completed_inference_reply() {
+        let mut run = completed_run();
+        run.request_evidence.reply_received = false;
+        assert!(!window_confirmed(&snapshot(38010, 1.0), &run, 20040));
+        run.request_evidence.output_tokens = Some(2);
+        assert!(window_confirmed(&snapshot(38010, 1.0), &run, 20040));
+    }
+
+    #[test]
+    fn rounded_zero_usage_requires_an_observed_fixed_countdown() {
+        let mut run = completed_run();
+        assert_eq!(
+            verify_window(&snapshot(38010, 0.0), &mut run, 20015)
+                .unwrap()
+                .0,
+            "verifying"
+        );
+        assert_eq!(
+            verify_window(&snapshot(38010, 0.0), &mut run, 20045)
+                .unwrap()
+                .0,
+            "verifying"
+        );
+        assert_eq!(
+            verify_window(&snapshot(38010, 0.0), &mut run, 20075)
+                .unwrap()
+                .0,
+            "success"
+        );
+        assert_eq!(run.baseline_reset, Some(38004));
+        assert_eq!(run.verified_reset, Some(38010));
+    }
+
+    #[test]
+    fn repairs_legacy_success_without_replaying_or_changing_the_schedule() {
+        let mut run = completed_run();
+        run.verification_version = 0;
+        run.status = "success".into();
+        run.request_completed = false;
+        let mut data = SchedulerData {
+            settings: Settings::default(),
+            runs: vec![run],
+        };
+        let times = data.settings.times.clone();
+        assert!(repair_legacy_confirmations(&mut data));
+        assert_eq!(data.runs[0].status, "failed");
+        assert_eq!(data.runs[0].detail, "legacyUnconfirmed");
+        assert_eq!(data.runs[0].requested_at, Some(20004));
+        assert_eq!(data.settings.times, times);
+        assert!(!data.runs[0].active());
+        assert!(!repair_legacy_confirmations(&mut data));
     }
 }

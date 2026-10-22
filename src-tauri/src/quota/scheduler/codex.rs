@@ -27,6 +27,23 @@ pub struct Snapshot {
     pub allowed: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WarmupEvidence {
+    pub stage: String,
+    pub model: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub reply_received: bool,
+    pub output_tokens: Option<u64>,
+    pub service_error: Option<String>,
+}
+
+pub struct PreparedWarmup {
+    thread_id: String,
+    effort: Option<String>,
+}
+
 pub fn local_login() -> Result<(Value, String), Failure> {
     let home = env::var_os("CODEX_HOME")
         .map(PathBuf::from)
@@ -68,6 +85,7 @@ pub struct Client {
     next_id: u64,
     account_id: String,
     pending_completion: Option<Value>,
+    pending_events: Vec<Value>,
     pub workspace: PathBuf,
     // Declared last: credentials are removed after the child has been terminated.
     _directory: TempDir,
@@ -159,6 +177,7 @@ impl Client {
             next_id: 0,
             account_id: expected_account.to_string(),
             pending_completion: None,
+            pending_events: Vec::new(),
             workspace,
             _directory: directory,
         };
@@ -232,6 +251,16 @@ impl Client {
                 }
                 if message["method"] == "turn/completed" {
                     self.pending_completion = Some(message);
+                } else if matches!(
+                    message["method"].as_str(),
+                    Some(
+                        "item/completed"
+                            | "thread/tokenUsage/updated"
+                            | "item/agentMessage/delta"
+                            | "error"
+                    )
+                ) {
+                    self.pending_events.push(message);
                 }
             }
         })
@@ -289,7 +318,11 @@ impl Client {
         })
     }
 
-    pub async fn warm(&mut self) -> Result<(), Failure> {
+    pub async fn prepare_warmup(
+        &mut self,
+        evidence: &mut WarmupEvidence,
+    ) -> Result<PreparedWarmup, Failure> {
+        evidence.stage = "listingModels".into();
         let models = self.request("model/list", json!({"limit":100})).await?;
         // Use the account's normal Codex model, rather than guessing that a cheaper model shares its quota bucket.
         let model = models["data"]
@@ -311,6 +344,8 @@ impl Client {
                 })
             })
             .map(String::from);
+        evidence.model = Some(model_id.clone());
+        evidence.stage = "startingThread".into();
         let thread = self.request("thread/start", json!({
             "model":model_id,"modelProvider":"openai","cwd":self.workspace,"ephemeral":true,
             "approvalPolicy":"never","sandbox":"read-only",
@@ -322,31 +357,126 @@ impl Client {
             .and_then(Value::as_str)
             .ok_or(Failure("protocolError", false))?
             .to_string();
-        self.request("turn/start", json!({"threadId":thread_id,"effort":effort,"input":[{"type":"text","text":"Reply exactly OK.","text_elements":[]}]})).await?;
-        timeout(Duration::from_secs(60), async {
+        evidence.thread_id = Some(thread_id.clone());
+        Ok(PreparedWarmup { thread_id, effort })
+    }
+
+    pub async fn warm(
+        &mut self,
+        prepared: PreparedWarmup,
+        evidence: &mut WarmupEvidence,
+    ) -> Result<(), Failure> {
+        evidence.stage = "startingTurn".into();
+        let thread_id = prepared.thread_id;
+        let response = self.request("turn/start", json!({"threadId":thread_id,"effort":prepared.effort,"input":[{"type":"text","text":"Reply exactly OK.","text_elements":[]}]})).await?;
+        let turn_id = response
+            .pointer("/turn/id")
+            .and_then(Value::as_str)
+            .ok_or(Failure("protocolError", false))?
+            .to_string();
+        evidence.turn_id = Some(turn_id.clone());
+        evidence.stage = "waitingCompletion".into();
+        for event in std::mem::take(&mut self.pending_events) {
+            observe_turn_event(&event, &thread_id, &turn_id, evidence);
+        }
+        // A turn can finish before its start RPC response is consumed.
+        if response.pointer("/turn/status").and_then(Value::as_str) == Some("completed") {
+            observe_completed_turn(&response["turn"], evidence);
+            evidence.stage = "completed".into();
+            return Ok(());
+        }
+        timeout(Duration::from_secs(120), async {
             loop {
                 let message = match self.pending_completion.take() {
                     Some(value) => value,
                     None => self.receive().await?,
                 };
-                if message["method"] == "turn/completed"
+                observe_turn_event(&message, &thread_id, &turn_id, evidence);
+                if message["method"] == "error"
                     && message.pointer("/params/threadId").and_then(Value::as_str)
                         == Some(&thread_id)
+                    && message.pointer("/params/turnId").and_then(Value::as_str) == Some(&turn_id)
+                    && message
+                        .pointer("/params/willRetry")
+                        .and_then(Value::as_bool)
+                        == Some(false)
                 {
+                    return Err(message
+                        .pointer("/params/error")
+                        .map(classify_error)
+                        .unwrap_or(Failure("warmupFailed", false)));
+                }
+                if is_matching_completion(&message, &thread_id, &turn_id) {
                     return if message
                         .pointer("/params/turn/status")
                         .and_then(Value::as_str)
                         == Some("completed")
                     {
+                        observe_completed_turn(&message["params"]["turn"], evidence);
+                        evidence.stage = "completed".into();
                         Ok(())
                     } else {
-                        Err(Failure("warmupFailed", false))
+                        let error = message
+                            .pointer("/params/turn/error")
+                            .map(classify_error)
+                            .unwrap_or(Failure("warmupFailed", false));
+                        Err(error)
                     };
                 }
             }
         })
         .await
         .map_err(|_| Failure("requestTimeout", true))?
+    }
+}
+
+fn is_matching_completion(message: &Value, thread: &str, turn: &str) -> bool {
+    message["method"] == "turn/completed"
+        && message.pointer("/params/threadId").and_then(Value::as_str) == Some(thread)
+        && message.pointer("/params/turn/id").and_then(Value::as_str) == Some(turn)
+}
+
+fn observe_completed_turn(turn: &Value, evidence: &mut WarmupEvidence) {
+    if let Some(items) = turn["items"].as_array() {
+        evidence.reply_received |= items.iter().any(|item| {
+            item["type"] == "agentMessage"
+                && item["text"].as_str().is_some_and(|s| !s.trim().is_empty())
+        });
+    }
+}
+
+fn observe_turn_event(message: &Value, thread: &str, turn: &str, evidence: &mut WarmupEvidence) {
+    if message.pointer("/params/threadId").and_then(Value::as_str) != Some(thread) {
+        return;
+    }
+    let event_turn = message.pointer("/params/turnId").and_then(Value::as_str);
+    if event_turn != Some(turn) {
+        return;
+    }
+    match message["method"].as_str() {
+        Some("error") => {
+            evidence.service_error = Some(classify_error(&message["params"]["error"]).0.into());
+        }
+        Some("item/agentMessage/delta") => {
+            evidence.reply_received |= message
+                .pointer("/params/delta")
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.trim().is_empty());
+        }
+        Some("item/completed") => {
+            let item = &message["params"]["item"];
+            evidence.reply_received |= item["type"] == "agentMessage"
+                && item["text"].as_str().is_some_and(|s| !s.trim().is_empty());
+        }
+        Some("thread/tokenUsage/updated") => {
+            if let Some(tokens) = message
+                .pointer("/params/tokenUsage/last/outputTokens")
+                .and_then(Value::as_u64)
+            {
+                evidence.output_tokens = Some(tokens);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -401,4 +531,68 @@ fn codex_command() -> Result<Command, Failure> {
         }
     }
     Err(Failure("cliUnavailable", false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_accepts_completion_for_the_dispatched_turn() {
+        let event = json!({"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}});
+        assert!(is_matching_completion(&event, "thread-1", "turn-1"));
+        assert!(!is_matching_completion(&event, "thread-1", "other-turn"));
+        assert!(!is_matching_completion(&event, "other-thread", "turn-1"));
+    }
+
+    #[test]
+    fn reply_and_usage_must_belong_to_the_expected_turn() {
+        let mut evidence = WarmupEvidence::default();
+        let reply = json!({"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"OK"}}});
+        observe_turn_event(&reply, "thread-1", "other-turn", &mut evidence);
+        assert!(!evidence.reply_received);
+        observe_turn_event(&reply, "thread-1", "turn-1", &mut evidence);
+        assert!(evidence.reply_received);
+        let usage = json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"outputTokens":2}}}});
+        observe_turn_event(&usage, "thread-1", "turn-1", &mut evidence);
+        assert_eq!(evidence.output_tokens, Some(2));
+    }
+
+    #[test]
+    fn completed_response_can_supply_reply_evidence_without_delta_events() {
+        let mut evidence = WarmupEvidence::default();
+        observe_completed_turn(
+            &json!({"items":[{"type":"agentMessage","text":"OK"}]}),
+            &mut evidence,
+        );
+        assert!(evidence.reply_received);
+    }
+
+    // Never runs in normal test suites: this consumes real subscription capacity.
+    #[tokio::test]
+    #[ignore = "requires explicit user permission for one real Codex inference"]
+    async fn live_single_authorized_warmup() {
+        let (_, account) = local_login().expect("local file login");
+        let mut evidence = WarmupEvidence::default();
+        let operation = async {
+            let mut client = Client::open(&account).await?;
+            let before = client.snapshot().await?;
+            println!("quota_before={:?}", before.session);
+            let prepared = client.prepare_warmup(&mut evidence).await?;
+            println!("prepared_model={:?}", evidence.model);
+            // Exactly one turn; no retry loop and no changes to the user's schedule.
+            client.warm(prepared, &mut evidence).await?;
+            let after = client.snapshot().await?;
+            println!("quota_after={:?}", after.session);
+            Ok::<(), Failure>(())
+        };
+        let result = timeout(Duration::from_secs(240), operation).await;
+        println!("warmup_evidence={evidence:?}");
+        assert!(
+            matches!(result, Ok(Ok(()))),
+            "authorized request result: {result:?}"
+        );
+        assert_eq!(evidence.stage, "completed");
+        assert!(evidence.reply_received || evidence.output_tokens.is_some_and(|tokens| tokens > 0));
+    }
 }

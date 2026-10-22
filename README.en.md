@@ -123,7 +123,7 @@ Head to **[GitHub Releases to download the latest version](https://github.com/zh
 | **Linux (Debian / Ubuntu family)** | `Halowake_<version>_amd64.deb` |
 | **Linux (AppImage)** | `Halowake_<version>_amd64.AppImage` |
 
-> The artifacts above correspond to the current release pipeline and existing packages for v1.4.4. Features, permissions, and installation experience may vary across platforms; if you encounter issues, please submit your OS version and reproduction steps. **A standalone Windows portable `Halowake.exe` is not currently distributed in the v1.4.4 release.**
+> The artifacts above correspond to the current release pipeline and existing packages for v1.4.5. Features, permissions, and installation experience may vary across platforms; if you encounter issues, please submit your OS version and reproduction steps. **A standalone Windows portable `Halowake.exe` is not currently distributed in the v1.4.5 release.**
 
 ### 2. Open Your Project
 

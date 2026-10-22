@@ -146,6 +146,24 @@
                 }}</span>
               </div>
               <p>{{ t(`codexSchedule.detail.${run.detail}`) }}</p>
+              <p v-if="run.requestEvidence?.stage" class="run-diagnostics">
+                {{
+                  t('codexSchedule.requestStage', {
+                    stage: t(`codexSchedule.stage.${run.requestEvidence.stage}`),
+                  })
+                }}
+                <template v-if="run.requestEvidence.model">
+                  · {{ run.requestEvidence.model }}</template
+                >
+              </p>
+              <p
+                v-if="run.requestError || run.requestEvidence?.serviceError"
+                class="run-diagnostics"
+              >
+                {{
+                  t(`codexSchedule.detail.${run.requestError || run.requestEvidence?.serviceError}`)
+                }}
+              </p>
               <span class="run-meta"
                 >{{ t('codexSchedule.checkCount', { count: run.checks })
                 }}<template v-if="isActive(run) && run.nextCheckAt">

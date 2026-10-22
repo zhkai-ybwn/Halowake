@@ -20,6 +20,14 @@ export interface CodexScheduleRun {
   nextCheckAt: number
   requestedAt: number | null
   requestCompleted: boolean
+  requestError?: string | null
+  requestEvidence?: {
+    stage: string
+    model: string | null
+    replyReceived: boolean
+    outputTokens: number | null
+    serviceError?: string | null
+  }
   updatedAt: number
 }
 

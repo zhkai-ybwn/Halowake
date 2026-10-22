@@ -34,3 +34,12 @@
 ## Manual acceptance
 
 Open AI Quota → Codex schedule; edit/save/reopen; verify pause, weekdays and validation. With a supported local subscription login, enable a near-future node and inspect waiting/ready/confirmed states. Verify expiry, offline failure, pause during work and restart deduplication. UI and real-account validation are manual and were not authorized for automated browser testing.
+
+## 2026-10-22 confirmation repair
+
+- An unfinished request could previously be marked successful when an unused quota window returned a sliding `now + 5h` reset. A moving reset timestamp alone is no longer accepted.
+- Require a completed matching thread/turn, a model reply or positive output token count, and quota evidence. Rounded zero usage requires a fixed reset countdown observed at least one minute apart. Verification expires after three minutes and never dispatches another inference.
+- Keep the baseline and verified reset separate. Mark legacy success records as unconfirmed on startup without replaying them or changing the saved schedule.
+- Persist sanitized request phase/error diagnostics. Model/thread preparation happens before the durable dispatch marker; completion waits up to 120 seconds within the node deadline.
+- Validation: 15 offline scheduler regression tests and all 146 Rust library tests passed. Frontend type checking, production build, targeted ESLint and Stylelint passed.
+- After explicit permission, exactly one real `Reply exactly OK.` turn completed in an isolated temporary workspace using the account default model. Reply evidence and 5 output tokens were received. This verifies the current request path with an already active window; it does not reproduce an idle morning window or establish why the historical request failed to finish. No browser automation was used.
