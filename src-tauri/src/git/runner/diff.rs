@@ -6,7 +6,7 @@ use crate::git::models::{
 
 use super::branches::load_branches;
 use super::process::{run_git, run_git_raw, silent_command};
-use super::sync::load_repository_state;
+use super::sync::{load_repository_state, status_has_unmerged_files};
 
 pub fn load_git_status(repo_path: &str) -> Result<String, String> {
     let status = run_git_raw(
@@ -56,9 +56,18 @@ pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
             let repository_state = scope.spawn(|| load_repository_state(repo_path));
             let status_raw = scope.spawn(|| load_git_status(repo_path));
             let staged_files_raw =
-                scope.spawn(|| run_git(repo_path, &["diff", "--cached", "--name-only"]));
-            let file_stats = scope.spawn(|| load_file_stats(repo_path));
+                scope.spawn(|| run_git(repo_path, &["diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv"]));
             let branches = scope.spawn(|| load_branches(repo_path));
+            let status_raw = status_raw
+                .join()
+                .map_err(|_| "读取文件状态任务异常".to_string())??;
+            // A conflict list only needs status. Defer repository-wide line
+            // statistics until conflicts are resolved.
+            let file_stats = if status_has_unmerged_files(&status_raw) {
+                vec![]
+            } else {
+                load_file_stats(repo_path)?
+            };
 
             Ok::<_, String>((
                 repo_root
@@ -70,15 +79,11 @@ pub fn load_git_snapshot(repo_path: &str) -> Result<GitSnapshot, String> {
                 repository_state
                     .join()
                     .map_err(|_| "读取仓库状态任务异常".to_string())?,
-                status_raw
-                    .join()
-                    .map_err(|_| "读取文件状态任务异常".to_string())??,
+                status_raw,
                 staged_files_raw
                     .join()
                     .map_err(|_| "读取暂存文件任务异常".to_string())??,
-                file_stats
-                    .join()
-                    .map_err(|_| "读取文件统计任务异常".to_string())??,
+                file_stats,
                 branches
                     .join()
                     .map_err(|_| "读取分支任务异常".to_string())??,
@@ -123,9 +128,9 @@ pub fn load_file_diff(
         "--unified=3"
     };
     let args = if staged {
-        vec!["diff", "--cached", unified, "--no-color", "--", file_path]
+        vec!["diff", "--cached", unified, "--no-color", "--no-ext-diff", "--no-textconv", "--", file_path]
     } else {
-        vec!["diff", unified, "--no-color", "--", file_path]
+        vec!["diff", unified, "--no-color", "--no-ext-diff", "--no-textconv", "--", file_path]
     };
 
     let diff = run_git_raw(repo_path, &args)?;
@@ -162,8 +167,8 @@ fn load_file_stats(repo_path: &str) -> Result<Vec<GitFileStat>, String> {
         return Ok(vec![]);
     }
 
-    let unstaged_raw = run_git_raw(repo_path, &["diff", "--numstat", "--"])?;
-    let staged_raw = run_git_raw(repo_path, &["diff", "--cached", "--numstat", "--"])?;
+    let unstaged_raw = run_git_raw(repo_path, &["diff", "--numstat", "--no-ext-diff", "--no-textconv", "--"])?;
+    let staged_raw = run_git_raw(repo_path, &["diff", "--cached", "--numstat", "--no-ext-diff", "--no-textconv", "--"])?;
 
     let mut stats = unstaged_raw
         .lines()
@@ -218,11 +223,11 @@ fn load_selected_file_diff_with_context(
     };
     let unstaged = run_git_raw(
         repo_path,
-        &["diff", unified, "--no-color", "--", file_path],
+        &["diff", unified, "--no-color", "--no-ext-diff", "--no-textconv", "--", file_path],
     )?;
     let staged = run_git_raw(
         repo_path,
-        &["diff", "--cached", unified, "--no-color", "--", file_path],
+        &["diff", "--cached", unified, "--no-color", "--no-ext-diff", "--no-textconv", "--", file_path],
     )?;
     let mut result = String::new();
 
@@ -264,6 +269,8 @@ fn load_untracked_file_diff(
             "--no-index",
             unified,
             "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
             "--",
             "/dev/null",
             file_path,

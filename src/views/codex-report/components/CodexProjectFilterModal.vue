@@ -49,12 +49,12 @@
             icon="solar:magnifer-linear"
             :title="t('codexReport.noProjectsFound')"
           />
-          <NCheckboxGroup v-else :value="selectedProjects" class="project-items-group" @update:value="onSelectionChange">
+          <NCheckboxGroup v-else :value="checkedProjects" class="project-items-group" @update:value="onSelectionChange">
             <label
               v-for="project in searchedProjectList"
               :key="project.name"
               class="project-select-card"
-              :class="{ 'is-checked': selectedProjects.includes(project.name) }"
+              :class="{ 'is-checked': checkedProjects.includes(project.name) }"
             >
               <div class="project-card-left">
                 <NCheckbox :value="project.name" />
@@ -130,6 +130,8 @@ const { t } = useLocale()
 const projectSearch = ref('')
 
 const allProjectNames = computed(() => props.projects.map(p => p.name))
+// An empty whitelist means no project filter, including projects discovered later.
+const checkedProjects = computed(() => props.selectedProjects.length ? props.selectedProjects : allProjectNames.value)
 
 const searchedProjectList = computed(() => {
   const query = projectSearch.value.trim().toLowerCase()
@@ -144,7 +146,7 @@ function onSelectionChange(value: (string | number)[]) {
 }
 
 function selectAllProjects() {
-  emit('update:selectedProjects', [...allProjectNames.value])
+  emit('update:selectedProjects', [])
 }
 
 function clearSelectedProjects() {

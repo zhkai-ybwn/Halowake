@@ -4,7 +4,11 @@ import { loadGitFileDiff, loadGitFileHeadDiff } from '@/services/git/git-service
 import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
 import type { GitFileStatus } from '@/types/git'
 
-export function useGitDiff(getDisplayRepoPath: () => string, setError: (msg: string) => void) {
+export function useGitDiff(
+  getDisplayRepoPath: () => string,
+  setError: (msg: string) => void,
+  isInlineDiffVisible: () => boolean = () => true,
+) {
   const { t } = useLocale()
 
   const currentDiff = ref('')
@@ -17,61 +21,50 @@ export function useGitDiff(getDisplayRepoPath: () => string, setError: (msg: str
   const logFileDiff = ref('')
   const logFileDiffLoading = ref(false)
   const logDiffFileView = ref<GitAssistantFileView | null>(null)
+  let diffRequestId = 0
 
   function clearDiff() {
+    diffRequestId += 1
     currentDiff.value = ''
+    diffLoading.value = false
   }
 
   async function loadDiffForFile(file: GitFileStatus, mode: 'head' | 'staged' | 'unstaged') {
     const repoPath = getDisplayRepoPath()
-    if (!repoPath) return
-
-    if (mode === 'head') {
-      diffLoading.value = true
-      try {
-        const result = await loadGitFileHeadDiff(repoPath, file.path)
-        currentDiff.value = result.diff
-      } catch (err) {
-        console.error(err)
-        currentDiff.value = ''
-        setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
-      } finally {
-        diffLoading.value = false
-      }
+    if (!repoPath || (!isInlineDiffVisible() && !showDiff.value)) {
+      clearDiff()
       return
     }
 
     const staged = mode === 'staged'
-    if (staged && !file.staged) {
-      currentDiff.value = ''
+    if (mode !== 'head' && (staged ? !file.staged : !file.unstaged)) {
+      clearDiff()
       return
     }
 
-    if (!staged && !file.unstaged) {
-      currentDiff.value = ''
-      return
-    }
-
+    const requestId = ++diffRequestId
     diffLoading.value = true
     try {
-      const result = await loadGitFileDiff({
-        repoPath,
-        filePath: file.path,
-        staged,
-      })
-      currentDiff.value = result.diff
+      const result = mode === 'head'
+        ? await loadGitFileHeadDiff(repoPath, file.path)
+        : await loadGitFileDiff({ repoPath, filePath: file.path, staged })
+      if (requestId === diffRequestId && repoPath === getDisplayRepoPath()) {
+        currentDiff.value = result.diff
+      }
     } catch (err) {
-      console.error(err)
-      currentDiff.value = ''
-      setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+      if (requestId === diffRequestId && repoPath === getDisplayRepoPath()) {
+        console.error(err)
+        currentDiff.value = ''
+        setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+      }
     } finally {
-      diffLoading.value = false
+      if (requestId === diffRequestId) diffLoading.value = false
     }
   }
 
   function closeDiff() {
     showDiff.value = false
-    currentDiff.value = ''
+    clearDiff()
   }
 
   return {

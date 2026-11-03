@@ -76,6 +76,7 @@ export default {
     projectModalTitle: '项目筛选设置',
     projectModalDesc: '勾选需要纳入日报的项目，未勾选的项目将自动过滤。',
     projectSearchPlaceholder: '搜索项目名称或路径…',
+    filtersChangedAfterEdit: '筛选结果已变化，已保留你编辑的内容。请点击“生成工作记录”更新。',
     projectSelectedSummary: '已选中 {selected} / {total} 个项目',
     sessionsCountBadge: '{count} 会话',
     projectPlaceholder: '选择项目（支持多选）',

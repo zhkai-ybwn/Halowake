@@ -76,6 +76,7 @@ export default {
     projectModalTitle: 'Project Filter Settings',
     projectModalDesc: 'Check projects to include in the report; unchecked projects will be filtered out.',
     projectSearchPlaceholder: 'Search project name or path…',
+    filtersChangedAfterEdit: 'The filtered results changed. Your edits were preserved; click Generate to update the report.',
     projectSelectedSummary: '{selected} of {total} projects selected',
     sessionsCountBadge: '{count} sessions',
     projectPlaceholder: 'Select projects (multi-select)',

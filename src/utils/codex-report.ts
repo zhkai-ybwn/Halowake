@@ -99,6 +99,10 @@ export function getProjectName(cwd: string | null) {
   return segments.at(-1) || cwd
 }
 
+export function sessionSelectionKey(session: CodexReportSession) {
+  return `${session.provider}:${session.id}`
+}
+
 export function hasWorkContent(session: CodexReportSession) {
   return session.userMessages.length > 0 && session.assistantMessages.length > 0
 }
@@ -111,13 +115,14 @@ export function matchesKeyword(session: CodexReportSession, keyword: string) {
     .some(value => value.toLocaleLowerCase().includes(query))
 }
 
-export function formatSessionTime(timestamp: string) {
+export function formatSessionTime(timestamp: string, includeDate = false) {
   try {
-    return new Intl.DateTimeFormat('zh-CN', {
+    const time = new Intl.DateTimeFormat('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
     }).format(new Date(timestamp))
+    return includeDate ? `${formatReportDate(new Date(timestamp).getTime())} ${time}` : time
   } catch {
     return timestamp
   }
@@ -139,7 +144,13 @@ function sessionLabel(session: CodexReportSession) {
   return firstRequest.length > 72 ? `${firstRequest.slice(0, 72)}…` : firstRequest
 }
 
-export function renderWorkRecord(sessions: CodexReportSession[], reportDate: number) {
+export function renderWorkRecord(sessions: CodexReportSession[], reportDate: number, reportEnd = reportDate) {
+  const from = formatReportDate(reportDate)
+  const to = formatReportDate(reportEnd)
+  const dateLabel = from === to ? from : `${from}～${to}`
+  const showDates = from !== to || sessions.some(session =>
+    formatReportDate(Date.parse(session.startedAt)) !== from || formatReportDate(Date.parse(session.endedAt)) !== from)
+
   const projectGroups = new Map<string, CodexReportSession[]>()
   const providerStats = new Map<string, number>()
 
@@ -161,14 +172,14 @@ export function renderWorkRecord(sessions: CodexReportSession[], reportDate: num
     .join(' · ')
 
   const header = [
-    `# AI 辅助编程工作记录｜${formatReportDate(reportDate)}`,
+    `# AI 辅助编程工作记录｜${dateLabel}`,
     '',
     '## 汇总概况',
     `- 纳入会话总数：${sessions.length} 个`,
     `- 涉及项目：${projectGroups.size} 个`,
     providerSummaryStr ? `- 工具来源分布：${providerSummaryStr}` : '',
     times.length
-      ? `- 记录时间跨度：${formatSessionTime(times[0])}–${formatSessionTime(times.at(-1) ?? times[0])}`
+      ? `- 记录时间跨度：${formatSessionTime(times[0], showDates)}–${formatSessionTime(times.at(-1) ?? times[0], showDates)}`
       : '',
   ].filter(Boolean)
 
@@ -177,7 +188,7 @@ export function renderWorkRecord(sessions: CodexReportSession[], reportDate: num
     `## 📁 项目：${project}`,
     ...groupedSessions.flatMap(session => [
       '',
-      `### [${getProviderLabel(session.provider)}] ${formatSessionTime(session.startedAt)}–${formatSessionTime(session.endedAt)}｜${sessionLabel(session)}`,
+      `### [${getProviderLabel(session.provider)}] ${formatSessionTime(session.startedAt, showDates)}–${formatSessionTime(session.endedAt, showDates)}｜${sessionLabel(session)}`,
       ...session.userMessages.map(message => `- 任务意图：${message}`),
       ...session.assistantMessages.map(message => `- 完成结论：${message}`),
     ]),

@@ -710,8 +710,8 @@ const {
 function clearReviewSelection() { reviewSelectedRaws.value = [] }
 
 const {
-  currentDiff, diffMode, diffLoading, showDiff, activeFileRaw, loadDiffForFile,
-} = useGitDiff(() => displayRepoPath.value, (msg) => { error.value = msg })
+  currentDiff, diffMode, diffLoading, showDiff, activeFileRaw, loadDiffForFile, clearDiff,
+} = useGitDiff(() => displayRepoPath.value, (msg) => { error.value = msg }, () => panelLayout.value.visible.diff)
 
 const {
   fetchLoading, pushLoading, pullLoading, rebaseLoading, remoteLoading,
@@ -1064,8 +1064,8 @@ watch(selectedFile, file => {
   diffMode.value = file.unstaged ? 'unstaged' : 'staged'
 }, { immediate: true })
 
-watch([selectedFile, diffMode], async ([file, mode]) => {
-  if (!file || !displayRepoPath.value) { currentDiff.value = ''; return }
+watch([selectedFile, diffMode, () => panelLayout.value.visible.diff, showDiff], async ([file, mode]) => {
+  if (!file || !displayRepoPath.value) { clearDiff(); return }
   await loadDiffForFile(file, mode)
 }, { immediate: true })
 

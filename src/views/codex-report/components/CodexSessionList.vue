@@ -77,12 +77,12 @@
       >
         <label
           v-for="session in listSessions"
-          :key="session.id"
+          :key="sessionSelectionKey(session)"
           class="session-card"
-          :class="{ 'is-included': includedIds.includes(session.id) }"
+          :class="{ 'is-included': includedIds.includes(sessionSelectionKey(session)) }"
         >
           <div class="card-checkbox">
-            <NCheckbox :value="session.id" />
+            <NCheckbox :value="sessionSelectionKey(session)" />
           </div>
           <div class="card-content">
             <div class="card-topline">
@@ -101,10 +101,10 @@
             <div class="card-status">
               <span
                 class="status-tag"
-                :class="includedIds.includes(session.id) ? 'tag-included' : hasWorkContent(session) ? 'tag-excluded' : 'tag-auto-excluded'"
+                :class="includedIds.includes(sessionSelectionKey(session)) ? 'tag-included' : hasWorkContent(session) ? 'tag-excluded' : 'tag-auto-excluded'"
               >
                 {{
-                  includedIds.includes(session.id)
+                  includedIds.includes(sessionSelectionKey(session))
                     ? t('codexReport.statusIncluded')
                     : hasWorkContent(session)
                       ? t('codexReport.statusExcluded')
@@ -131,6 +131,7 @@ import {
   getProviderIcon,
   getProviderLabel,
   hasWorkContent,
+  sessionSelectionKey,
 } from '@/utils/codex-report'
 
 defineProps<{

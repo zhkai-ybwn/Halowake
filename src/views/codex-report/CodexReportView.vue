@@ -15,7 +15,7 @@
           <Icon icon="solar:refresh-linear" :class="{ 'spin-anim': loading }" />
           {{ loading ? t('codexReport.loading') : t('codexReport.load') }}
         </WorkbenchButton>
-        <WorkbenchButton :disabled="!includedSessions.length" @click="generateWorkRecord">
+        <WorkbenchButton :disabled="loading || !includedSessions.length" @click="generateWorkRecord">
           <Icon icon="solar:notes-linear" />
           {{ t('codexReport.generate') }}
         </WorkbenchButton>
@@ -93,6 +93,7 @@ import {
   formatSessionTime,
   getProjectName,
   hasWorkContent,
+  sessionSelectionKey,
   matchesKeyword,
   renderWorkRecord,
 } from '@/utils/codex-report'
@@ -118,6 +119,9 @@ const selectedProvider = ref<AiToolProvider>('all')
 const sessions = ref<CodexReportSession[]>([])
 const includedIds = ref<string[]>([])
 const loading = ref(false)
+let loadSequence = 0
+let lastGeneratedRecord = ''
+let staleRecordWarningShown = false
 
 const availableProjects = ref<CodexProjectInfo[]>([])
 const projectsLoading = ref(false)
@@ -189,16 +193,16 @@ const filteredSessions = computed(() =>
 )
 
 const includedSessions = computed(() =>
-  filteredSessions.value.filter(session => includedIds.value.includes(session.id))
+  filteredSessions.value.filter(session => includedIds.value.includes(sessionSelectionKey(session)))
 )
 
 const excludedSessions = computed(() =>
-  filteredSessions.value.filter(session => !includedIds.value.includes(session.id))
+  filteredSessions.value.filter(session => !includedIds.value.includes(sessionSelectionKey(session)))
 )
 
 const listSessions = computed(() =>
   sessionView.value === 'included'
-    ? filteredSessions.value.filter(session => includedIds.value.includes(session.id))
+    ? filteredSessions.value.filter(session => includedIds.value.includes(sessionSelectionKey(session)))
     : sessionView.value === 'excluded'
       ? excludedSessions.value
       : filteredSessions.value
@@ -232,12 +236,42 @@ watch(selectedProjects, val => {
 
 watch(
   () => [dateRange.value?.[0], dateRange.value?.[1], selectedProvider.value],
-  ([start, end, prov], [oldStart, oldEnd, oldProv]) => {
-    if (start && end && (start !== oldStart || end !== oldEnd || prov !== oldProv)) {
-      void loadSessions()
+  () => {
+    if (!dateRange.value) {
+      ++loadSequence
+      loading.value = false
+      sessions.value = []
+      includedIds.value = []
+      if (workRecord.value === lastGeneratedRecord) {
+        workRecord.value = ''
+        lastGeneratedRecord = ''
+      }
+      return
     }
+    void loadSessions()
   }
 )
+
+watch(autoExcludeInvalid, exclude => {
+  const included = new Set(includedIds.value)
+  for (const session of sessions.value) {
+    if (hasWorkContent(session)) continue
+    const key = sessionSelectionKey(session)
+    if (exclude) included.delete(key)
+    else included.add(key)
+  }
+  includedIds.value = [...included]
+})
+
+// Keep automatic output in sync without overwriting user-edited Markdown.
+watch(includedSessions, () => {
+  if (loading.value) return
+  if (workRecord.value === lastGeneratedRecord) generateWorkRecord()
+  else if (!staleRecordWarningShown) {
+    staleRecordWarningShown = true
+    message.warning(t('codexReport.filtersChangedAfterEdit'))
+  }
+}, { flush: 'post' })
 
 onMounted(() => {
   void Promise.allSettled([
@@ -262,6 +296,7 @@ async function loadSessions() {
     message.warning(t('codexReport.selectDateRange'))
     return
   }
+  const request = ++loadSequence
   loading.value = true
   try {
     const providers = selectedProvider.value === 'all'
@@ -279,26 +314,32 @@ async function loadSessions() {
       endDate.setHours(23, 59, 59, 999)
     }
 
-    sessions.value = await loadCodexReportSessions({
+    const loadedSessions = await loadCodexReportSessions({
       from: startDate.toISOString(),
       to: endDate.toISOString(),
       providers,
     })
+    if (request !== loadSequence) return
+    sessions.value = loadedSessions
     includedIds.value = sessions.value
       .filter(session => !autoExcludeInvalid.value || hasWorkContent(session))
-      .map(session => session.id)
+      .map(sessionSelectionKey)
     sessionView.value = 'all'
-    generateWorkRecord()
+    if (workRecord.value === lastGeneratedRecord) generateWorkRecord()
   } catch (error) {
+    if (request !== loadSequence) return
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
-    loading.value = false
+    if (request === loadSequence) loading.value = false
   }
 }
 
 function generateWorkRecord() {
-  if (dateRange.value)
-    workRecord.value = renderWorkRecord(includedSessions.value, dateRange.value[0])
+  if (dateRange.value) {
+    lastGeneratedRecord = renderWorkRecord(includedSessions.value, dateRange.value[0], dateRange.value[1])
+    workRecord.value = lastGeneratedRecord
+    staleRecordWarningShown = false
+  }
 }
 
 function readSavedProjects(): string[] {
@@ -306,7 +347,7 @@ function readSavedProjects(): string[] {
     const raw = localStorage.getItem(SELECTED_PROJECTS_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : []
   } catch {
     return []
   }

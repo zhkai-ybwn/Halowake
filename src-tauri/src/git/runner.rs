@@ -902,6 +902,54 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     }
 
     #[test]
+    fn conflict_snapshot_defers_statistics_and_diff_never_runs_external_helpers() {
+        let repo = temp_repo("conflict-status-only");
+        git(&repo, &["init"]);
+        git(&repo, &["config", "user.name", "Halowake Test"]);
+        git(&repo, &["config", "user.email", "lumina@example.test"]);
+        write_file(&repo.join("translations.json"), "{\"value\":\"base\"}\n");
+        write_file(&repo.join(".gitattributes"), "*.json diff=diagnostic\n");
+        git(&repo, &["add", "--", "."]);
+        git(&repo, &["commit", "-m", "base"]);
+        let repo_path = repo.to_string_lossy().to_string();
+        let base_branch = run_git(&repo_path, &["branch", "--show-current"]).unwrap();
+        git(&repo, &["switch", "-c", "incoming"]);
+        write_file(&repo.join("translations.json"), "{\"value\":\"incoming\"}\n");
+        write_file(&repo.join("added.txt"), "non-conflicting change\n");
+        git(&repo, &["add", "--", "."]);
+        git(&repo, &["commit", "-m", "incoming"]);
+        git(&repo, &["switch", &base_branch]);
+        write_file(&repo.join("translations.json"), "{\"value\":\"local\"}\n");
+        git(&repo, &["add", "--", "translations.json"]);
+        git(&repo, &["commit", "-m", "local"]);
+        write_file(&repo.join(".git/record-diff.sh"), "#!/bin/sh\necho invoked > .git/diff-helper-invoked\nexit 1\n");
+        git(&repo, &["config", "diff.diagnostic.textconv", "sh .git/record-diff.sh"]);
+        git(&repo, &["config", "diff.external", "sh .git/record-diff.sh"]);
+
+        let result = merge_branch(&GitMergePayload {
+            repo_path: repo_path.clone(), source_branch: "incoming".to_string(), no_fast_forward: false,
+        }).expect("conflict is a recoverable merge result");
+        assert!(result.stdout.contains("CONFLICT"));
+        let snapshot = load_git_snapshot(&repo_path).expect("load conflicted repository");
+        assert!(snapshot.repository_state.merge_in_progress);
+        assert!(snapshot.status.iter().any(|line| line.starts_with("UU translations.json")));
+        assert!(snapshot.staged_files.iter().any(|path| path == "added.txt"));
+        assert!(snapshot.file_stats.is_empty(), "conflict refresh must not compute line statistics");
+        let diff = load_file_diff(&repo_path, "translations.json", false, false).expect("built-in conflict diff");
+        assert!(!diff.diff.is_empty());
+        assert!(!repo.join(".git/diff-helper-invoked").exists());
+
+        write_file(&repo.join("translations.json"), "{\"value\":\"resolved\"}\n");
+        git(&repo, &["add", "--", "translations.json"]);
+        continue_merge(&crate::git::models::GitRepoPayload { repo_path: repo_path.clone() }).expect("finish merge");
+        write_file(&repo.join("translations.json"), "{\"value\":\"changed again\"}\n");
+        let resolved = load_git_snapshot(&repo_path).expect("statistics resume after resolution");
+        assert!(resolved.file_stats.iter().any(|stat| stat.path == "translations.json"));
+        assert!(!repo.join(".git/diff-helper-invoked").exists());
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
     fn merges_selected_branch_and_rejects_dirty_worktree() {
         let repo = temp_repo("merge-branch");
         git(&repo, &["init"]);

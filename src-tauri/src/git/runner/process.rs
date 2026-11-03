@@ -572,13 +572,12 @@ pub(super) fn run_git_capture_status(
     repo_path: &str,
     args: &[&str],
 ) -> Result<(bool, GitCommandResult), String> {
-    let output = git_command(repo_path)
-        .args(args)
-        .output()
-        .map_err(|e| format!("执行 git 命令失败 {:?}: {}", args, e))?;
+    let command = format!("git {}", args.join(" "));
+    let mut cmd = git_command(repo_path);
+    cmd.args(args);
+    let output = run_command_with_timeout(cmd, DEFAULT_HEAVY_GIT_TIMEOUT, &command)?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let command = format!("git {}", args.join(" "));
     let success = output.status.success();
     let message = if stdout.trim().is_empty() {
         if success {

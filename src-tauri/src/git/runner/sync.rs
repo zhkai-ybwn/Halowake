@@ -15,6 +15,10 @@ fn has_unmerged_files(repo_path: &str) -> bool {
         return false;
     };
 
+    status_has_unmerged_files(&status_raw)
+}
+
+pub(super) fn status_has_unmerged_files(status_raw: &str) -> bool {
     status_raw.lines().any(|line| {
         let status = line.get(0..2).unwrap_or_default();
         matches!(status, "DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU")

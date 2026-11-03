@@ -1,10 +1,13 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
+mod opencode;
+
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use rusqlite::{Connection, OpenFlags};
@@ -77,6 +80,71 @@ fn get_local_appdata_dir() -> Option<PathBuf> {
     env::var("LOCALAPPDATA").ok().map(PathBuf::from)
 }
 
+
+fn configured_roots(home: &Path, variable: &str, default_name: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = env::var_os(variable).filter(|v| !v.is_empty()) {
+        roots.push(PathBuf::from(root));
+    }
+    let default = home.join(default_name);
+    if !roots.contains(&default) { roots.push(default); }
+    roots
+}
+
+fn codex_history_dirs(home: &Path) -> Vec<PathBuf> {
+    configured_roots(home, "CODEX_HOME", ".codex").into_iter()
+        .flat_map(|root| [root.join("sessions"), root.join("archived_sessions")]).collect()
+}
+
+fn claude_project_dirs(home: &Path) -> Vec<PathBuf> {
+    configured_roots(home, "CLAUDE_CONFIG_DIR", ".claude").into_iter()
+        .map(|root| root.join("projects")).collect()
+}
+
+fn is_jsonl_history(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))
+}
+
+fn history_reader(path: &Path) -> Option<Box<dyn BufRead>> {
+    let file = fs::File::open(path).ok()?;
+    if path.extension().is_some_and(|ext| ext == "zst") {
+        let decoder = zstd::stream::read::Decoder::new(file).ok()?;
+        Some(Box::new(BufReader::new(decoder)))
+    } else {
+        Some(Box::new(BufReader::new(file)))
+    }
+}
+
+fn canonical_timestamp(timestamp: &str) -> Option<String> {
+    DateTime::parse_from_rfc3339(timestamp).ok()
+        .map(|ts| ts.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+fn merge_sessions(sessions: Vec<CodexReportSession>) -> Vec<CodexReportSession> {
+    let mut merged: HashMap<(String, String), CodexReportSession> = HashMap::new();
+    for session in sessions {
+        let key = (session.provider.clone(), session.id.clone());
+        if let Some(existing) = merged.get_mut(&key) {
+            if session.started_at < existing.started_at { existing.started_at = session.started_at; }
+            if session.ended_at > existing.ended_at { existing.ended_at = session.ended_at; }
+            if existing.cwd.is_none() && session.cwd.is_some() {
+                existing.cwd = session.cwd;
+                existing.project_name = session.project_name;
+            }
+            existing.user_messages.extend(session.user_messages);
+            existing.assistant_messages.extend(session.assistant_messages);
+        } else { merged.insert(key, session); }
+    }
+    let mut sessions: Vec<_> = merged.into_values().collect();
+    for session in &mut sessions {
+        session.user_messages = deduplicate(std::mem::take(&mut session.user_messages));
+        session.assistant_messages = deduplicate(std::mem::take(&mut session.assistant_messages));
+    }
+    sessions.sort_by(|a,b| b.started_at.cmp(&a.started_at).then_with(|| a.provider.cmp(&b.provider)).then_with(|| a.id.cmp(&b.id)));
+    sessions
+}
+
 #[tauri::command]
 pub async fn detect_installed_ai_tools() -> Result<Vec<InstalledToolInfo>, String> {
     tokio::task::spawn_blocking(detect_installed_ai_tools_sync)
@@ -89,13 +157,13 @@ fn detect_installed_ai_tools_sync() -> Result<Vec<InstalledToolInfo>, String> {
     let mut tools = Vec::new();
 
     // 1. Codex
-    let codex_dir = home.join(".codex").join("sessions");
-    let codex_installed = codex_dir.exists();
+    let codex_dirs = codex_history_dirs(&home);
+    let codex_installed = codex_dirs.iter().any(|dir| dir.exists());
     let mut codex_count = 0;
     if codex_installed {
         let mut codex_files = Vec::new();
-        let _ = collect_jsonl_files(&codex_dir, &mut codex_files);
-        codex_count = codex_files.len();
+        for dir in &codex_dirs { if dir.exists() { let _ = collect_jsonl_files(dir, &mut codex_files); } }
+        codex_count = codex_files.iter().map(|path| history_session_id(path).unwrap_or_else(|| path.to_string_lossy().into_owned())).collect::<HashSet<_>>().len();
     }
     tools.push(InstalledToolInfo {
         provider: "codex".to_string(),
@@ -106,12 +174,12 @@ fn detect_installed_ai_tools_sync() -> Result<Vec<InstalledToolInfo>, String> {
 
     // 2. Claude Code
     let claude_dir = home.join(".claude");
-    let claude_projects = claude_dir.join("projects");
-    let claude_installed = claude_dir.exists();
+    let claude_projects = claude_project_dirs(&home);
+    let claude_installed = claude_dir.exists() || claude_projects.iter().any(|p| p.exists());
     let mut claude_count = 0;
-    if claude_projects.exists() {
+    if claude_installed {
         let mut claude_files = Vec::new();
-        let _ = collect_jsonl_files(&claude_projects, &mut claude_files);
+        for dir in &claude_projects { if dir.exists() { let _ = collect_jsonl_files(dir, &mut claude_files); } }
         claude_count = claude_files.len();
     }
     tools.push(InstalledToolInfo {
@@ -141,23 +209,9 @@ fn detect_installed_ai_tools_sync() -> Result<Vec<InstalledToolInfo>, String> {
     });
 
     // 4. OpenCode
-    let mut opencode_installed = false;
-    let mut opencode_count = 0;
-    let opencode_candidates = [
-        home.join(".local").join("share").join("opencode").join("storage"),
-        home.join(".opencode").join("storage"),
-        get_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
-        get_local_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
-    ];
-    for dir in &opencode_candidates {
-        if dir.exists() {
-            opencode_installed = true;
-            if let Ok(entries) = fs::read_dir(dir) {
-                opencode_count = entries.filter_map(Result::ok).count();
-            }
-            break;
-        }
-    }
+    let opencode_roots = opencode::data_roots(&home);
+    let opencode_installed = opencode_roots.iter().any(|dir| dir.join("opencode.db").exists() || dir.join("storage").exists());
+    let opencode_count = opencode::session_index(&opencode_roots)?.len();
     tools.push(InstalledToolInfo {
         provider: "opencode".to_string(),
         name: "OpenCode".to_string(),
@@ -231,39 +285,48 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     let mut project_map: HashMap<String, ProjectAccumulator> = HashMap::new();
 
     // 1. Codex Projects
-    let codex_dir = home.join(".codex").join("sessions");
-    if codex_dir.exists() {
-        let mut session_files = Vec::new();
-        let _ = collect_jsonl_files(&codex_dir, &mut session_files);
-        for path in &session_files {
-            if let Some((cwd, timestamp)) = extract_codex_session_meta(path) {
-                record_project_activity(&mut project_map, &cwd, None, timestamp, "codex", 1);
-            }
-        }
-    }
-
-    // 2. Claude Code Projects
-    let claude_projects_dir = home.join(".claude").join("projects");
-    if claude_projects_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&claude_projects_dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.is_dir() {
-                    let folder_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-                    let cwd = decode_claude_project_path(&folder_name);
-                    let mut session_files = Vec::new();
-                    let _ = collect_jsonl_files(&path, &mut session_files);
-                    let count = session_files.len();
-                    if count > 0 {
-                        record_project_activity(&mut project_map, &cwd, None, None, "claude", count);
-                    }
+    let mut seen_codex = HashSet::new();
+    for dir in codex_history_dirs(&home) {
+        if !dir.exists() { continue; }
+        let mut files = Vec::new();
+        collect_jsonl_files(&dir, &mut files)?;
+        files.sort();
+        for path in files {
+            if let Some((cwd, timestamp)) = extract_codex_session_meta(&path) {
+                // Metadata ID is shared by resumed/compacted rollout files.
+                let id = history_session_id(&path).unwrap_or_else(|| path.to_string_lossy().into_owned());
+                if seen_codex.insert(id) {
+                    record_project_activity(&mut project_map, &cwd, None, timestamp, "codex", 1);
                 }
             }
         }
     }
 
+    // 2. Claude Code Projects: cwd in the record is authoritative; folder encoding is lossy.
+    for dir in claude_project_dirs(&home) {
+        if !dir.exists() { continue; }
+        let mut files = Vec::new();
+        collect_jsonl_files(&dir, &mut files)?;
+        let sessions = parse_items_parallel(files, |path| parse_claude_session(path, "1970-01-01T00:00:00Z", "9999-12-31T23:59:59Z"));
+        for session in merge_sessions(sessions) {
+            if let Some(cwd) = session.cwd {
+                record_project_activity(&mut project_map, &cwd, None, Some(session.ended_at), "claude", 1);
+            }
+        }
+    }
+
+    // 4. OpenCode Projects (SQLite and legacy JSON share the same discovery roots).
+    for (_, cwd, timestamp) in opencode::session_index(&opencode::data_roots(&home))? {
+        record_project_activity(&mut project_map, &cwd, None, timestamp, "opencode", 1);
+    }
+
     // 3. Antigravity Projects
-    let (_project_id_map, project_mappings, _conv_to_project, project_stats) = load_antigravity_metadata(&home);
+    let (_project_id_map, mut project_mappings, conv_to_project, project_stats) = load_antigravity_metadata(&home);
+    for (name, cwd) in conv_to_project.values() {
+        if !project_mappings.iter().any(|(_, existing)| existing.eq_ignore_ascii_case(cwd)) {
+            project_mappings.push((name.clone(), cwd.clone()));
+        }
+    }
     for (name, cwd) in &project_mappings {
         let (count, last_active) = if let Some((cnt, ts)) = project_stats.get(cwd) {
             (*cnt, ts.clone())
@@ -301,87 +364,6 @@ fn load_codex_projects_sync() -> Result<Vec<CodexProjectInfo>, String> {
     });
 
     Ok(projects)
-}
-
-fn days_from_civil(year: i64, month: u64, day: u64) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let m = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe as i64 - 719468
-}
-
-pub fn parse_iso_timestamp(iso: &str) -> Option<u64> {
-    if iso.len() < 19 {
-        return None;
-    }
-    let year: i64 = iso.get(0..4)?.parse().ok()?;
-    let month: u64 = iso.get(5..7)?.parse().ok()?;
-    let day: u64 = iso.get(8..10)?.parse().ok()?;
-    let hour: u64 = iso.get(11..13)?.parse().ok()?;
-    let min: u64 = iso.get(14..16)?.parse().ok()?;
-    let sec: u64 = iso.get(17..19)?.parse().ok()?;
-
-    if month < 1 || month > 12 || day < 1 || day > 31 {
-        return None;
-    }
-
-    let days = days_from_civil(year, month, day);
-    if days < 0 {
-        return None;
-    }
-    let mut total_secs = (days as u64) * 86400 + hour * 3600 + min * 60 + sec;
-
-    if let Some(tz_part) = iso.get(19..) {
-        if let Some(plus_idx) = tz_part.find('+') {
-            if let Some(offset_str) = tz_part.get(plus_idx + 1..) {
-                if offset_str.len() >= 5 {
-                    let oh: u64 = offset_str.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                    let om: u64 = offset_str.get(3..5).and_then(|s| s.parse().ok()).unwrap_or(0);
-                    total_secs = total_secs.saturating_sub(oh * 3600 + om * 60);
-                }
-            }
-        } else if let Some(minus_idx) = tz_part.find('-') {
-            if let Some(offset_str) = tz_part.get(minus_idx + 1..) {
-                if offset_str.len() >= 5 {
-                    let oh: u64 = offset_str.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                    let om: u64 = offset_str.get(3..5).and_then(|s| s.parse().ok()).unwrap_or(0);
-                    total_secs = total_secs.saturating_add(oh * 3600 + om * 60);
-                }
-            }
-        }
-    }
-    Some(total_secs)
-}
-
-fn is_file_modified_since(path: &Path, min_epoch: u64) -> bool {
-    if min_epoch == 0 {
-        return true;
-    }
-    match fs::metadata(path).and_then(|m| m.modified()) {
-        Ok(mtime) => {
-            let secs = mtime
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(u64::MAX);
-            secs >= min_epoch
-        }
-        Err(_) => true,
-    }
-}
-
-fn fast_extract_timestamp(line: &str) -> Option<&str> {
-    for prefix in &["\"created_at\":\"", "\"timestamp\":\""] {
-        if let Some(pos) = line.find(prefix) {
-            let start = pos + prefix.len();
-            if let Some(end) = line[start..].find('"') {
-                return Some(&line[start..start + end]);
-            }
-        }
-    }
-    None
 }
 
 fn parse_items_parallel<T, F>(items: Vec<T>, parser: F) -> Vec<CodexReportSession>
@@ -426,7 +408,10 @@ pub async fn load_codex_report_sessions(query: CodexReportQuery) -> Result<Vec<C
 }
 
 fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
-    let home = get_home_dir()?;
+    load_report_sessions_from_home(&get_home_dir()?, query)
+}
+
+fn load_report_sessions_from_home(home: &Path, query: CodexReportQuery) -> Result<Vec<CodexReportSession>, String> {
     let selected_providers = query.providers.clone().unwrap_or_else(|| {
         vec![
             "codex".to_string(),
@@ -445,43 +430,30 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
         to_str = format!("{}T23:59:59.999Z", to_str);
     }
 
-    let to_date = if to_str.len() >= 10 { &to_str[..10] } else { &to_str };
-    // Add 5 minutes grace period before query.from for mtime check
-    let min_epoch = parse_iso_timestamp(&from_str).map(|s| s.saturating_sub(300)).unwrap_or(0);
-
+    let from_time = DateTime::parse_from_rfc3339(&from_str).map_err(|_| "无效的日报开始时间")?;
+    let to_time = DateTime::parse_from_rfc3339(&to_str).map_err(|_| "无效的日报结束时间")?;
+    if from_time > to_time { return Err("无效的日报日期范围".into()); }
     let mut all_sessions = Vec::new();
-
-    // 1. Codex (with date directory pruning and mtime filter)
     if selected_providers.iter().any(|p| p == "codex" || p == "all") {
-        let codex_dir = home.join(".codex").join("sessions");
-        if codex_dir.exists() {
-            let mut session_files = Vec::new();
-            collect_codex_jsonl_files_pruned(&codex_dir, to_date, &mut session_files);
-            let sessions = parse_items_parallel(session_files, |path| {
-                parse_codex_session(path, &from_str, &to_str)
-            });
-            all_sessions.extend(sessions);
+        let mut files = Vec::new();
+        for dir in codex_history_dirs(home) {
+            if dir.exists() { collect_jsonl_files(&dir, &mut files)?; }
         }
+        files.sort();
+        files.dedup();
+        all_sessions.extend(parse_items_parallel(files, |path| parse_codex_session(path, &from_str, &to_str)));
     }
-
-    // 2. Claude Code
     if selected_providers.iter().any(|p| p == "claude" || p == "all") {
-        let claude_projects_dir = home.join(".claude").join("projects");
-        if claude_projects_dir.exists() {
-            let mut claude_files = Vec::new();
-            let _ = collect_jsonl_files(&claude_projects_dir, &mut claude_files);
-            let filtered_claude: Vec<PathBuf> = claude_files
-                .into_iter()
-                .filter(|p| is_file_modified_since(p, min_epoch))
-                .collect();
-            let sessions = parse_items_parallel(filtered_claude, |path| {
-                parse_claude_session(path, &from_str, &to_str)
-            });
-            all_sessions.extend(sessions);
+        let mut files = Vec::new();
+        for dir in claude_project_dirs(home) {
+            if dir.exists() { collect_jsonl_files(&dir, &mut files)?; }
         }
+        files.sort();
+        files.dedup();
+        all_sessions.extend(parse_items_parallel(files, |path| parse_claude_session(path, &from_str, &to_str)));
     }
 
-    // 3. Antigravity (with mtime check & fast streaming reader)
+    // 3. Antigravity transcripts; database metadata determines workspace attribution.
     if selected_providers.iter().any(|p| p == "antigravity" || p == "all") {
         let brain_dir = home.join(".gemini").join("antigravity").join("brain");
         if brain_dir.exists() {
@@ -493,12 +465,13 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
                     if conv_dir.is_dir() {
                         let conv_id = conv_dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
                         let transcript_file = conv_dir.join(".system_generated").join("logs").join("transcript.jsonl");
-                        if transcript_file.exists() && is_file_modified_since(&transcript_file, min_epoch) {
-                            agy_candidates.push((transcript_file, conv_id));
+                        for path in [transcript_file.clone(), transcript_file.with_extension("jsonl.zst")] {
+                            if path.exists() { agy_candidates.push((path, conv_id.clone())); }
                         }
                     }
                 }
             }
+            agy_candidates.sort();
             let sessions = parse_items_parallel(agy_candidates, |(transcript_file, conv_id)| {
                 parse_antigravity_transcript(
                     transcript_file,
@@ -513,80 +486,14 @@ fn load_codex_report_sessions_sync(query: CodexReportQuery) -> Result<Vec<CodexR
         }
     }
 
-    // 4. OpenCode
     if selected_providers.iter().any(|p| p == "opencode" || p == "all") {
-        let opencode_candidates = [
-            home.join(".local").join("share").join("opencode").join("storage"),
-            home.join(".opencode").join("storage"),
-            get_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
-            get_local_appdata_dir().unwrap_or_default().join("opencode").join("storage"),
-        ];
-        let mut opencode_files = Vec::new();
-        for storage_dir in &opencode_candidates {
-            if storage_dir.exists() {
-                if let Ok(entries) = fs::read_dir(storage_dir) {
-                    for entry in entries.filter_map(Result::ok) {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|ext| ext == "json") {
-                            if is_file_modified_since(&path, min_epoch) {
-                                opencode_files.push(path);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let sessions = parse_items_parallel(opencode_files, |path| {
-            parse_opencode_session(path, &from_str, &to_str)
-        });
-        all_sessions.extend(sessions);
+        all_sessions.extend(opencode::load_sessions(&opencode::data_roots(home), &from_str, &to_str)?);
     }
-
-    all_sessions.sort_by(|left, right| right.started_at.cmp(&left.started_at));
-    Ok(all_sessions)
+    Ok(merge_sessions(all_sessions))
 }
 
-/// Prune Codex directories based on YYYY/MM/DD structure for future dates only
-fn collect_codex_jsonl_files_pruned(codex_dir: &Path, to_date: &str, files: &mut Vec<PathBuf>) {
-    let to_year = if to_date.len() >= 4 { &to_date[..4] } else { "9999" };
-    let to_ym = if to_date.len() >= 7 { &to_date[..7] } else { "9999-12" };
-
-    let Ok(year_entries) = fs::read_dir(codex_dir) else { return };
-    for year_entry in year_entries.filter_map(Result::ok) {
-        let year_path = year_entry.path();
-        if !year_path.is_dir() { continue; }
-        let Some(year_str) = year_path.file_name().and_then(|n| n.to_str()) else { continue; };
-        if year_str > to_year { continue; }
-
-        let Ok(month_entries) = fs::read_dir(&year_path) else { continue };
-        for month_entry in month_entries.filter_map(Result::ok) {
-            let month_path = month_entry.path();
-            if !month_path.is_dir() { continue; }
-            let Some(month_str) = month_path.file_name().and_then(|n| n.to_str()) else { continue; };
-            let current_ym = format!("{}-{}", year_str, month_str);
-            if current_ym.as_str() > to_ym { continue; }
-
-            let Ok(day_entries) = fs::read_dir(&month_path) else { continue };
-            for day_entry in day_entries.filter_map(Result::ok) {
-                let day_path = day_entry.path();
-                if !day_path.is_dir() { continue; }
-                let Some(day_str) = day_path.file_name().and_then(|n| n.to_str()) else { continue; };
-                let current_ymd = format!("{}-{}-{}", year_str, month_str, day_str);
-                if current_ymd.as_str() > to_date { continue; }
-
-                if let Ok(entries) = fs::read_dir(&day_path) {
-                    for entry in entries.filter_map(Result::ok) {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|ext| ext == "jsonl") {
-                            files.push(path);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
+// Storage directory dates and file mtimes are not message dates. Scan historical
+// files even after they have been migrated, archived, compressed or resumed.
 fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in fs::read_dir(directory)
         .map_err(|error| format!("读取目录失败 {}: {}", directory.display(), error))?
@@ -595,8 +502,8 @@ fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(),
             .map_err(|error| format!("读取条目失败: {}", error))?
             .path();
         if path.is_dir() {
-            let _ = collect_jsonl_files(&path, files);
-        } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+            collect_jsonl_files(&path, files)?;
+        } else if is_jsonl_history(&path) {
             files.push(path);
         }
     }
@@ -604,8 +511,7 @@ fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(),
 }
 
 fn extract_codex_session_meta(path: &Path) -> Option<(String, Option<String>)> {
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let reader = history_reader(path)?;
 
     for line in reader.lines().take(15) {
         let line = line.ok()?;
@@ -630,19 +536,26 @@ fn extract_codex_session_meta(path: &Path) -> Option<(String, Option<String>)> {
     None
 }
 
-fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportSession> {
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+fn history_session_id(path: &Path) -> Option<String> {
+    for line in history_reader(path)?.lines().take(15) {
+        let entry: Value = serde_json::from_str(&line.ok()?).ok()?;
+        if entry.get("type").and_then(Value::as_str) == Some("session_meta") {
+            return entry.pointer("/payload/session_id").or_else(|| entry.pointer("/payload/id")).and_then(Value::as_str).map(str::to_string);
+        }
+    }
+    None
+}
 
-    let default_id = path
+fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportSession> {
+    let reader = history_reader(path)?;
+
+    let uncompressed = path.with_extension("");
+    let id_path = if path.extension().is_some_and(|e| e == "zst") { &uncompressed } else { path };
+    let default_id = id_path
         .file_stem()
         .and_then(|s| s.to_str())
         .map(|s| {
-            if s.len() > 36 {
-                s[s.len() - 36..].to_string()
-            } else {
-                s.to_string()
-            }
+            s.get(s.len().saturating_sub(36)..).unwrap_or(s).to_string()
         })
         .unwrap_or_default();
 
@@ -653,24 +566,17 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
     };
 
     for line_res in reader.lines() {
-        let Ok(line) = line_res else { continue; };
+        let Ok(line) = line_res else { break; };
         // Fast string pre-filter to avoid unnecessary serde deserialization
         let is_meta = line.contains("\"session_meta\"");
         if !is_meta
             && !line.contains("\"user\"")
             && !line.contains("\"user_message\"")
+            && !line.contains("\"agent_message\"")
             && !line.contains("\"final_answer\"")
             && !line.contains("\"assistant\"")
         {
             continue;
-        }
-
-        if !is_meta {
-            if let Some(ts) = fast_extract_timestamp(&line) {
-                if !is_in_range(ts, from, to) {
-                    continue;
-                }
-            }
         }
 
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
@@ -724,7 +630,7 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
             }
         }
         // 2. Assistant messages
-        else if role == "assistant" {
+        else if role == "assistant" || (entry_type == "event_msg" && payload_type == "agent_message") {
             let phase = payload.get("phase").and_then(Value::as_str);
             if phase == Some("final_answer") || phase.is_none() {
                 let text = payload
@@ -744,8 +650,7 @@ fn parse_codex_session(path: &Path, from: &str, to: &str) -> Option<CodexReportS
 }
 
 fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReportSession> {
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let reader = history_reader(path)?;
 
     let session_id = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
     let parent_name = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or_default();
@@ -759,27 +664,27 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
     };
 
     for line_res in reader.lines() {
-        let Ok(line) = line_res else { continue; };
+        let Ok(line) = line_res else { break; };
         if !line.contains("\"user\"") && !line.contains("\"assistant\"") {
             continue;
         }
 
-        if let Some(ts) = fast_extract_timestamp(&line) {
-            if !is_in_range(ts, from, to) {
-                continue;
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else { continue; };
+        if let Some(cwd) = entry.get("cwd").and_then(Value::as_str).filter(|cwd| !cwd.is_empty()) {
+            draft.cwd = Some(normalize_project_path(cwd));
+        }
+        if let Some(id) = entry.get("sessionId").and_then(Value::as_str).filter(|id| !id.is_empty()) {
+            // Subagents have their own file identity; do not merge their work into the parent.
+            if !entry.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) {
+                draft.id = id.to_string();
             }
         }
-
-        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-
         let timestamp = entry.get("timestamp")
             .or_else(|| entry.get("created_at"))
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        if !timestamp.is_empty() && !is_in_range(timestamp, from, to) {
+        if !is_in_range(timestamp, from, to) {
             continue;
         }
 
@@ -791,17 +696,17 @@ fn parse_claude_session(path: &Path, from: &str, to: &str) -> Option<CodexReport
         let role = entry.get("role").or_else(|| entry.pointer("/message/role")).and_then(Value::as_str).unwrap_or_default();
 
         if msg_type == "user" || role == "user" {
-            let text = entry.get("message")
+            let text = entry.pointer("/message/content")
                 .or_else(|| entry.get("content"))
-                .or_else(|| entry.pointer("/message/content"))
+                .or_else(|| entry.get("message"))
                 .and_then(extract_text_value);
             if let Some(t) = text.and_then(|s| clean_user_message(&s)) {
                 draft.user_messages.push(t);
             }
         } else if msg_type == "assistant" || role == "assistant" {
-            let text = entry.get("message")
+            let text = entry.pointer("/message/content")
                 .or_else(|| entry.get("content"))
-                .or_else(|| entry.pointer("/message/content"))
+                .or_else(|| entry.get("message"))
                 .and_then(extract_text_value);
             if let Some(t) = text.and_then(|s| clean_result_message(&s)) {
                 draft.assistant_messages.push(t);
@@ -820,8 +725,7 @@ fn parse_antigravity_transcript(
     from: &str,
     to: &str,
 ) -> Option<CodexReportSession> {
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let reader = history_reader(path)?;
 
     let mut draft = SessionDraft {
         id: conv_id.to_string(),
@@ -836,17 +740,11 @@ fn parse_antigravity_transcript(
     };
 
     for line_res in reader.lines() {
-        let Ok(line) = line_res else { continue; };
+        let Ok(line) = line_res else { break; };
 
         // Fast skip lines that are not user input or planner response
         if !line.contains("\"USER_INPUT\"") && !line.contains("\"PLANNER_RESPONSE\"") {
             continue;
-        }
-
-        if let Some(ts) = fast_extract_timestamp(&line) {
-            if !is_in_range(ts, from, to) {
-                continue;
-            }
         }
 
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
@@ -858,17 +756,12 @@ fn parse_antigravity_transcript(
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        if !timestamp.is_empty() && !is_in_range(timestamp, from, to) {
-            continue;
-        }
-
-        if !timestamp.is_empty() {
-            update_bounds(&mut draft, timestamp);
-        }
+        let in_range = is_in_range(timestamp, from, to);
+        if in_range { update_bounds(&mut draft, timestamp); }
 
         let entry_type = entry.get("type").and_then(Value::as_str).unwrap_or_default();
 
-        if entry_type == "USER_INPUT" {
+        if entry_type == "USER_INPUT" && in_range {
             if let Some(content_str) = entry.get("content").and_then(Value::as_str) {
                 let user_request = extract_agy_user_request(content_str);
                 if let Some(cleaned) = clean_user_message(&user_request) {
@@ -927,7 +820,7 @@ fn parse_antigravity_transcript(
                 }
             }
 
-            if let Some(content_str) = entry.get("content").and_then(Value::as_str) {
+            if let Some(content_str) = entry.get("content").and_then(Value::as_str).filter(|_| in_range) {
                 if !content_str.trim().is_empty() {
                     if let Some(cleaned) = clean_result_message(content_str) {
                         draft.assistant_messages.push(cleaned);
@@ -950,7 +843,7 @@ fn parse_opencode_session(path: &Path, from: &str, to: &str) -> Option<CodexRepo
     let val = serde_json::from_str::<Value>(&content).ok()?;
 
     let session_id = val.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-    let cwd = val.get("cwd").or_else(|| val.get("projectPath")).and_then(Value::as_str).map(str::to_string);
+    let cwd = val.get("directory").or_else(|| val.get("cwd")).or_else(|| val.get("projectPath")).and_then(Value::as_str).map(str::to_string);
 
     let mut draft = SessionDraft {
         id: session_id,
@@ -962,10 +855,11 @@ fn parse_opencode_session(path: &Path, from: &str, to: &str) -> Option<CodexRepo
     if let Some(messages) = val.get("messages").and_then(Value::as_array) {
         for msg in messages {
             let role = msg.get("role").and_then(Value::as_str).unwrap_or_default();
-            let timestamp = msg.get("timestamp").and_then(Value::as_str).unwrap_or_default();
+            let Some(timestamp) = opencode::message_timestamp(msg) else { continue; };
+            let timestamp = timestamp.as_str();
             let text = msg.get("content").and_then(extract_text_value);
 
-            if !timestamp.is_empty() && !is_in_range(timestamp, from, to) {
+            if !is_in_range(timestamp, from, to) {
                 continue;
             }
 
@@ -1196,8 +1090,14 @@ fn extract_text_value(val: &Value) -> Option<String> {
     if let Some(s) = val.as_str() {
         return Some(s.to_string());
     }
+    if val.is_object() {
+        return val.get("text").or_else(|| val.get("content")).and_then(extract_text_value);
+    }
     if let Some(arr) = val.as_array() {
         let texts: Vec<String> = arr.iter().filter_map(|item| {
+            if let Some(kind) = item.get("type").and_then(Value::as_str) {
+                if !matches!(kind, "text" | "input_text" | "output_text") { return None; }
+            }
             if let Some(t) = item.get("text").and_then(Value::as_str) {
                 Some(t.trim().to_string())
             } else if let Some(t) = item.get("content").and_then(Value::as_str) {
@@ -1214,10 +1114,15 @@ fn extract_text_value(val: &Value) -> Option<String> {
 }
 
 fn is_in_range(timestamp: &str, from: &str, to: &str) -> bool {
-    !timestamp.is_empty() && timestamp >= from && timestamp <= to
+    match (DateTime::parse_from_rfc3339(timestamp), DateTime::parse_from_rfc3339(from), DateTime::parse_from_rfc3339(to)) {
+        (Ok(timestamp), Ok(from), Ok(to)) => timestamp >= from && timestamp <= to,
+        _ => false,
+    }
 }
 
 fn update_bounds(draft: &mut SessionDraft, timestamp: &str) {
+    let Some(canonical) = canonical_timestamp(timestamp) else { return; };
+    let timestamp = canonical.as_str();
     if draft.started_at.is_empty() || timestamp < draft.started_at.as_str() {
         draft.started_at = timestamp.to_string();
     }
@@ -1303,6 +1208,116 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
 
+
+
+
+    #[test]
+    fn antigravity_loads_compressed_and_plain_logs_with_old_mtimes() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join(".gemini/antigravity/brain/fixture-ag/.system_generated/logs");
+        fs::create_dir_all(&dir).unwrap();
+        let old = concat!(
+            "{\"created_at\":\"2026-06-01T00:00:00Z\",\"type\":\"PLANNER_RESPONSE\",\"tool_calls\":[{\"args\":{\"Cwd\":\"D:/actual\"}}]}\n",
+            "{\"created_at\":\"2026-07-01T00:00:00Z\",\"type\":\"USER_INPUT\",\"content\":\"question\"}\n"
+        );
+        fs::write(dir.join("transcript.jsonl.zst"), zstd::stream::encode_all(old.as_bytes(), 1).unwrap()).unwrap();
+        let plain = dir.join("transcript.jsonl");
+        fs::write(&plain, "{\"created_at\":\"2026-07-01T00:01:00Z\",\"type\":\"PLANNER_RESPONSE\",\"content\":\"answer\"}\n").unwrap();
+        fs::File::options().write(true).open(&plain).unwrap().set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH)).unwrap();
+        let sessions = load_report_sessions_from_home(temp.path(), CodexReportQuery {
+            from: "2026-07-01T00:00:00.000Z".into(), to: "2026-07-01T23:59:59.999Z".into(), providers: Some(vec!["antigravity".into()]),
+        }).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].project_name, "actual");
+        assert_eq!(sessions[0].user_messages, ["question"]);
+        assert_eq!(sessions[0].assistant_messages, ["answer"]);
+    }
+
+    #[test]
+    fn loader_reads_archives_later_directories_and_old_file_mtimes() {
+        let temp = tempfile::tempdir().unwrap();
+        let later = temp.path().join(".codex/sessions/2026/11/01");
+        let archive = temp.path().join(".codex/archived_sessions");
+        fs::create_dir_all(&later).unwrap();
+        fs::create_dir_all(&archive).unwrap();
+        let metadata = "{\"timestamp\":\"2026-07-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"fixture-archive\",\"cwd\":\"D:/archive\"}}\n";
+        fs::write(later.join("resumed.jsonl"), format!("{metadata}{}\n", r#"{"timestamp":"2026-07-01T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"question"}}"#)).unwrap();
+        let text = format!("{metadata}{}\n", r#"{"timestamp":"2026-07-01T00:01:00Z","type":"event_msg","payload":{"type":"agent_message","message":"answer"}}"#);
+        let file = archive.join("archived.jsonl.zst");
+        fs::write(&file, zstd::stream::encode_all(text.as_bytes(), 1).unwrap()).unwrap();
+        fs::File::options().write(true).open(&file).unwrap().set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH)).unwrap();
+        let sessions = load_report_sessions_from_home(temp.path(), CodexReportQuery {
+            from: "2026-07-01T00:00:00Z".into(), to: "2026-09-30T23:59:59Z".into(), providers: Some(vec!["codex".into()]),
+        }).unwrap();
+        let session = sessions.iter().find(|s| s.id == "fixture-archive").unwrap();
+        assert_eq!(session.user_messages, ["question"]);
+        assert_eq!(session.assistant_messages, ["answer"]);
+    }
+
+    #[test]
+    fn compressed_archived_codex_and_resumed_messages_are_merged() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("continued.jsonl.zst");
+        let text = concat!(
+            "{\"timestamp\":\"2026-07-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"same-session\",\"cwd\":\"D:/project\"}}\n",
+            "{\"timestamp\":\"2026-07-01T00:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"repair\"}}\n"
+        );
+        fs::write(&file, zstd::stream::encode_all(text.as_bytes(), 1).unwrap()).unwrap();
+        let first = parse_codex_session(&file, "2026-07-01T00:00:00.000Z", "2026-07-02T00:00:00Z").unwrap();
+        assert_eq!(first.id, "same-session");
+        assert_eq!(first.user_messages, ["repair"]);
+        assert_eq!(extract_codex_session_meta(&file).unwrap().0, "D:/project");
+        let mut second = first.clone();
+        second.user_messages.clear();
+        second.assistant_messages = vec!["fixed".into()];
+        let merged = merge_sessions(vec![first.clone(), second, first]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].user_messages, ["repair"]);
+        assert_eq!(merged[0].assistant_messages, ["fixed"]);
+        let mut files = Vec::new();
+        collect_jsonl_files(temp.path(), &mut files).unwrap();
+        assert_eq!(files, [file]);
+    }
+
+    #[test]
+    fn claude_nested_messages_use_real_workspace_and_session_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("agent.jsonl");
+        fs::write(&file, concat!(
+            "{\"timestamp\":\"2026-07-01T08:00:00+08:00\",\"type\":\"user\",\"sessionId\":\"claude-session\",\"cwd\":\"D:/my-project\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"question\"}]}}\n",
+            "{\"timestamp\":\"2026-07-01T00:01:00Z\",\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"private\"},{\"type\":\"tool_use\",\"name\":\"Read\"},{\"type\":\"text\",\"text\":\"answer\"}]}}\n"
+        )).unwrap();
+        let session = parse_claude_session(&file, "2026-07-01T00:00:00.000Z", "2026-07-01T23:59:59.999Z").unwrap();
+        assert_eq!(session.id, "claude-session");
+        assert_eq!(session.project_name, "my-project");
+        assert_eq!(session.user_messages, ["question"]);
+        assert_eq!(session.assistant_messages, ["answer"]);
+    }
+
+    #[test]
+    fn timestamp_range_compares_instants_and_fractional_boundaries() {
+        let from = "2026-07-01T00:00:00.000Z";
+        let to = "2026-07-01T23:59:59.999Z";
+        assert!(is_in_range("2026-07-01T00:00:00Z", from, to));
+        assert!(is_in_range("2026-07-02T07:59:59+08:00", from, to));
+        assert!(!is_in_range("2026-07-01T07:59:59+08:00", from, to));
+        assert!(!is_in_range("2026-07-01T23:59:59.999001Z", from, to));
+    }
+
+    #[test]
+    fn antigravity_infers_workspace_from_earlier_tool_calls() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("transcript.jsonl");
+        fs::write(&file, concat!(
+            "{\"created_at\":\"2026-06-01T00:00:00Z\",\"type\":\"PLANNER_RESPONSE\",\"tool_calls\":[{\"args\":{\"Cwd\":\"D:/actual-project\"}}]}\n",
+            "{\"created_at\":\"2026-07-01T00:00:00Z\",\"type\":\"USER_INPUT\",\"content\":\"question\"}\n",
+            "{\"created_at\":\"2026-07-01T00:01:00Z\",\"type\":\"PLANNER_RESPONSE\",\"content\":\"answer\"}\n"
+        )).unwrap();
+        let session = parse_antigravity_transcript(&file, "ag-session", &HashMap::new(), &[], "2026-07-01T00:00:00Z", "2026-07-01T23:59:59Z").unwrap();
+        assert_eq!(session.project_name, "actual-project");
+        assert_eq!(session.assistant_messages, ["answer"]);
+    }
+
     #[test]
     fn test_parse_codex_session_and_directory_pruning() {
         let temp_dir = std::env::temp_dir().join(format!("halowake_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
@@ -1317,7 +1332,7 @@ mod tests {
         drop(file);
 
         let mut collected = Vec::new();
-        collect_codex_jsonl_files_pruned(&temp_dir, "2026-08-25", &mut collected);
+        collect_jsonl_files(&temp_dir, &mut collected).unwrap();
         assert_eq!(collected.len(), 1, "Should collect historical session file");
 
         let session = parse_codex_session(&file_path, "2026-08-24T16:00:00.000Z", "2026-08-25T15:59:59.999Z")
@@ -1472,14 +1487,11 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_iso_timestamp() {
-        assert_eq!(parse_iso_timestamp("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_iso_timestamp("2026-09-07T00:00:00.000Z"), Some(1788739200));
-        assert_eq!(parse_iso_timestamp("2026-09-07T08:00:00+08:00"), Some(1788739200));
-        assert_eq!(fast_extract_timestamp(r#"{"created_at":"2026-09-10T08:13:55Z"}"#), Some("2026-09-10T08:13:55Z"));
-        assert_eq!(fast_extract_timestamp(r#"{"timestamp":"2026-09-10T08:13:55.123Z"}"#), Some("2026-09-10T08:13:55.123Z"));
+    fn test_timestamp_normalization() {
+        assert_eq!(canonical_timestamp("1970-01-01T00:00:00Z").as_deref(), Some("1970-01-01T00:00:00.000Z"));
+        assert_eq!(canonical_timestamp("2026-09-07T08:00:00+08:00"), canonical_timestamp("2026-09-07T00:00:00.000Z"));
+        assert!(canonical_timestamp("invalid").is_none());
     }
-
 
     #[test]
     fn test_sep_11_sessions_loads_continued_codex_sessions() {
@@ -1495,7 +1507,7 @@ mod tests {
         drop(file);
 
         let mut collected = Vec::new();
-        collect_codex_jsonl_files_pruned(&temp_dir, "2026-09-11", &mut collected);
+        collect_jsonl_files(&temp_dir, &mut collected).unwrap();
         assert_eq!(collected.len(), 1, "Should collect continued historical session file into current date");
 
         let session = parse_codex_session(&file_path, "2026-09-10T16:00:00.000Z", "2026-09-11T15:59:59.999Z")
