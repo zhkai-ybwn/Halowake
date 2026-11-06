@@ -208,7 +208,8 @@ watch(
       const currentCwd = workspaceStore.refreshFromStorage() || undefined
       void store.scan(currentCwd, { silent: store.skills.length > 0 })
     }
-  }
+  },
+  { immediate: true }
 )
 
 watch(

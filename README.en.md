@@ -6,7 +6,7 @@
   **A Local-First Developer Workbench for AI Coding**
 
   Codex, Claude Code, Antigravity, and OpenCode write the code.  
-  **Halowake handles everything around it: aggregating sessions, launching services, managing Git, skills, and AI quotas.**
+  **Halowake handles everything around it: aggregating sessions, launching services, managing Git and skills.**
 
   [![Release](https://img.shields.io/github/v/release/zhkai-ybwn/Halowake?label=Release)](https://github.com/zhkai-ybwn/Halowake/releases/latest)
   [![License](https://img.shields.io/github/license/zhkai-ybwn/Halowake)](LICENSE)
@@ -20,6 +20,14 @@
 
 ---
 
+## What's new in v1.5.0
+
+This release removes the Token Wallet (AI Quota Center), Codex quota warmup, and built-in code review. Halowake focuses on work records, project services, Git commits, and Skills management.
+
+Git Assistant supports diff viewing, file selection, commit message generation, and committing selected files. Previously configured Codex warmup schedules stop running after upgrading. Legacy quota accounts and review history stay in the local database, with expired, unpinned review records following the existing cleanup policy.
+
+This release also improves repeated session loading, on-demand page loading, background polling, and large diffs. [Read the full release notes](docs/releases/v1.5.0.md)
+
 <p align="center">
   <img src="src/assets/report-preview.png" alt="Halowake — Aggregating sessions and work logs across multiple AI coding agents" width="100%" />
   <sub>A real-world use case: Extracting work facts from local agent sessions, selecting records, and copying them to an AI for daily standup reports.</sub>
@@ -32,7 +40,7 @@ When working with multiple AI coding agents, writing code is only part of the jo
 - Before finishing work, sifting through different agent logs to piece together what was accomplished today.
 - Maintaining multiple projects at once, switching between terminals, starting services, and tracking down occupied ports.
 - The agent modified dozens of files, but before committing you still need to review diffs, pick files, and craft commit messages.
-- Skills are scattered across multiple tools and folders, making them hard to find and manage; subscription quotas need to be checked separately.
+- Skills are scattered across multiple tools and folders, making them hard to find and manage.
 
 **Halowake does not provide another code-generation agent, nor does it replace your IDE.** It is a desktop app running locally on your machine that brings these repetitive, fragmented developer tasks together into one place.
 
@@ -48,22 +56,7 @@ No need to scroll through chat history one by one. Halowake directly parses loca
 
 > **Note**: "0 Token" refers to **local session extraction and work fact aggregation**; when copying content to an external AI to generate final reports, billing depends on the service you use.
 
-### 2. View AI quotas in one place, with opt-in Codex quota warmup
-
-Check configured AI service quotas, reset times, and consumption pace. For Codex, you can also **voluntarily enable local scheduled warmup** to align quota refresh cycles with your working hours.
-
-- Supports Codex, Claude Code, Gemini, DeepSeek, OpenRouter, and more; **actual readable metrics depend on the provider and auth method**.
-- Shows burn pace based on available quota windows; supports multi-account configuration and individual refresh.
-- Codex warmup allows configuring **active weekdays, time slots, check intervals, and max wait limits**, with controls to pause or trigger manually anytime.
-- Background scheduler features node deduplication, timeouts, and error handling, preventing unconditional repeated warmup requests.
-
-> **Codex Warmup Boundaries**: This is an **opt-in helper feature (disabled by default)** that requires an existing local Codex CLI login session. It attempts to send a lightweight request via the Codex protocol, but **does not guarantee that the upstream service will open or reset a new 5-hour quota window**; the actual outcome depends on the server's quota response. This operation may consume actual quota, so review your subscription terms first.
-
-<p align="center">
-  <img src="src/assets/ai-quota-preview.png" alt="Halowake — AI Quota Management" width="100%" />
-</p>
-
-### 3. DevDock: Manage developer services across multiple projects
+### 2. DevDock: Manage developer services across multiple projects
 
 No need to remember which terminal launched which service, or repeatedly hunt down processes hogging ports.
 
@@ -76,7 +69,7 @@ No need to remember which terminal launched which service, or repeatedly hunt do
   <img src="src/assets/devdock-preview.png" alt="Halowake — DevDock Multi-Project Process Workbench" width="100%" />
 </p>
 
-### 4. Git Assistant: Maintain full control before committing
+### 3. Git Assistant: Maintain full control before committing
 
 After an AI generates code, you still decide **which files belong in the commit**.
 
@@ -84,13 +77,12 @@ After an AI generates code, you still decide **which files belong in the commit*
 - Selectively commit specified files; stages selected files while preserving and restoring the original index state of unselected files to reduce accidental commit risks.
 - Analyze diffs and generate Conventional Commit messages using your configured Ollama or OpenAI-compatible model.
 - Browse commit history and branches, executing common Git operations like Pull, Push, Merge, Rebase.
-- Pair with Local Code Review: deterministic rule checks + optional AI semantic audits to see files and issue severity levels.
 
 <p align="center">
   <img src="src/assets/git-assistant-preview.png.png" alt="Halowake — Git Assistant File Changes and Commits" width="100%" />
 </p>
 
-### 5. Skills Center: Discover, install, and manage Agent Skills
+### 4. Skills Center: Discover, install, and manage Agent Skills
 
 Unified view for installed skills across Codex, Claude Code, Antigravity, and OpenCode, with discovery and selection from an online catalog.
 
@@ -105,7 +97,6 @@ Unified view for installed skills across Codex, Claude Code, Antigravity, and Op
 
 | Feature | Purpose |
 | --- | --- |
-| **Local Code Review** | Configurable review rules and models, audits selected files, and saves review records |
 | **Agent Storage** | Inspect disk space across multiple agents and safely clean clearly listed caches |
 | **Markdown Workbench** | Markdown preview, syntax highlighting, document outline (TOC), and detached window reading |
 | **Desktop Experience** | Dark / Light theme, English & Chinese interface, system tray, and in-app update checks |
@@ -123,7 +114,7 @@ Head to **[GitHub Releases to download the latest version](https://github.com/zh
 | **Linux (Debian / Ubuntu family)** | `Halowake_<version>_amd64.deb` |
 | **Linux (AppImage)** | `Halowake_<version>_amd64.AppImage` |
 
-> The artifacts above correspond to the current release pipeline and existing packages for v1.4.6. Features, permissions, and installation experience may vary across platforms; if you encounter issues, please submit your OS version and reproduction steps. **A standalone Windows portable `Halowake.exe` is not currently distributed in the v1.4.6 release.**
+> Download the installer for your operating system from the release assets listed above.
 
 ### 2. Open Your Project
 
@@ -134,7 +125,6 @@ Launch Halowake, then add or select a local project directory. You can start by 
 - **Prepare a standup report**: Open "Session History", pick a date and Agent → load sessions → check relevant records → generate and copy.
 - **Manage project services**: Open "DevDock" → select project scripts → start services → monitor logs and ports.
 - **Safely commit changes**: Open "Git Assistant" → inspect diffs → select files → edit / generate commit message → commit.
-- **Check quotas**: Open the Quota Center → configure or discover supported accounts → review quotas; Codex scheduled warmup can be opted into separately.
 
 ## 🔒 Local-First & Data Boundaries
 
@@ -142,8 +132,7 @@ Project scanning, Git operations, session parsing, report aggregation, and local
 
 However, **Local-first does not mean every feature is completely offline**:
 
-- **AI Generation / AI Review**: When using online models, necessary prompts, selected diffs, or review snippets are sent to your configured provider; choosing local Ollama runs supported models on your device.
-- **Quota queries & Codex warmup**: Accesses relevant service endpoints or communicates via local clients with upstream servers.
+- **AI commit messages**: When using online models, the necessary prompts and selected diffs are sent to your configured provider; choosing local Ollama runs supported models on your device.
 - **Skills registry sync & installation**: Downloads data from configured remote registries and skill repositories.
 - **Credentials**: Uses local configuration and persistence; Windows protects certain keys via DPAPI. Protect your local accounts and never expose sensitive configurations or logs publicly.
 
@@ -172,6 +161,7 @@ Before submitting changes, you can run:
 npm run lint
 npm run test:unit
 cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo test --manifest-path src-tauri/Cargo.toml --test skill_registry_search
 ```
 
 **Tech Stack**: Tauri 2 · Rust · Vue 3 · TypeScript · Vite · Naive UI · Pinia · SQLite (WAL / FTS5)

@@ -209,7 +209,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import mermaid from 'mermaid'
 import {
   renderMarkdown,
   type TocItem,
@@ -360,6 +359,9 @@ async function renderMermaidDiagrams() {
   if (!articleContent.value) return
   const containers = articleContent.value.querySelectorAll<HTMLElement>('.md-mermaid-container')
   if (!containers.length) return
+
+  const { default: mermaid } = await import('mermaid')
+  if (!articleContent.value?.contains(containers[0] ?? null)) return
 
   const isDark =
     preferencesStore.resolvedTheme === 'dark' ||

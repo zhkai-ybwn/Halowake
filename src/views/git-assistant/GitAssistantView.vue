@@ -15,7 +15,6 @@
       :pushing="pushLoading"
       :pulling="pullLoading"
       :summary="summary"
-      :recommended-count="recommendedFiles.length"
       :repository-state="snapshot?.repositoryState ?? null"
       :recent-repos="recentRepos"
       :has-snapshot="Boolean(snapshot)"
@@ -41,26 +40,18 @@
         :loading="loading"
         :keyword="keyword"
         :status-filter="statusFilter"
-        :recommended-only="recommendedOnly"
-        :summary="summary"
-        :groups="filteredFileGroups"
-        :filtered-count="filteredFiles.length"
+        :files="filteredFiles"
         :total-count="allFiles.length"
         :active-file-raw="activeFileRaw"
-        :review-selected-raws="reviewSelectedRaws"
-        :review-scoring="reviewScoring"
-        :has-review-scores="reviewScores.size > 0"
-        :review-score-progress="reviewScoreProgress"
+        :selected-raws="selectedRaws"
         @update:keyword="keyword = $event"
         @update:status-filter="handleStatusFilterChange"
-        @update:recommended-only="recommendedOnly = $event"
         @select-file="handleSelectFile"
         @open-diff="handleOpenDiff"
         @file-action="handleFileAction"
         @request-refresh="handleRefresh"
-        @toggle-review-selection="toggleReviewSelection"
-        @set-review-selection="setReviewSelection"
-        @request-review-score="loadReviewScores"
+        @toggle-file-selection="toggleFileSelection"
+        @set-file-selection="setFileSelection"
       />
 
       <WorkbenchSplitHandle
@@ -100,12 +91,12 @@
           :committing="commitLoading"
           :pushing="pushLoading"
           :pulling="pullLoading"
-          :submit-disabled="!snapshot || !reviewSelectedRaws.length || !commitTitle.trim()"
-          :selected-count="reviewSelectedRaws.length"
+          :submit-disabled="!snapshot || !selectedRaws.length || !commitTitle.trim()"
+          :selected-count="selectedRaws.length"
           :title="commitTitle"
           :body="commitBody"
           :ai-loading="aiLoading"
-          :can-generate="Boolean(snapshot) && reviewSelectedRaws.length > 0"
+          :can-generate="Boolean(snapshot) && selectedRaws.length > 0"
           :prompt-generation-step="promptGenerationStep"
           :current-model-label="selectedCommitModelLabel"
           :current-language-label="selectedCommitLanguageLabel"
@@ -119,7 +110,7 @@
         <section class="commit-side">
           <div class="ai-panel-title">
             <span>{{ t('gitAssistant.ai.actionsTitle') }}</span>
-            <strong>{{ reviewSelectedRaws.length }}</strong>
+            <strong>{{ selectedRaws.length }}</strong>
           </div>
 
           <details class="ai-settings">
@@ -239,9 +230,6 @@
               </button>
               <button class="ai-action" type="button" :disabled="!snapshot" @click="handleOpenLog()">
                 {{ t('gitAssistant.log.open') }}
-              </button>
-              <button class="ai-action" type="button" :disabled="!snapshot" @click="openReviewPanel">
-                {{ t('gitAssistant.ai.reviewCode') }}
               </button>
             </div>
           </section>
@@ -366,27 +354,6 @@
         </WorkbenchSheet>
       </NModal>
 
-      <NModal v-model:show="reviewPanelOpen" class="review-modal" :mask-closable="false" :auto-focus="false">
-        <GitReviewPanel
-          :key="reviewPanelRevision"
-          :session="reviewStore.activeSession"
-          :history="reviewStore.history"
-          :rules="reviewStore.rules"
-          :selected-count="selectedFileViews.length"
-          :has-model="Boolean(reviewModel)"
-          :running="reviewStore.running"
-          :loading="reviewStore.loading"
-          :error="reviewStore.error"
-          @close="reviewPanelOpen = false"
-          @start="startCodeReview"
-          @cancel="reviewStore.cancel()"
-          @open-session="reviewStore.open"
-          @open-file="openReviewFindingFile"
-          @finding-status="reviewStore.setFindingStatus"
-          @save-rule="reviewStore.saveRule"
-          @delete-rule="reviewStore.deleteRule"
-        />
-      </NModal>
 
       <NModal v-model:show="conflictDialogOpen" class="conflict-modal" :mask-closable="true">
         <WorkbenchSheet
@@ -671,14 +638,13 @@ import GitChangeExplorer from './components/GitChangeExplorer.vue'
 import GitCommandDialog from './components/GitCommandDialog.vue'
 import GitCommitAssistant from './components/GitCommitAssistant.vue'
 import GitStatusBar from './components/GitStatusBar.vue'
-import GitReviewPanel from './components/GitReviewPanel.vue'
 import RepositoryRulesEditor from './components/RepositoryRulesEditor.vue'
 import WorkbenchDrawer from '@/components/workbench/WorkbenchDrawer.vue'
 import WorkbenchModalPanel from '@/components/workbench/WorkbenchModalPanel.vue'
 import WorkbenchSplitHandle from '@/components/workbench/WorkbenchSplitHandle.vue'
 import WorkbenchSheet from '@/components/workbench/WorkbenchSheet.vue'
 import { GIT_REPO_STORAGE_KEY } from './git-assistant.config'
-import { useGitSnapshot, useGitDiff, useGitRemote, useGitCommit, useGitWorkspaceLayout, useGitReview, useGitBranchOptions, useGitRepositorySetup, useGitBranchActions, useGitStaging, useGitConflictDialog } from '@/composables/git-assistant'
+import { useGitSnapshot, useGitDiff, useGitRemote, useGitCommit, useGitWorkspaceLayout, useGitBranchOptions, useGitRepositorySetup, useGitBranchActions, useGitStaging, useGitConflictDialog } from '@/composables/git-assistant'
 import {
   normalizePath,
   getFileName,
@@ -689,7 +655,6 @@ import type { GitFileStatus } from '@/types/git'
 import type {
   GitAssistantStatusFilter,
   GitAssistantFileView,
-  GitAssistantFileGroup,
 } from './git-assistant.types'
 
 const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffViewer.vue'))
@@ -701,13 +666,13 @@ const aiSettings = useAiSettingsStore()
 // ── Composables ──
 const {
   loading, error, repoPath, snapshot, recentRepos, editingAliasPath,
-  displayRepoPath, repositoryState, reviewSelectedRaws,
+  displayRepoPath, repositoryState, selectedRaws,
   loadRecentRepos, loadSnapshotByPath, handleSelectDirectory, handleRefresh,
   handleSwitchRecentRepo, renameRecentRepo, setAliasInputRef,
   startEditAlias, finishEditAlias, cancelEditAlias, removeRecentRepo,
 } = useGitSnapshot()
 
-function clearReviewSelection() { reviewSelectedRaws.value = [] }
+function clearFileSelection() { selectedRaws.value = [] }
 
 const {
   currentDiff, diffMode, diffLoading, showDiff, activeFileRaw, loadDiffForFile, clearDiff,
@@ -722,7 +687,7 @@ const {
   handleCommandNextAction, startGitCommand, finishGitCommand, failGitCommand,
 } = useGitRemote(
   () => displayRepoPath.value, () => repositoryState.value,
-  (msg) => { error.value = msg }, loadSnapshotByPath, clearReviewSelection,
+  (msg) => { error.value = msg }, loadSnapshotByPath, clearFileSelection,
 )
 
 const {
@@ -733,9 +698,9 @@ const {
 } = useGitCommit(
   () => displayRepoPath.value, () => snapshot.value,
   () => selectedFileViews.value, () => conflictedFiles.value,
-  () => reviewSelectedRaws.value, (msg) => { error.value = msg },
+  (msg) => { error.value = msg },
   startGitCommand, finishGitCommand, failGitCommand,
-  loadSnapshotByPath, clearReviewSelection,
+  loadSnapshotByPath, clearFileSelection,
 )
 
 // ── UI-only state ──
@@ -748,7 +713,6 @@ const {
 
 const keyword = ref('')
 const statusFilter = ref<GitAssistantStatusFilter>('all')
-const recommendedOnly = ref(false)
 const recentRepoManagerOpen = ref(false)
 const repositoryRulesOpen = ref(false)
 // ── Computed ──
@@ -758,7 +722,6 @@ const parsedFiles = computed<GitFileStatus[]>(() => parseGitStatusList(snapshot.
 const allFiles = computed<GitAssistantFileView[]>(() => {
   const statsByPath = new Map((snapshot.value?.fileStats ?? []).map(stat => [normalizePath(stat.path), stat]))
   return parsedFiles.value.map(file => {
-    const reviewScore = reviewScores.value.get(normalizePath(file.path))
     const stats = statsByPath.get(normalizePath(file.path))
     return {
       ...file,
@@ -767,10 +730,6 @@ const allFiles = computed<GitAssistantFileView[]>(() => {
       extension: getFileExtension(file.path),
       addedLines: stats?.added ?? null,
       removedLines: stats?.removed ?? null,
-      score: reviewScore && !reviewScore.skipped ? reviewScore.score : null,
-      scoreCategories: reviewScore?.categories ?? [],
-      scoreBreakdown: reviewScore?.scoreBreakdown ?? [],
-      recommended: reviewScore?.eligible ?? false,
     }
   })
 })
@@ -791,9 +750,6 @@ const summary = computed(() => {
   }
 })
 
-const recommendedFiles = computed(() =>
-  [...allFiles.value].filter(f => f.recommended).sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
-)
 const conflictedFiles = computed(() => allFiles.value.filter(f => f.type === 'updated-but-unmerged'))
 const {
   conflictDialogOpen, conflictSelectedPaths,
@@ -802,21 +758,21 @@ const {
   getConflictedFilePaths: () => conflictedFiles.value.map(file => file.path),
   markResolved: handleMarkResolved,
 })
-const {
-  reviewStore, reviewScores, reviewScoring, reviewPanelOpen, reviewPanelRevision, reviewScoreProgress,
-  reviewModel, selectedFileViews, toggleReviewSelection, setReviewSelection, loadReviewScores,
-  openReviewPanel, startCodeReview, openReviewFindingFile, startReviewListeners, stopReviewListeners,
-} = useGitReview({
-  getRepositoryPath: () => displayRepoPath.value,
-  getRepositoryRoot: () => snapshot.value?.repoRoot || displayRepoPath.value,
-  getFiles: () => allFiles.value,
-  getSnapshotStatus: () => snapshot.value?.status,
-  getModel: () => aiSettings.getModelForTask('light-review'),
-  reviewSelectedRaws,
-  onError: message => { error.value = message },
-  openFileDiff: handleOpenDiff,
-  errorFallback: () => t('gitAssistant.errorFallback'),
+const selectedFileViews = computed(() => {
+  const selected = new Set(selectedRaws.value)
+  return allFiles.value.filter(file => selected.has(file.raw))
 })
+
+function setFileSelection(raws: string[]) {
+  const valid = new Set(allFiles.value.map(file => file.raw))
+  selectedRaws.value = [...new Set(raws.filter(raw => valid.has(raw)))]
+}
+
+function toggleFileSelection({ raw, checked }: { raw: string; checked: boolean }) {
+  if (checked) setFileSelection([...selectedRaws.value, raw])
+  else selectedRaws.value = selectedRaws.value.filter(item => item !== raw)
+}
+
 const { branchOptions, currentBranchValue, mergeSourceOptions, mergeModeOptions } = useGitBranchOptions(snapshot, t)
 const {
   branchLoading, branchSelectorOpen, branchSelectionValue, newBranchDraft,
@@ -871,20 +827,12 @@ const filteredFiles = computed(() => {
     if (statusFilter.value === 'staged') files = files.filter(f => f.staged)
     else if (statusFilter.value === 'unstaged') files = files.filter(f => f.unstaged)
     else if (statusFilter.value === 'versioned') files = files.filter(f => f.type !== 'untracked')
-    else if (statusFilter.value === 'recommended') files = files.filter(f => f.recommended)
     else files = files.filter(f => f.type === statusFilter.value)
   }
-  if (recommendedOnly.value) files = files.filter(f => f.recommended)
   const kw = keyword.value.trim().toLowerCase()
   if (kw) files = files.filter(f => `${f.path} ${f.fileName} ${f.directory}`.toLowerCase().includes(kw))
-  return files.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.path.localeCompare(b.path))
+  return files.sort((a, b) => a.path.localeCompare(b.path))
 })
-
-const filteredFileGroups = computed<GitAssistantFileGroup[]>(() => [{
-  key: 'all-files',
-  label: recommendedOnly.value ? t('gitAssistant.files.groupRecommended') : t('gitAssistant.files.groupAll'),
-  files: filteredFiles.value,
-}])
 
 const selectedFile = computed(() => {
   if (!activeFileRaw.value) return filteredFiles.value[0] ?? allFiles.value[0] ?? null
@@ -1020,7 +968,7 @@ async function handleRevertFile(filePath: string) {
   try {
     const result = await revertGitFile(displayRepoPath.value, filePath)
     finishGitCommand(result)
-    reviewSelectedRaws.value = reviewSelectedRaws.value.filter(raw => {
+    selectedRaws.value = selectedRaws.value.filter(raw => {
       const file = allFiles.value.find(item => item.raw === raw)
       return file?.path !== filePath
     })
@@ -1050,7 +998,7 @@ watch(filteredFiles, files => {
 
 watch(allFiles, files => {
   const fileSet = new Set(files.map(f => f.raw))
-  reviewSelectedRaws.value = reviewSelectedRaws.value.filter(r => fileSet.has(r))
+  selectedRaws.value = selectedRaws.value.filter(r => fileSet.has(r))
 }, { immediate: true })
 
 watch(showConflictTools, (active, wasActive) => {
@@ -1070,9 +1018,8 @@ watch([selectedFile, diffMode, () => panelLayout.value.visible.diff, showDiff], 
 }, { immediate: true })
 
 // MainLayout keeps this view alive. Route deactivation must not refresh the snapshot:
-// doing so invalidates in-flight scoring/AI requests and discards their results.
+// doing so invalidates in-flight AI requests and discards their results.
 onMounted(async () => {
-  await startReviewListeners()
   loadRecentRepos()
   loadCommitMessageHistory()
   observeWorkspaceBody()
@@ -1083,7 +1030,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopReviewListeners()
   disconnectWorkspaceObserver()
 })
 </script>

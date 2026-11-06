@@ -303,38 +303,6 @@ pub struct GitCommitPromptPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GitReviewAttentionPayload {
-    pub repo_path: String,
-    pub selected_files: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitReviewAttention {
-    pub path: String,
-    pub score: i32,
-    pub categories: Vec<String>,
-    pub score_breakdown: Vec<GitReviewScoreBreakdown>,
-    pub eligible: bool,
-    pub skipped: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitReviewScoreBreakdown {
-    pub factor: String,
-    pub delta: i32,
-    pub evidence: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitReviewAttentionResult {
-    pub files: Vec<GitReviewAttention>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GitPromptAiPayload {
     pub request_id: String,
     pub prompt: String,

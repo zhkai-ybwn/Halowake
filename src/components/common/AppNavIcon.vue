@@ -64,22 +64,7 @@
       <path d="M8.5 13.8 L10.5 15.6 L15.5 11.8" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
     </svg>
 
-    <!-- 5. AI Quota: Violet / Neon-Cyan AI Token Sparkle Badge -->
-    <svg v-else-if="name === 'ai-quota'" viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="quota-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#8B5CF6" />
-          <stop offset="100%" stop-color="#06B6D4" />
-        </linearGradient>
-      </defs>
-      <rect x="2" y="2" width="20" height="20" rx="4.8" fill="url(#quota-grad)" />
-      <!-- AI Sparkle Star & Intelligence Node -->
-      <path d="M12 5.5 C12 8.2 13.5 9.8 16.5 9.8 C13.5 9.8 12 11.4 12 14.1 C12 11.4 10.5 9.8 7.5 9.8 C10.5 9.8 12 8.2 12 5.5 Z" fill="#FFFFFF" />
-      <path d="M16.5 14.2 C16.5 15.6 17.2 16.4 18.6 16.4 C17.2 16.4 16.5 17.2 16.5 18.6 C16.5 17.2 15.7 16.4 14.4 16.4 C15.7 16.4 16.5 15.6 16.5 14.2 Z" fill="#FFFFFF" opacity="0.9" />
-      <circle cx="7.5" cy="16.5" r="1.1" fill="#FFFFFF" opacity="0.85" />
-    </svg>
-
-    <!-- 6. Settings: Subtle Slate Blue-Gray Badge -->
+    <!-- 5. Settings: Subtle Slate Blue-Gray Badge -->
     <svg v-else-if="name === 'settings'" viewBox="0 0 24 24" class="nav-svg" aria-hidden="true">
       <defs>
         <linearGradient id="settings-grad" x1="0%" y1="0%" x2="100%" y2="100%">

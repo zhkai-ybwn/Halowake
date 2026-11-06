@@ -20,19 +20,21 @@
     </button>
 
     <!-- Skills Manager Modal -->
-    <SkillsManagerModal />
+    <SkillsManagerModal v-if="modalLoaded" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { defineAsyncComponent, ref, watch, computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { useSkillsStore } from '@/stores/skills'
-import SkillsManagerModal from './SkillsManagerModal.vue'
+const SkillsManagerModal = defineAsyncComponent(() => import('./SkillsManagerModal.vue'))
 
 const { t } = useI18n()
 const store = useSkillsStore()
+const modalLoaded = ref(store.modalVisible)
+watch(() => store.modalVisible, visible => { if (visible) modalLoaded.value = true })
 
 const dotClass = computed(() => {
   if (store.hasUpdates) return 'warning'

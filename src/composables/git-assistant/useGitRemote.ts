@@ -56,7 +56,7 @@ export function useGitRemote(
   getRepositoryState: () => GitRepositoryState | null,
   setError: (msg: string) => void,
   loadSnapshotByPath: (path: string) => Promise<void>,
-  clearReviewSelection: () => void,
+  clearFileSelection: () => void,
 ) {
   const { t } = useLocale()
 
@@ -433,7 +433,7 @@ export function useGitRemote(
     try {
       const result = await abortGitMerge(displayRepoPath)
       finishGitCommand(result)
-      clearReviewSelection()
+      clearFileSelection()
       await loadSnapshotByPath(displayRepoPath)
     } catch (err) {
       console.error(err)

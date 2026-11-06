@@ -138,16 +138,8 @@ fn default_profile(repo_root: &str) -> Value {
         "commit": {
             "defaultLanguage": "en",
             "style": "conventional",
-            "scopeStrategy": "dominant-scope"
-        },
-        "review": {
-            "localizationPatterns": [],
-            "attentionWeights": {
-                "source": 10,
-                "config": 8,
-                "style": 3,
-                "lockfile": -5
-            }
+            "scopeStrategy": "dominant-scope",
+            "localizationPatterns": []
         }
     })
 }

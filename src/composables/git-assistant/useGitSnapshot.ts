@@ -91,7 +91,7 @@ export function useGitSnapshot() {
       if (requestId !== snapshotRequestId) return
 
       snapshot.value = result
-      reviewSelectedRaws.value = []
+      selectedRaws.value = []
       workspaceStore.setCurrentProjectPath(result.repoRoot || path)
       localStorage.setItem(GIT_REPO_STORAGE_KEY, result.repoRoot || path)
       rememberRecentRepo(result.repoRoot || path)
@@ -116,8 +116,7 @@ export function useGitSnapshot() {
     }
   }
 
-  // reviewSelectedRaws is used by loadSnapshotByPath to clear selection on repo switch
-  const reviewSelectedRaws = ref<string[]>([])
+  const selectedRaws = ref<string[]>([])
 
   async function handleSelectDirectory() {
     try {
@@ -147,7 +146,7 @@ export function useGitSnapshot() {
     if (!path || path === displayRepoPath.value) return
     repoPath.value = path
     snapshot.value = null
-    reviewSelectedRaws.value = []
+    selectedRaws.value = []
     await loadSnapshotByPath(path)
   }
 
@@ -205,7 +204,7 @@ export function useGitSnapshot() {
     editingAliasPath,
     displayRepoPath,
     repositoryState,
-    reviewSelectedRaws,
+    selectedRaws,
     loadRecentRepos,
     loadSnapshotByPath,
     handleSelectDirectory,

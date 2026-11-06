@@ -25,7 +25,6 @@ const groups = computed(() => [
     { label: t('settings.shortcuts.searchFiles'), keys: formatPrimaryShortcut('F') },
     { label: t('settings.shortcuts.refreshRepository'), keys: formatPrimaryShortcut('R') },
     { label: t('settings.shortcuts.commit'), keys: formatPrimaryShortcut('Enter') },
-    { label: t('settings.shortcuts.startReview'), keys: formatPrimaryShortcut('Enter') },
   ] },
 ])
 </script>

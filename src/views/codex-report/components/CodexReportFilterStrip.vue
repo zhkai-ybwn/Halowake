@@ -84,7 +84,7 @@
       <button
         type="button"
         class="project-config-trigger"
-        :class="{ 'is-filtered': selectedProjects.length && selectedProjects.length < allProjectCount }"
+        :class="{ 'is-filtered': selectedProjects !== null && selectedProjects.length < allProjectCount }"
         :title="t('codexReport.manageProjects')"
         @click="emit('open-project-modal')"
       >
@@ -92,7 +92,7 @@
           <Icon icon="solar:folder-with-files-linear" class="trigger-icon" />
           <span class="trigger-text">
             {{
-              !selectedProjects.length || selectedProjects.length === allProjectCount
+              selectedProjects === null || selectedProjects.length === allProjectCount
                 ? t('codexReport.allProjectsSelected', { count: allProjectCount })
                 : t('codexReport.selectedProjectsCount', { count: selectedProjects.length })
             }}
@@ -143,7 +143,7 @@ import type { AiToolProvider } from '@/types/codex-report'
 const props = defineProps<{
   dateRange: [number, number] | null
   selectedProvider: AiToolProvider
-  selectedProjects: string[]
+  selectedProjects: string[] | null
   allProjectCount: number
   keyword: string
   autoExcludeInvalid: boolean

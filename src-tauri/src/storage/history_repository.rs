@@ -5,7 +5,6 @@ mod ai_settings_repository;
 mod codex_report_template_repository;
 mod devdock_repository;
 mod git_history_repository;
-mod quota_repository;
 
 pub use ai_settings_repository::{load_ai_settings_from_db, save_ai_settings_to_db};
 pub use codex_report_template_repository::{
@@ -23,10 +22,6 @@ pub use git_history_repository::{
     clear_git_commit_history_entries, delete_expired_git_commit_history,
     list_git_commit_history_entries, save_git_commit_history_entry, GitCommitHistoryRecord,
 };
-pub use quota_repository::{
-    load_quota_accounts_from_db, quota_accounts_initialized, save_quota_accounts_to_db,
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,47 +204,6 @@ mod tests {
         assert_eq!(loaded.models.len(), 1);
         assert_eq!(loaded.models[0].name, "GPT-4o");
         assert_eq!(loaded.models[0].api_key.as_deref(), Some("sk-test"));
-    }
-
-    #[test]
-    fn saves_and_loads_quota_accounts() {
-        use crate::quota::models::{AccountConfig, ProviderType};
-
-        let db = setup_test_db();
-        assert!(!quota_accounts_initialized(&db).expect("read initial state"));
-        save_quota_accounts_to_db(&db, &[]).expect("save explicit empty account list");
-        assert!(quota_accounts_initialized(&db).expect("read saved state"));
-        assert!(load_quota_accounts_from_db(&db)
-            .expect("load empty accounts")
-            .is_empty());
-        let accounts = vec![AccountConfig {
-            id: "acc-1".to_string(),
-            provider_type: ProviderType::Deepseek,
-            name: "DeepSeek Primary".to_string(),
-            api_key: Some("sk-ds".to_string()),
-            base_url: None,
-            enabled: true,
-            auto_discovered: false,
-        }];
-
-        save_quota_accounts_to_db(&db, &accounts).expect("save quota accounts");
-        #[cfg(target_os = "windows")]
-        {
-            let connection = db.connect().expect("inspect stored quota account");
-            let stored: String = connection
-                .query_row(
-                    "SELECT account_json FROM app_quota_accounts WHERE id='acc-1'",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("read stored quota account");
-            assert!(!stored.contains("sk-ds"));
-            assert!(stored.contains("dpapi:v1:"));
-        }
-        let loaded = load_quota_accounts_from_db(&db).expect("load quota accounts");
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].name, "DeepSeek Primary");
-        assert_eq!(loaded[0].api_key.as_deref(), Some("sk-ds"));
     }
 
     #[test]

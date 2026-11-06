@@ -17,7 +17,7 @@ import { useRouter } from 'vue-router'
 import { darkTheme, type GlobalThemeOverrides, NConfigProvider } from 'naive-ui'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useUpdaterStore } from '@/stores/updater'
-import { getInitialMarkdownFile } from '@/services/markdown/markdown-service'
+import { getInitialMarkdownFile } from '@/services/markdown/markdown-files'
 import UpdateModal from '@/components/updater/UpdateModal.vue'
 
 const router = useRouter()

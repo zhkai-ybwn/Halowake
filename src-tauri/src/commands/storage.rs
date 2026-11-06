@@ -75,12 +75,6 @@ fn read_storage_settings(app: &AppHandle) -> Result<StorageSettings, String> {
     Ok(normalize_settings(settings))
 }
 
-pub(crate) fn current_retention_days(app: &AppHandle) -> u32 {
-    read_storage_settings(app)
-        .map(|settings| settings.retention_days)
-        .unwrap_or(DEFAULT_RETENTION_DAYS)
-}
-
 fn write_storage_settings(app: &AppHandle, settings: &StorageSettings) -> Result<(), String> {
     let path = storage_settings_path(app)?;
     let parent = path
@@ -183,10 +177,14 @@ pub fn run_storage_cleanup(app: AppHandle, force: bool) -> Result<StorageCleanup
     let (cache_bytes, cache_files) = cleanup_expired_files(&cache_dir, cutoff)?;
     let (log_bytes, log_files) = cleanup_expired_files(&log_dir, cutoff)?;
     let database = app.state::<crate::storage::AppDatabase>();
-    let deleted_review_records = crate::review::repository::delete_expired_sessions(&database, now as i64)?;
+    // Honor the existing retention policy for unpinned history from older versions.
+    let expired_legacy_records = database.connect()?.execute(
+        "DELETE FROM review_sessions WHERE is_pinned=0 AND expires_at IS NOT NULL AND expires_at < ?1",
+        [now as i64],
+    ).map_err(|error| format!("清理过期历史记录失败: {error}"))? as u64;
     let deleted_git_records = crate::storage::history_repository::delete_expired_git_commit_history(&database, now as i64, cutoff as i64)?;
     let deleted_devdock_records = crate::storage::history_repository::delete_expired_devdock_run_history(&database, now as i64, cutoff as i64)?;
-    let deleted_records = deleted_review_records + deleted_git_records + deleted_devdock_records;
+    let deleted_records = expired_legacy_records + deleted_git_records + deleted_devdock_records;
     settings.last_cleanup_at = Some(now);
     write_storage_settings(&app, &settings)?;
 

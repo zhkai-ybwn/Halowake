@@ -101,7 +101,7 @@
       @saved="handleConfigSaved"
     />
 
-    <DevDockLogModal :logs="processLogs" :show="logModalOpen" @after-leave="stopLogPolling" @close="closeProcessLogs" />
+    <DevDockLogModal :logs="processLogs" :show="logModalOpen" @close="closeProcessLogs" />
 
     <DevDockPortModal
       v-model:show="portModalOpen"
@@ -114,7 +114,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
+import { computed, nextTick, onActivated, onMounted, reactive, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useDialog, useMessage } from 'naive-ui'
 import { useLocale } from '@/composables/useLocale'
@@ -197,8 +198,9 @@ function handleProcessKilled() {
   refreshProcesses()
 }
 let isFirstMount = true
-let logPollTimer: ReturnType<typeof window.setInterval> | undefined
-let processPollTimer: ReturnType<typeof window.setInterval> | undefined
+const logProcessId = ref('')
+let refreshingProcesses = false
+let refreshingLogs = false
 const loadingAll = computed(() => projects.value.some(project => project.loading))
 const scannedCount = computed(() => projects.value.filter(project => Boolean(project.scanned)).length)
 const scanProgressLabel = computed(() => {
@@ -228,13 +230,11 @@ const visibleProjects = computed(() => {
 let lastScannedAt = 0
 
 onMounted(async () => {
-  document.addEventListener('visibilitychange', handleVisibilityChange)
   pinnedScripts.value = loadPinnedScripts()
   await initStoredProjects()
   void scanAllProjects()
   void refreshProcesses()
   void refreshRunHistory()
-  startProcessPolling()
 })
 
 onActivated(() => {
@@ -249,17 +249,6 @@ onActivated(() => {
   }
   void refreshProcesses()
   void refreshRunHistory()
-  startProcessPolling()
-})
-
-onDeactivated(() => {
-  stopProcessPolling()
-})
-
-onUnmounted(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopLogPolling()
-  stopProcessPolling()
 })
 
 async function handleAddProject() {
@@ -680,35 +669,18 @@ async function startProjectCommand(command: {
 }
 
 async function refreshProcesses() {
+  if (refreshingProcesses) return
+  refreshingProcesses = true
   try {
     const list = await listProjectProcesses()
     processes.value = list.filter(p => !dismissedProcessIds.has(p.id))
   } catch (err) {
     reportError('devdock.refresh-processes', err)
-  }
+  } finally { refreshingProcesses = false }
 }
 
-function handleVisibilityChange() {
-  if (document.hidden) {
-    stopProcessPolling()
-  } else {
-    void refreshProcesses()
-    startProcessPolling()
-  }
-}
-
-function startProcessPolling() {
-  stopProcessPolling()
-  if (document.hidden) return
-  processPollTimer = window.setInterval(() => void refreshProcesses(), 5000)
-}
-
-function stopProcessPolling() {
-  if (processPollTimer) {
-    window.clearInterval(processPollTimer)
-    processPollTimer = undefined
-  }
-}
+useVisiblePolling(refreshProcesses, 5000)
+useVisiblePolling(() => refreshProcessLogs(logProcessId.value), 1000, () => logModalOpen.value && Boolean(logProcessId.value), false)
 
 async function stopProcess(processId: string) {
   processBusy.add(processId)
@@ -755,7 +727,7 @@ async function openProcessLogs(processId: string) {
   try {
     processLogs.value = await loadProjectProcessLogs(processId)
     logModalOpen.value = true
-    startLogPolling(processId)
+    logProcessId.value = processId
   } catch (err) {
     message.error(reportError('devdock.open-logs', err))
   }
@@ -763,35 +735,23 @@ async function openProcessLogs(processId: string) {
 
 function closeProcessLogs() {
   logModalOpen.value = false
-  stopLogPolling()
-}
-
-function startLogPolling(processId: string) {
-  stopLogPolling()
-  logPollTimer = window.setInterval(() => {
-    if (!logModalOpen.value || document.hidden) {
-      if (!logModalOpen.value) stopLogPolling()
-      return
-    }
-    void refreshProcessLogs(processId)
-  }, 1000)
-}
-
-function stopLogPolling() {
-  if (logPollTimer) {
-    window.clearInterval(logPollTimer)
-    logPollTimer = undefined
-  }
+  logProcessId.value = ''
 }
 
 async function refreshProcessLogs(processId: string) {
+  if (refreshingLogs) return
+  refreshingLogs = true
   try {
-    processLogs.value = await loadProjectProcessLogs(processId)
-    updateProcess(processLogs.value.process)
+    const previous = processLogs.value
+    const updated = await loadProjectProcessLogs(processId, previous ?? undefined)
+    if (logProcessId.value !== processId) return
+    if (previous?.process.id === processId && previous.revision === updated.revision) previous.process = updated.process
+    else processLogs.value = updated
+    updateProcess(updated.process)
   } catch (err) {
     reportError('devdock.poll-logs', err)
-    stopLogPolling()
-  }
+    logProcessId.value = ''
+  } finally { refreshingLogs = false }
 }
 
 function updateProcess(process: ProjectProcessSnapshot) {

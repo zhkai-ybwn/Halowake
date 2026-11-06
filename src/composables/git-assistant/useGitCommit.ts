@@ -25,13 +25,12 @@ export function useGitCommit(
   getSnapshot: () => { branch: string } | null,
   getSelectedFileViews: () => GitAssistantFileView[],
   getConflictedFiles: () => GitAssistantFileView[],
-  getReviewSelectedRaws: () => string[],
   setError: (msg: string) => void,
   startGitCommand: (title: string, phase: string, nextAction?: '' | 'push' | 'pull') => void,
   finishGitCommand: (result: { command: string; stdout: string; stderr: string; message: string; suggestion?: string | null }, nextActionLabel?: string) => void,
   failGitCommand: (err: unknown) => void,
   loadSnapshotByPath: (path: string) => Promise<void>,
-  clearReviewSelection: () => void,
+  clearFileSelection: () => void,
 ) {
   const { t } = useLocale()
   const aiSettings = useAiSettingsStore()
@@ -85,7 +84,7 @@ export function useGitCommit(
       title,
       body,
       source,
-      selectedFileCount: getReviewSelectedRaws().length,
+      selectedFileCount: getSelectedFileViews().length,
       createdAt: Date.now(),
       expiresAt: null,
     }
@@ -242,7 +241,7 @@ export function useGitCommit(
 
       commitTitle.value = ''
       commitBody.value = ''
-      clearReviewSelection()
+      clearFileSelection()
       finishGitCommand(result, t('gitAssistant.gitCommand.pushNext'))
       void loadSnapshotByPath(displayRepoPath)
     } catch (err) {

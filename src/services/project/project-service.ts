@@ -90,6 +90,7 @@ export interface ProjectProcessLogLine {
 }
 
 export interface ProjectProcessLogs {
+  revision: string
   process: ProjectProcessSnapshot
   lines: ProjectProcessLogLine[]
 }
@@ -150,8 +151,11 @@ export async function restartProjectProcess(processId: string): Promise<ProjectP
   return await invoke<ProjectProcessSnapshot>('restart_project_process', { processId })
 }
 
-export async function loadProjectProcessLogs(processId: string): Promise<ProjectProcessLogs> {
-  return await invoke<ProjectProcessLogs>('load_project_process_logs', { processId })
+export async function loadProjectProcessLogs(processId: string, previous?: ProjectProcessLogs): Promise<ProjectProcessLogs> {
+  const result = await invoke<Omit<ProjectProcessLogs, 'lines'> & { lines: ProjectProcessLogLine[] | null }>(
+    'load_project_process_logs', { processId, previousRevision: previous?.process.id === processId ? previous.revision : null },
+  )
+  return { ...result, lines: result.lines ?? previous?.lines ?? [] }
 }
 
 export async function openProjectUrl(url: string): Promise<void> {

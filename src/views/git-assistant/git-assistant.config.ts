@@ -16,7 +16,6 @@ export const STATUS_FILTER_OPTIONS: Array<{
   { value: 'added', labelKey: 'gitAssistant.files.filters.added' },
   { value: 'modified', labelKey: 'gitAssistant.files.filters.modified' },
   { value: 'deleted', labelKey: 'gitAssistant.files.filters.deleted' },
-  { value: 'recommended', labelKey: 'gitAssistant.files.filters.recommended' },
 ]
 
 export const STATUS_META: Record<
@@ -35,12 +34,4 @@ export const STATUS_META: Record<
   untracked: { labelKey: 'gitAssistant.status.untracked', shortLabel: 'U', tone: 'muted' },
   'updated-but-unmerged': { labelKey: 'gitAssistant.status.updated-but-unmerged', shortLabel: 'U', tone: 'danger' },
   unknown: { labelKey: 'gitAssistant.status.unknown', shortLabel: '?', tone: 'muted' },
-}
-
-export const ATTENTION_SCORE_CONFIG = {
-  recommendedThreshold: 6,
-  highRiskDirectories: ['src/core/', 'src/services/', 'src/store/', 'src/views/'],
-  highRiskFiles: ['package.json', 'pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', '.env'],
-  docsExtensions: ['md', 'txt'],
-  configExtensions: ['json', 'yaml', 'yml', 'toml', 'ini'],
 }

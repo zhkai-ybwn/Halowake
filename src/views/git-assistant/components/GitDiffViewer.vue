@@ -8,10 +8,6 @@
           <span class="meta-pill" :class="`tone-${statusMeta[activeFile.type].tone}`">
             {{ t(statusMeta[activeFile.type].labelKey) }}
           </span>
-          <span class="meta-pill">{{ activeFile.score === null ? '-' : t('gitAssistant.detail.score', { score: activeFile.score }) }}</span>
-          <span v-if="activeFile.recommended" class="meta-pill meta-pill--accent">
-            {{ t('gitAssistant.detail.reviewRecommended') }}
-          </span>
         </div>
       </div>
 
@@ -51,18 +47,20 @@
     <WorkbenchEmptyState v-else-if="!diffText" icon="solar:check-circle-linear" :title="t('gitAssistant.detail.diffEmpty')" />
 
     <div v-else class="diff-body">
-      <div class="diff2html-host" v-html="diffHtml"></div>
+      <UnifiedDiffViewer v-if="isLargeDiff" :diff="diffText" />
+      <div v-else class="diff2html-host" v-html="diffHtml"></div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 import { STATUS_META } from '../git-assistant.config'
 import type { GitAssistantFileView } from '../git-assistant.types'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 import 'diff2html/bundles/css/diff2html.min.css'
+import UnifiedDiffViewer from '@/views/git-diff/UnifiedDiffViewer.vue'
 
 const props = defineProps<{
   hasSnapshot: boolean
@@ -81,6 +79,8 @@ const { t } = useLocale()
 
 const hasToggle = ref(false)
 const diffHtml = ref('')
+const isLargeDiff = computed(() => /(?:^|\n)@@ /.test(props.diffText) && (props.diffText.length > 100_000 || (props.diffText.match(/\n/g)?.length ?? 0) > 1500))
+let renderSequence = 0
 
 watch(
   () => [props.currentMode, props.activeFile?.staged, props.activeFile?.unstaged] as const,
@@ -93,12 +93,14 @@ watch(
 watch(
   () => props.diffText,
   async diffText => {
-    if (!diffText) {
+    const sequence = ++renderSequence
+    if (!diffText || isLargeDiff.value) {
       diffHtml.value = ''
       return
     }
 
     const { html } = await import('diff2html')
+    if (sequence !== renderSequence) return
     diffHtml.value = html(diffText, {
       drawFileList: false,
       matching: 'lines',
@@ -160,7 +162,6 @@ h2 {
   padding: 0 8px;
 }
 
-.meta-pill--accent,
 .switch-btn.active {
   background: color-mix(in srgb, var(--lumina-primary-soft) 58%, var(--lumina-surface-2));
   border-color: var(--lumina-primary);

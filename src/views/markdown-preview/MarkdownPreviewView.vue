@@ -212,6 +212,7 @@
 </template>
 
 <script setup lang="ts">
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -227,7 +228,7 @@ import {
   openMarkdownInEditor,
   openMarkdownStandaloneWindow,
   readMarkdownFile,
-} from '@/services/markdown/markdown-service'
+} from '@/services/markdown/markdown-files'
 import { useMarkdownHistoryStore } from '@/stores/markdown-history'
 
 const route = useRoute()
@@ -249,7 +250,6 @@ const stats = ref({
   readingTimeMinutes: 1,
 })
 
-let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 const recentDropdownOptions = computed(() => {
   return historyStore.recentFiles.map(file => ({
@@ -280,7 +280,6 @@ async function loadFile(filePath: string) {
     lastModifiedAt.value = fileInfo.modifiedAt
 
     historyStore.addRecentFile(fileInfo.path, fileInfo.name)
-    startPolling(fileInfo.path)
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
   } finally {
@@ -328,7 +327,6 @@ async function reloadCurrentFile() {
 }
 
 function closeCurrentFile() {
-  stopPolling()
   currentFilePath.value = ''
   currentFileName.value = ''
   currentFileContent.value = ''
@@ -380,35 +378,20 @@ function handleWelcomeDrop(event: DragEvent) {
   }
 }
 
-function startPolling(path: string) {
-  stopPolling()
-  pollingTimer = setInterval(async () => {
-    if (!currentFilePath.value || currentFilePath.value !== path) return
-    try {
-      const meta = await getMarkdownMetadata(path)
-      if (
-        meta.modifiedAt &&
-        lastModifiedAt.value &&
-        meta.modifiedAt > lastModifiedAt.value
-      ) {
-        lastModifiedAt.value = meta.modifiedAt
-        const updated = await readMarkdownFile(path)
-        currentFileContent.value = updated.content
-      }
-    } catch {
-      // Ignore polling errors
-    }
-  }, 3000)
-}
-
-function stopPolling() {
-  if (pollingTimer) {
-    clearInterval(pollingTimer)
-    pollingTimer = null
-  }
-}
+useVisiblePolling(async () => {
+  const path = currentFilePath.value
+  try {
+    const meta = await getMarkdownMetadata(path)
+    if (currentFilePath.value !== path || meta.modifiedAt === lastModifiedAt.value) return
+    const updated = await readMarkdownFile(path)
+    if (currentFilePath.value !== path) return
+    currentFileContent.value = updated.content
+    lastModifiedAt.value = updated.modifiedAt
+  } catch { /* A file can temporarily disappear while an editor replaces it. */ }
+}, 3000, () => Boolean(currentFilePath.value))
 
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if (route.name !== 'markdown-preview') return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
     e.preventDefault()
     void selectAndOpenFile()
@@ -420,7 +403,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  stopPolling()
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 </script>

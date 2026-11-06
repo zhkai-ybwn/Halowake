@@ -2,8 +2,6 @@
 pub mod ai;
 pub mod commands;
 pub mod git;
-pub mod quota;
-pub mod review;
 pub mod storage;
 
 use tauri::{menu::MenuBuilder, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, Emitter, Manager};
@@ -30,7 +28,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(launch_state)
         .manage(commands::project_process::ProjectProcessState::default())
-        .manage(review::ReviewTaskRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -44,10 +41,7 @@ pub fn run() {
         .setup(|app| {
             let database = storage::AppDatabase::open(app.handle())
                 .map_err(std::io::Error::other)?;
-            review::repository::mark_running_sessions_interrupted(&database)
-                .map_err(std::io::Error::other)?;
             app.manage(database);
-            quota::scheduler::start(app.handle()).map_err(std::io::Error::other)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(tauri::include_image!("icons/window-icon.png"))?;
             }
@@ -76,9 +70,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            quota::scheduler::load_codex_schedule,
-            quota::scheduler::save_codex_schedule,
-            quota::scheduler::run_codex_warmup_now,
             commands::git::load_git_snapshot,
             commands::git::load_git_file_diff,
             commands::git::load_git_file_head_diff,
@@ -115,7 +106,6 @@ pub fn run() {
             commands::git::load_git_project_profile,
             commands::git::save_git_project_profile,
             commands::git::build_git_commit_prompt,
-            commands::git::score_git_review_files,
             commands::git::generate_git_ai_analysis,
             commands::git::generate_git_ai_analysis_from_prompt,
             commands::git::cancel_git_ai_analysis,
@@ -159,20 +149,6 @@ pub fn run() {
             commands::storage::run_storage_cleanup,
             commands::agent_storage::scan_agent_storage,
             commands::agent_storage::clear_agent_cache,
-            commands::quota::load_all_quotas,
-            commands::quota::refresh_single_quota,
-            commands::quota::load_quota_accounts,
-            commands::quota::save_quota_accounts,
-            commands::quota::discover_local_ai_accounts,
-            commands::client_launcher::launch_ai_client,
-            commands::review::start_local_code_review,
-            commands::review::get_local_code_review,
-            commands::review::list_local_code_reviews,
-            commands::review::cancel_local_code_review,
-            commands::review::update_review_finding,
-            commands::review::list_review_rules,
-            commands::review::save_review_rule,
-            commands::review::delete_review_rule,
             commands::markdown::read_markdown_file,
             commands::markdown::get_markdown_file_metadata,
             commands::markdown::get_initial_markdown_file,

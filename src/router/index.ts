@@ -1,9 +1,5 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
-import GitAssistantView from '@/views/git-assistant/GitAssistantView.vue'
-import DevDockView from '@/views/devdock/DevDockView.vue'
-import CodexReportView from '@/views/codex-report/CodexReportView.vue'
-import SettingsView from '@/views/settings/SettingsView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -17,17 +13,17 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'git',
         name: 'git-assistant',
-        component: GitAssistantView,
+        component: () => import('@/views/git-assistant/GitAssistantView.vue'),
       },
       {
         path: 'devdock',
         name: 'devdock',
-        component: DevDockView,
+        component: () => import('@/views/devdock/DevDockView.vue'),
       },
       {
         path: 'codex-report',
         name: 'codex-report',
-        component: CodexReportView,
+        component: () => import('@/views/codex-report/CodexReportView.vue'),
       },
       {
         path: 'markdown',
@@ -37,7 +33,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'settings',
         name: 'settings',
-        component: SettingsView,
+        component: () => import('@/views/settings/SettingsView.vue'),
       },
     ]
   },

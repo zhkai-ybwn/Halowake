@@ -22,6 +22,7 @@ const mountView = () => shallowMount(CodexReportView, { global: { stubs: { Icon:
 const record = (wrapper: ReturnType<typeof mountView>) => wrapper.findComponent({ name: 'CodexReportEditor' }).props('workRecord') as string
 
 beforeEach(() => {
+  localStorage.clear()
   vi.mocked(loadCodexProjects).mockResolvedValue([])
   vi.mocked(loadCodexReportSessions).mockReset()
   vi.mocked(loadCodexReportSessions).mockResolvedValue([makeSession('first'), makeSession('second'), makeSession('partial', [])])
@@ -70,10 +71,52 @@ describe('work report filter state', () => {
     await flushPromises()
     wrapper.findComponent({ name: 'CodexReportFilterStrip' }).vm.$emit('update:dateRange', [new Date(2026, 6, 1).getTime(), new Date(2026, 8, 30).getTime()])
     await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 180))
+    await flushPromises()
     resolveOld([makeSession('obsolete')])
     await flushPromises()
     expect(record(wrapper)).not.toContain('obsolete')
     expect(record(wrapper)).toContain('2026-07-01～2026-09-30')
     wrapper.unmount()
   })
+  it('excludes every project for [] and restores all for null', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const modal = wrapper.findComponent({ name: 'CodexProjectFilterModal' })
+    modal.vm.$emit('update:selectedProjects', [])
+    await flushPromises()
+    expect(record(wrapper)).toContain('纳入会话总数：0')
+    modal.vm.$emit('update:selectedProjects', null)
+    await flushPromises()
+    expect(record(wrapper)).toContain('纳入会话总数：2')
+    wrapper.unmount()
+  })
+  it('presents partial-source warnings while keeping usable sessions', async () => {
+    vi.mocked(loadCodexReportSessions).mockImplementation(async (_query, onWarnings) => {
+      onWarnings?.(['OpenCode fixture database is unavailable'])
+      return [makeSession('usable')]
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(record(wrapper)).toContain('usable')
+    expect(wrapper.find('[role="status"]').text()).toContain('OpenCode fixture database')
+    wrapper.unmount()
+  })
+
+  it('migrates the legacy all selection and preserves an explicit empty selection across reloads', async () => {
+    const key = 'lumina.codex-report.selected-projects.v1'
+    localStorage.setItem(key, '[]')
+    const legacy = mountView()
+    await flushPromises()
+    expect(record(legacy)).toContain('纳入会话总数：2')
+    legacy.findComponent({ name: 'CodexProjectFilterModal' }).vm.$emit('update:selectedProjects', [])
+    await flushPromises()
+    expect(JSON.parse(localStorage.getItem(key)!).projects).toEqual([])
+    legacy.unmount()
+    const current = mountView()
+    await flushPromises()
+    expect(record(current)).toContain('纳入会话总数：0')
+    current.unmount()
+  })
+
 })

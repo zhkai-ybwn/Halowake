@@ -1,5 +1,4 @@
 import type { GitFileStatus } from '@/types/git'
-import { ATTENTION_SCORE_CONFIG } from '@/views/git-assistant/git-assistant.config'
 
 export function normalizePath(path: string) {
   return path.replace(/\\/g, '/')
@@ -27,27 +26,6 @@ export function getRepoDisplayName(path: string) {
   const normalized = normalizePath(path)
   const parts = normalized.split('/').filter(Boolean)
   return parts[parts.length - 1] || path
-}
-
-export function scoreFileAttention(file: GitFileStatus) {
-  let score = 1
-
-  if (file.type === 'deleted' || file.type === 'renamed' || file.type === 'updated-but-unmerged') score += 4
-  else if (file.type === 'modified') score += 3
-  else if (file.type === 'added') score += 2
-
-  if (file.staged) score += 1
-  if (file.unstaged && file.staged) score += 1
-
-  const normalizedPath = file.path.replace(/\\/g, '/').toLowerCase()
-  const extension = getFileExtension(file.path)
-
-  if (ATTENTION_SCORE_CONFIG.highRiskDirectories.some(directory => normalizedPath.startsWith(directory))) score += 2
-  if (ATTENTION_SCORE_CONFIG.highRiskFiles.some(name => normalizedPath.endsWith(name.toLowerCase()))) score += 2
-  if (ATTENTION_SCORE_CONFIG.configExtensions.includes(extension)) score += 1
-  if (ATTENTION_SCORE_CONFIG.docsExtensions.includes(extension)) score -= 1
-
-  return Math.max(score, 1)
 }
 
 export function parseGitLogDate(date: string) {

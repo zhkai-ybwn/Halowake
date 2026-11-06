@@ -1,16 +1,25 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { CodexProjectInfo, CodexReportQuery, CodexReportSession, InstalledToolInfo } from '@/types/codex-report'
 
-export function loadCodexProjects() {
-  return invoke<CodexProjectInfo[]>('load_codex_projects')
+interface ReportLoad<T> { data: T; warnings: string[] }
+type WarningHandler = (warnings: string[]) => void
+
+async function loadReportData<T>(command: string, args: Record<string, unknown> | undefined, onWarnings?: WarningHandler): Promise<T> {
+  const result = await invoke<ReportLoad<T>>(command, args)
+  onWarnings?.(result.warnings)
+  return result.data
 }
 
-export function loadCodexReportSessions(query: CodexReportQuery) {
-  return invoke<CodexReportSession[]>('load_codex_report_sessions', { query })
+export function loadCodexProjects(onWarnings?: WarningHandler) {
+  return loadReportData<CodexProjectInfo[]>('load_codex_projects', undefined, onWarnings)
 }
 
-export function detectInstalledAiTools() {
-  return invoke<InstalledToolInfo[]>('detect_installed_ai_tools')
+export function loadCodexReportSessions(query: CodexReportQuery, onWarnings?: WarningHandler) {
+  return loadReportData<CodexReportSession[]>('load_codex_report_sessions', { query }, onWarnings)
+}
+
+export function detectInstalledAiTools(onWarnings?: WarningHandler) {
+  return loadReportData<InstalledToolInfo[]>('detect_installed_ai_tools', undefined, onWarnings)
 }
 
 export interface CodexReportPromptTemplate {

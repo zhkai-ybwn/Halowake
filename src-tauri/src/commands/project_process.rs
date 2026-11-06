@@ -75,8 +75,9 @@ pub struct ProjectProcessLogLine {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProcessLogs {
+    pub revision: String,
     pub process: ProjectProcessSnapshot,
-    pub lines: Vec<ProjectProcessLogLine>,
+    pub lines: Option<Vec<ProjectProcessLogLine>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,17 +133,21 @@ pub async fn list_project_processes(
 
 #[tauri::command]
 pub async fn stop_project_process(
+    app: tauri::AppHandle,
     process_id: String,
-    state: State<'_, ProjectProcessState>,
 ) -> Result<ProjectProcessSnapshot, String> {
-    stop_process_by_id(&state, &process_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_process_by_id(&app.state::<ProjectProcessState>(), &process_id)
+    }).await.map_err(|e| format!("停止进程任务失败: {e}"))?
 }
 
 #[tauri::command]
 pub async fn stop_all_project_processes(
-    state: State<'_, ProjectProcessState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<ProjectProcessSnapshot>, String> {
-    stop_all_processes(&state)
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_all_processes(&app.state::<ProjectProcessState>())
+    }).await.map_err(|e| format!("停止所有进程任务失败: {e}"))?
 }
 
 pub fn stop_all_processes(
@@ -155,18 +160,21 @@ pub fn stop_all_processes(
 pub async fn restart_project_process(
     app: tauri::AppHandle,
     process_id: String,
-    state: tauri::State<'_, ProjectProcessState>,
+    // State is resolved inside the blocking task so no borrowed guard escapes.
 ) -> Result<ProjectProcessSnapshot, String> {
     let database = app.try_state::<AppDatabase>().map(|db| db.inner().clone());
-    restart_process(&state, &process_id, database)
+    tauri::async_runtime::spawn_blocking(move || {
+        restart_process(&app.state::<ProjectProcessState>(), &process_id, database)
+    }).await.map_err(|e| format!("重启进程任务失败: {e}"))?
 }
 
 #[tauri::command]
 pub async fn load_project_process_logs(
     process_id: String,
+    previous_revision: Option<String>,
     state: State<'_, ProjectProcessState>,
 ) -> Result<ProjectProcessLogs, String> {
-    load_process_logs(&state, &process_id)
+    load_process_logs(&state, &process_id, previous_revision.as_deref())
 }
 
 #[tauri::command]

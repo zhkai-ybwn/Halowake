@@ -27,14 +27,14 @@
       </div>
     </aside>
 
-    <section ref="codePane" class="code-pane" @scroll="syncViewport">
-      <template v-for="hunk in hunks" :key="hunk.id">
+    <section ref="codePane" class="code-pane" @scroll="queueViewport">
+      <div class="virtual-rows" :style="{ minWidth: contentWidth }">
+        <div :style="{ height: `${windowRange.top}px` }" aria-hidden="true"></div>
         <div
-          v-for="line in hunk.lines"
+          v-for="line in visibleLines"
           :key="line.id"
           class="diff-line"
           :class="`diff-line--${line.kind}`"
-          :data-locator-index="locatorIndex(line.id)"
         >
           <template v-if="line.kind === 'note'">
             <span class="diff-line__note">{{ line.text }}</span>
@@ -45,14 +45,15 @@
             <code class="diff-line__content">{{ line.text }}</code>
           </template>
         </div>
-      </template>
+        <div :style="{ height: `${windowRange.bottom}px` }" aria-hidden="true"></div>
+      </div>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { parseUnifiedDiff, type UnifiedDiffLine, type UnifiedDiffLineKind } from './unified-diff'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { DIFF_ROW_HEIGHT, getDiffWindow, parseUnifiedDiff, type UnifiedDiffLine, type UnifiedDiffLineKind } from './unified-diff'
 
 const props = defineProps<{ diff: string }>()
 
@@ -69,8 +70,15 @@ const viewport = ref({ top: 0, bottom: 100 })
 let locatorDragging = false
 
 const hunks = computed(() => parseUnifiedDiff(props.diff))
-const codeLines = computed(() => hunks.value.flatMap(hunk => hunk.lines.filter(line => line.kind !== 'hunk' && line.kind !== 'note')))
-const lineIndexes = computed(() => new Map(codeLines.value.map((line, index) => [line.id, index])))
+const codeLines = computed(() => hunks.value.flatMap(hunk => hunk.lines))
+const scrollTop = ref(0)
+const viewportHeight = ref(600)
+const windowRange = computed(() => getDiffWindow(codeLines.value.length, scrollTop.value, viewportHeight.value))
+const visibleLines = computed(() => codeLines.value.slice(windowRange.value.start, windowRange.value.end))
+// Stable horizontal extent while rows enter/leave the window. Tabs use the CSS tab-size below.
+const contentWidth = computed(() => `max(100%, calc(${codeLines.value.reduce((max, line) => Math.max(max, line.text.replace(/\t/g, '    ').replace(/[^\x00-\x7F]/g, 'xx').length), 0)}ch + 112px))`)
+let frame: number | undefined
+let observer: ResizeObserver | undefined
 function buildLocatorMarkers(): LocatorMarker[] {
   const lines = codeLines.value
   const groups: Array<{ start: number; end: number; kind: LocatorKind }> = []
@@ -109,10 +117,6 @@ const locatorViewport = computed(() => {
   return { top, height, bottom: top + height }
 })
 
-function locatorIndex(id: string) {
-  return lineIndexes.value.get(id) ?? ''
-}
-
 function lineSign(kind: UnifiedDiffLineKind) {
   if (kind === 'added') return '+'
   if (kind === 'deleted') return '−'
@@ -125,19 +129,15 @@ function displayLineNumber(line: UnifiedDiffLine) {
 
 function syncViewport() {
   const pane = codePane.value
-  const total = codeLines.value.length
-  if (!pane || total === 0) {
-    viewport.value = { top: 0, bottom: 100 }
-    return
-  }
-
-  const paneRect = pane.getBoundingClientRect()
-  const rows = [...pane.querySelectorAll<HTMLElement>('[data-locator-index]')]
-  const topIndex = rows.findIndex(row => row.getBoundingClientRect().bottom > paneRect.top)
-  const bottomIndex = rows.findLastIndex(row => row.getBoundingClientRect().top < paneRect.bottom)
-  const start = Math.max(topIndex, 0)
-  const end = Math.max(bottomIndex + 1, start + 1)
-  viewport.value = { top: (start / total) * 100, bottom: Math.min((end / total) * 100, 100) }
+  if (!pane) return
+  scrollTop.value = pane.scrollTop
+  viewportHeight.value = pane.clientHeight || 600
+  const totalHeight = codeLines.value.length * DIFF_ROW_HEIGHT
+  viewport.value = { top: totalHeight ? pane.scrollTop / totalHeight * 100 : 0, bottom: totalHeight ? Math.min(100, (pane.scrollTop + viewportHeight.value) / totalHeight * 100) : 100 }
+}
+function queueViewport() {
+  if (frame !== undefined) return
+  frame = requestAnimationFrame(() => { frame = undefined; syncViewport() })
 }
 
 function scrollFromLocator(event: PointerEvent) {
@@ -166,12 +166,27 @@ function stopLocatorDrag(event: PointerEvent) {
 }
 
 function refreshViewport() {
-  nextTick(() => requestAnimationFrame(syncViewport))
+  nextTick(queueViewport)
 }
 
-watch(() => props.diff, refreshViewport, { immediate: true })
-onMounted(() => window.addEventListener('resize', refreshViewport))
-onUnmounted(() => window.removeEventListener('resize', refreshViewport))
+watch(() => props.diff, () => {
+  scrollTop.value = 0
+  if (codePane.value) codePane.value.scrollTop = 0
+  refreshViewport()
+}, { immediate: true })
+onMounted(() => {
+  window.addEventListener('resize', refreshViewport)
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(queueViewport)
+    if (codePane.value) observer.observe(codePane.value)
+  }
+})
+onActivated(refreshViewport)
+onUnmounted(() => {
+  window.removeEventListener('resize', refreshViewport)
+  observer?.disconnect()
+  if (frame !== undefined) cancelAnimationFrame(frame)
+})
 </script>
 
 <style scoped lang="scss">
@@ -265,10 +280,17 @@ onUnmounted(() => window.removeEventListener('resize', refreshViewport))
   background: color-mix(in srgb, var(--lumina-primary) 42%, transparent);
 }
 
+.virtual-rows {
+  font: 12px/20px SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
 .diff-line {
   display: grid;
   grid-template-columns: 28px 60px minmax(max-content, 1fr);
-  min-height: 20px;
+  height: 20px;
+  overflow: hidden;
+  tab-size: 4;
+  white-space: pre;
   min-width: max-content;
 }
 

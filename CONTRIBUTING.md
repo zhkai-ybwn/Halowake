@@ -15,7 +15,7 @@ Requirements: Node.js 20+, Rust 1.77.2+, Git, and the Tauri 2 system prerequisit
 ```bash
 git clone https://github.com/zhkai-ybwn/Halowake.git
 cd Halowake
-npm install
+npm ci
 npm run tauri:dev
 ```
 
@@ -23,7 +23,10 @@ Run these checks before opening a pull request:
 
 ```bash
 npm run lint
+npm run test:unit
+npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo test --manifest-path src-tauri/Cargo.toml --test skill_registry_search
 ```
 
 ## Pull requests

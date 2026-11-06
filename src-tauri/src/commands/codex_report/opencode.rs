@@ -89,12 +89,22 @@ fn cwd(value: &Value) -> Option<String> {
 }
 
 // Session index avoids reading message bodies when populating the tool/project pickers.
+#[cfg(test)]
 pub(super) fn session_index(
     roots: &[PathBuf],
 ) -> Result<Vec<(String, String, Option<String>)>, String> {
+    session_index_with_warnings(roots, &mut Vec::new())
+}
+
+pub(super) fn session_index_with_warnings(
+    roots: &[PathBuf], warnings: &mut Vec<String>,
+) -> Result<Vec<(String, String, Option<String>)>, String> {
     let mut sessions = HashMap::new();
     for root in roots {
-        for path in session_files(root)? {
+        for path in session_files(root).unwrap_or_else(|error| {
+            warnings.push(format!("OpenCode {}: {error}", root.display()));
+            Vec::new()
+        }) {
             if let Some(value) = read_json(&path) {
                 if let (Some(id), Some(cwd)) =
                     (value.get("id").and_then(Value::as_str), cwd(&value))
@@ -111,22 +121,30 @@ pub(super) fn session_index(
         if !db.exists() {
             continue;
         }
-        let conn = open_database(&db)?;
-        let mut stmt = conn
-            .prepare("SELECT id, directory, time_updated FROM session")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            let (id, cwd, ts) = row.map_err(|e| e.to_string())?;
-            sessions.insert(id, (normalize_project_path(&cwd), millis_timestamp(ts)));
+        let indexed = (|| -> Result<Vec<_>, String> {
+            let conn = open_database(&db)?;
+            let mut stmt = conn
+                .prepare("SELECT id, directory, time_updated FROM session")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+            let mut result = Vec::new();
+            for row in rows {
+                let (id, cwd, ts) = row.map_err(|e| e.to_string())?;
+                result.push((id, (normalize_project_path(&cwd), millis_timestamp(ts))));
+            }
+            Ok(result)
+        })();
+        match indexed {
+            Ok(rows) => sessions.extend(rows),
+            Err(error) => warnings.push(format!("OpenCode {}: {error}", db.display())),
         }
     }
     Ok(sessions
@@ -291,21 +309,34 @@ fn load_legacy(root: &Path, path: &Path, from: &str, to: &str) -> Option<CodexRe
     finalize_draft(draft, from, to)
 }
 
+#[cfg(test)]
 pub(super) fn load_sessions(
     roots: &[PathBuf],
     from: &str,
     to: &str,
 ) -> Result<Vec<CodexReportSession>, String> {
+    load_sessions_with_warnings(roots, from, to, &mut Vec::new())
+}
+
+pub(super) fn load_sessions_with_warnings(
+    roots: &[PathBuf], from: &str, to: &str, warnings: &mut Vec<String>,
+) -> Result<Vec<CodexReportSession>, String> {
     let mut sessions = Vec::new();
     for root in roots {
-        for path in session_files(root)? {
+        for path in session_files(root).unwrap_or_else(|error| {
+            warnings.push(format!("OpenCode {}: {error}", root.display()));
+            Vec::new()
+        }) {
             if let Some(session) = load_legacy(root, &path, from, to) {
                 sessions.push(session);
             }
         }
         let db = root.join("opencode.db");
         if db.exists() {
-            sessions.extend(load_database(&db, from, to)?);
+            match load_database(&db, from, to) {
+                Ok(loaded) => sessions.extend(loaded),
+                Err(error) => warnings.push(format!("OpenCode {}: {error}", db.display())),
+            }
         }
     }
     Ok(merge_sessions(sessions))
@@ -314,6 +345,28 @@ pub(super) fn load_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_database_preserves_legacy_and_other_roots_with_warnings() {
+        let temp = tempfile::tempdir().unwrap();
+        let broken = temp.path().join("broken");
+        let valid = temp.path().join("valid");
+        for (root, id) in [(&broken, "a"), (&valid, "b")] {
+            fs::create_dir_all(root.join("storage")).unwrap();
+            let text = serde_json::json!({"id": id, "directory": "D:/fixture", "time": {"updated": 1782864000000i64}, "messages": [{"role":"user","timestamp":"2026-07-01T00:00:00Z","content":"question"}]});
+            fs::write(root.join("storage/session.json"), text.to_string()).unwrap();
+        }
+        fs::write(broken.join("opencode.db"), "corrupt fixture").unwrap();
+        let roots = [broken, valid];
+        let mut warnings = Vec::new();
+        let sessions = load_sessions_with_warnings(&roots, "2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z", &mut warnings).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("opencode.db"));
+        warnings.clear();
+        assert_eq!(session_index_with_warnings(&roots, &mut warnings).unwrap().len(), 2);
+        assert_eq!(warnings.len(), 1);
+    }
 
     #[test]
     fn sqlite_reads_message_dates_and_text_parts_without_writing() {

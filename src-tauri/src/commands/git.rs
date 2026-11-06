@@ -8,9 +8,9 @@ use crate::git::models::{
     GitConfigureRemotePayload, GitRemoteBranchCheckoutPayload,
     GitFileActionPayload, GitFilesActionPayload,
     GitLogEntry, GitLogPayload, GitMergePayload, GitPromptAiPayload, GitPullPayload, GitPushPayload, GitRebasePayload, GitRepoPayload,
-    GitRepairUpstreamPayload, GitReviewAttentionPayload, GitReviewAttentionResult, GitSnapshot, GitSyncStatus,
+    GitRepairUpstreamPayload, GitSnapshot, GitSyncStatus,
 };
-use crate::git::prompt::{build_analysis_prompt, build_review_attention_with_progress, build_selected_commit_prompt};
+use crate::git::prompt::{build_analysis_prompt, build_selected_commit_prompt};
 use crate::git::profile::{self, GitProjectProfileFile};
 use crate::git::runner;
 use serde::Deserialize;
@@ -301,26 +301,6 @@ async fn call_ai_with_prompt(model: &AiModelConfig, prompt: &str) -> Result<GitA
             qwencloud::call_openai_compatible_generate(model, prompt).await
         }
     }
-}
-
-#[tauri::command]
-pub async fn score_git_review_files(app: AppHandle, payload: GitReviewAttentionPayload) -> Result<GitReviewAttentionResult, String> {
-    let repo_path = payload.repo_path.clone();
-    run_git_task("计算代码审查优先级", move || {
-        build_review_attention_with_progress(
-            &payload.repo_path,
-            &payload.selected_files,
-            |completed, total, phase, file_path| {
-                let _ = app.emit("git-review-score-progress", serde_json::json!({
-                    "repoPath": repo_path.as_str(),
-                    "completed": completed,
-                    "total": total,
-                    "phase": phase,
-                    "filePath": file_path,
-                }));
-            },
-        )
-    }).await
 }
 
 async fn run_git_task<T, F>(task_name: &str, task: F) -> Result<T, String>

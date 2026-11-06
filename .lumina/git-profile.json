@@ -32,14 +32,6 @@
       "rust"
     ]
   },
-  "review": {
-    "attentionWeights": {
-      "config": 8,
-      "lockfile": -5,
-      "source": 10,
-      "style": 3
-    }
-  },
   "roles": {
     "generated": [
       "dist/**",

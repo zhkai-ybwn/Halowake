@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     path::Path,
 };
@@ -12,7 +12,6 @@ use crate::git::runner;
 pub(super) struct PromptProfile {
     pub(super) roles: Vec<(String, Vec<String>)>,
     pub(super) scopes: Vec<(String, Vec<String>)>,
-    pub(super) attention_weights: BTreeMap<String, i32>,
     pub(super) localization_patterns: Vec<String>,
 }
 
@@ -49,11 +48,6 @@ pub(super) fn load_prompt_profile(repo_path: &str) -> PromptProfile {
     let scopes = read_scope_patterns(&value);
     if !scopes.is_empty() {
         profile.scopes = scopes;
-    }
-
-    let attention_weights = read_attention_weights(&value);
-    if !attention_weights.is_empty() {
-        profile.attention_weights = attention_weights;
     }
 
     for pattern in read_localization_patterns(&value) {
@@ -124,12 +118,6 @@ pub(super) fn fallback_prompt_profile() -> PromptProfile {
                 ],
             ),
         ],
-        attention_weights: BTreeMap::from([
-            ("source".to_string(), 10),
-            ("config".to_string(), 8),
-            ("style".to_string(), 3),
-            ("lockfile".to_string(), -5),
-        ]),
         localization_patterns: Vec::new(),
     }
 }
@@ -160,9 +148,9 @@ pub(super) fn prompt_processing_rules() -> Vec<String> {
 }
 
 fn read_localization_patterns(value: &Value) -> Vec<String> {
-    value
-        .get("review")
-        .and_then(|review| review.get("localizationPatterns"))
+    value.pointer("/commit/localizationPatterns")
+        // Older repository profiles kept commit file classification under "review".
+        .or_else(|| value.pointer("/review/localizationPatterns"))
         .and_then(Value::as_array)
         .map(|patterns| {
             patterns
@@ -293,24 +281,6 @@ fn normalize_locale_code(candidate: &str) -> Option<String> {
     LANGUAGE_CODES
         .contains(&language)
         .then_some(candidate.to_string())
-}
-
-fn read_attention_weights(value: &Value) -> BTreeMap<String, i32> {
-    value
-        .get("review")
-        .and_then(|review| review.get("attentionWeights"))
-        .and_then(Value::as_object)
-        .map(|weights| {
-            weights
-                .iter()
-                .filter_map(|(kind, weight)| {
-                    weight
-                        .as_i64()
-                        .map(|weight| (kind.clone(), weight as i32))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn read_role_patterns(value: &Value) -> Vec<(String, Vec<String>)> {

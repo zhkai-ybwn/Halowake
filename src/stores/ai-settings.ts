@@ -10,7 +10,6 @@ const DEFAULT_SETTINGS: AiSettings = {
   taskModelMap: {
     'commit-message': '',
     'change-summary': '',
-    'light-review': '',
   },
 }
 
@@ -35,7 +34,6 @@ function normalizeSettings(settings: Partial<AiSettings>): AiSettings {
     taskModelMap: {
       'commit-message': resolveTaskModel(settings.taskModelMap?.['commit-message'], validModelIds, defaultModelId),
       'change-summary': resolveTaskModel(settings.taskModelMap?.['change-summary'], validModelIds, defaultModelId),
-      'light-review': resolveTaskModel(settings.taskModelMap?.['light-review'], validModelIds, defaultModelId),
     },
   }
 }
@@ -76,7 +74,6 @@ function createModelId() {
 export const AI_TASKS: Array<{ key: AiTaskType; i18nKey: string }> = [
   { key: 'commit-message', i18nKey: 'settings.aiRouting.tasks.commitMessage' },
   { key: 'change-summary', i18nKey: 'settings.aiRouting.tasks.changeSummary' },
-  { key: 'light-review', i18nKey: 'settings.aiRouting.tasks.lightReview' },
 ]
 
 export const useAiSettingsStore = defineStore('ai-settings', {

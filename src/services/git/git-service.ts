@@ -30,31 +30,6 @@ export interface GitFileStat {
   removed: number | null
 }
 
-export interface GitReviewAttention {
-  path: string
-  score: number
-  categories: string[]
-  scoreBreakdown: GitReviewScoreBreakdown[]
-  eligible: boolean
-  skipped: boolean
-}
-
-export interface GitReviewScoreBreakdown {
-  factor: string
-  delta: number
-  evidence: string
-}
-
-export interface GitReviewAttentionResult {
-  files: GitReviewAttention[]
-}
-
-export async function scoreGitReviewFiles(repoPath: string, selectedFiles: string[]): Promise<GitReviewAttentionResult> {
-  return await invoke<GitReviewAttentionResult>('score_git_review_files', {
-    payload: { repoPath, selectedFiles },
-  })
-}
-
 export async function loadGitSnapshot(repoPath: string): Promise<GitSnapshot> {
   return await invoke<GitSnapshot>('load_git_snapshot', { repoPath })
 }

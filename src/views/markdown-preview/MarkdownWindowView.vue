@@ -112,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -126,7 +127,7 @@ import {
   getMarkdownMetadata,
   openMarkdownInEditor,
   readMarkdownFile,
-} from '@/services/markdown/markdown-service'
+} from '@/services/markdown/markdown-files'
 import { useMarkdownHistoryStore } from '@/stores/markdown-history'
 
 const route = useRoute()
@@ -148,7 +149,6 @@ const stats = ref({
   readingTimeMinutes: 1,
 })
 
-let pollingTimer: ReturnType<typeof setInterval> | null = null
 let unlistenOpenEvent: UnlistenFn | null = null
 
 watch(
@@ -181,7 +181,6 @@ async function loadFile(filePath: string) {
       document.title = `Halowake - ${fileInfo.name}`
     }
     historyStore.addRecentFile(fileInfo.path, fileInfo.name)
-    startPolling(fileInfo.path)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -222,33 +221,17 @@ function updateStats(newStats: { wordCount: number; readingTimeMinutes: number }
   stats.value = newStats
 }
 
-function startPolling(path: string) {
-  stopPolling()
-  pollingTimer = setInterval(async () => {
-    if (!currentFilePath.value || currentFilePath.value !== path) return
-    try {
-      const meta = await getMarkdownMetadata(path)
-      if (
-        meta.modifiedAt &&
-        lastModifiedAt.value &&
-        meta.modifiedAt > lastModifiedAt.value
-      ) {
-        lastModifiedAt.value = meta.modifiedAt
-        const updated = await readMarkdownFile(path)
-        currentFileContent.value = updated.content
-      }
-    } catch {
-      // Ignore polling errors
-    }
-  }, 3000)
-}
-
-function stopPolling() {
-  if (pollingTimer) {
-    clearInterval(pollingTimer)
-    pollingTimer = null
-  }
-}
+useVisiblePolling(async () => {
+  const path = currentFilePath.value
+  try {
+    const meta = await getMarkdownMetadata(path)
+    if (currentFilePath.value !== path || meta.modifiedAt === lastModifiedAt.value) return
+    const updated = await readMarkdownFile(path)
+    if (currentFilePath.value !== path) return
+    currentFileContent.value = updated.content
+    lastModifiedAt.value = updated.modifiedAt
+  } catch { /* A file can temporarily disappear while an editor replaces it. */ }
+}, 3000, () => Boolean(currentFilePath.value))
 
 onMounted(async () => {
   unlistenOpenEvent = await listen<{ filePath: string }>('markdown-preview-open', event => {
@@ -259,7 +242,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopPolling()
   unlistenOpenEvent?.()
 })
 </script>

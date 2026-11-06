@@ -13,7 +13,6 @@ export type GitAssistantStatusFilter =
   | 'staged'
   | 'unstaged'
   | 'versioned'
-  | 'recommended'
 
 export interface GitAssistantSummary {
   total: number
@@ -34,16 +33,6 @@ export interface GitAssistantFileView extends GitFileStatus {
   extension: string
   addedLines: number | null
   removedLines: number | null
-  score: number | null
-  scoreCategories: string[]
-  scoreBreakdown: Array<{ factor: string; delta: number; evidence: string }>
-  recommended: boolean
-}
-
-export interface GitAssistantFileGroup {
-  key: string
-  label: string
-  files: GitAssistantFileView[]
 }
 
 export interface GitAssistantWorkspaceState {
@@ -56,12 +45,11 @@ export interface GitAssistantWorkspaceState {
 export interface GitAssistantExplorerState {
   keyword: string
   statusFilter: GitAssistantStatusFilter
-  recommendedOnly: boolean
 }
 
 export interface GitAssistantSelectionState {
   activeFileRaw: string | null
-  reviewSelectedRaws: string[]
+  selectedRaws: string[]
 }
 
 export interface GitAssistantAiState {

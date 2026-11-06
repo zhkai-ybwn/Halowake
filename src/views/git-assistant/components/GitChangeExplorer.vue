@@ -5,7 +5,7 @@
         <span>{{ t('gitAssistant.files.title') }}</span>
         <small>{{ t('gitAssistant.files.refreshHint') }}</small>
       </div>
-      <strong>{{ t('gitAssistant.files.selectedTotal', { selected: reviewSelectedRaws.length, total: totalCount }) }}</strong>
+      <strong>{{ t('gitAssistant.files.selectedTotal', { selected: selectedRaws.length, total: totalCount }) }}</strong>
     </header>
 
     <div class="filter-toolbar">
@@ -28,78 +28,42 @@
           {{ t(option.labelKey) }}
         </option>
       </select>
-      <label class="recommended-filter">
-        <input
-          :checked="recommendedOnly"
-          type="checkbox"
-          @change="$emit('update:recommended-only', ($event.target as HTMLInputElement).checked)"
-        />
-        <span>{{ t('gitAssistant.files.recommendedOnly') }}</span>
-      </label>
     </div>
 
     <div class="check-toolbar">
       <span>{{ t('gitAssistant.files.check') }}:</span>
-      <button type="button" @click="$emit('set-review-selection', visibleRaws)">
+      <button type="button" @click="$emit('set-file-selection', visibleRaws)">
         {{ t('gitAssistant.files.selectAll') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', [])">
+      <button type="button" @click="$emit('set-file-selection', [])">
         {{ t('gitAssistant.files.selectNone') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', unversionedRaws)">
+      <button type="button" @click="$emit('set-file-selection', unversionedRaws)">
         {{ t('gitAssistant.files.filters.untracked') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', versionedRaws)">
+      <button type="button" @click="$emit('set-file-selection', versionedRaws)">
         {{ t('gitAssistant.files.filters.versioned') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', addedRaws)">
+      <button type="button" @click="$emit('set-file-selection', addedRaws)">
         {{ t('gitAssistant.files.filters.added') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', deletedRaws)">
+      <button type="button" @click="$emit('set-file-selection', deletedRaws)">
         {{ t('gitAssistant.files.filters.deleted') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', modifiedRaws)">
+      <button type="button" @click="$emit('set-file-selection', modifiedRaws)">
         {{ t('gitAssistant.files.filters.modified') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', conflictedRaws)">
+      <button type="button" @click="$emit('set-file-selection', conflictedRaws)">
         {{ t('gitAssistant.files.filters.conflicted') }}
       </button>
-      <button type="button" @click="$emit('set-review-selection', visibleRaws)">
+      <button type="button" @click="$emit('set-file-selection', visibleRaws)">
         {{ t('gitAssistant.files.filters.files') }}
       </button>
-      <div class="review-score-action">
-        <div
-          class="review-score-progress"
-          :class="{ 'is-hidden': !reviewScoring }"
-          :aria-hidden="!reviewScoring"
-          role="status"
-        >
-          <span>{{ reviewProgressText }}</span>
-          <i><b :style="{ width: `${reviewProgressPercent}%` }"></b></i>
-        </div>
-        <span class="review-score-help" tabindex="0" :aria-label="t('gitAssistant.files.scoreHelpLabel')">
-          ?
-          <span class="review-score-help__popover" role="tooltip">{{ t('gitAssistant.files.scoreNotice') }}</span>
-        </span>
-        <button
-          class="review-score-button"
-          :class="{ 'is-running': reviewScoring }"
-          type="button"
-          :disabled="!hasSnapshot || loading || reviewScoring || !totalCount"
-          @click="$emit('request-review-score')"
-        >
-          {{ reviewScoring
-            ? t('gitAssistant.files.scoring')
-            : hasReviewScores
-              ? t('gitAssistant.files.rescore')
-              : t('gitAssistant.files.scoreChanges') }}
-        </button>
-      </div>
     </div>
 
     <WorkbenchEmptyState v-if="!hasSnapshot && !loading" icon="solar:folder-open-linear" :title="t('gitAssistant.files.emptyNoRepoTitle')" :description="t('gitAssistant.files.emptyNoRepo')" />
     <WorkbenchEmptyState v-else-if="loading" icon="solar:refresh-circle-linear" :title="t('gitAssistant.files.emptyLoadingTitle')" :description="t('gitAssistant.files.emptyLoading')" />
-    <WorkbenchEmptyState v-else-if="!groups.length" icon="solar:check-circle-linear" :title="totalCount ? t('gitAssistant.files.emptyNoMatchTitle') : t('gitAssistant.files.emptyCleanTitle')" :description="totalCount ? t('gitAssistant.files.emptyNoMatch') : t('gitAssistant.files.emptyClean')">
+    <WorkbenchEmptyState v-else-if="!files.length" icon="solar:check-circle-linear" :title="totalCount ? t('gitAssistant.files.emptyNoMatchTitle') : t('gitAssistant.files.emptyCleanTitle')" :description="totalCount ? t('gitAssistant.files.emptyNoMatch') : t('gitAssistant.files.emptyClean')">
       <template #actions><WorkbenchButton @click="$emit('request-refresh')">{{ t('gitAssistant.repo.refreshRepo') }}</WorkbenchButton></template>
     </WorkbenchEmptyState>
 
@@ -110,14 +74,14 @@
             ref="headerCheckbox"
             :checked="allVisibleSelected"
             type="checkbox"
-            @change="$emit('set-review-selection', allVisibleSelected ? [] : visibleRaws)"
+            @change="$emit('set-file-selection', allVisibleSelected ? [] : visibleRaws)"
           />
         </span>
         <span
           v-for="column in resizableColumns"
           :key="column.key"
           class="header-cell"
-          :class="{ 'numeric-header': column.key === 'added' || column.key === 'removed' || column.key === 'score' }"
+          :class="{ 'numeric-header': column.key === 'added' || column.key === 'removed' }"
         >
           {{ t(column.labelKey) }}
           <i class="column-resizer" @mousedown.prevent="startColumnResize(column.key, $event)"></i>
@@ -125,7 +89,7 @@
       </div>
 
       <div
-        v-for="file in visibleFiles"
+        v-for="file in files"
         :key="file.raw"
         class="file-row"
         :class="{ active: activeFileRaw === file.raw }"
@@ -136,10 +100,10 @@
       >
         <label class="commit-check" @click.stop>
           <input
-            :checked="reviewSelectedRaws.includes(file.raw)"
+            :checked="selectedRaws.includes(file.raw)"
             type="checkbox"
             @change="
-              $emit('toggle-review-selection', {
+              $emit('toggle-file-selection', {
                 raw: file.raw,
                 checked: ($event.target as HTMLInputElement).checked,
               })
@@ -148,7 +112,6 @@
         </label>
 
         <div class="path-cell mono" :title="file.path">
-          <span v-if="file.recommended" class="attention-dot" :title="t('gitAssistant.files.recommended')"></span>
           {{ file.path }}
         </div>
         <div class="extension-cell mono">{{ file.extension || '-' }}</div>
@@ -157,18 +120,6 @@
         </div>
         <div class="line-cell added-lines">{{ formatLineCount(file.addedLines) }}</div>
         <div class="line-cell removed-lines">{{ formatLineCount(file.removedLines) }}</div>
-        <div class="score-cell" :title="attentionBreakdownTitle(file)">{{ file.score ?? '-' }}</div>
-        <div class="review-reason-cell">
-          <span
-            v-for="category in file.scoreCategories.slice(0, 2)"
-            :key="category"
-            class="review-category"
-            :class="`tone-${reviewCategoryTone(category)}`"
-          >
-            {{ t(`gitAssistant.files.reviewCategories.${category}`) }}
-          </span>
-          <span v-if="!file.scoreCategories.length">-</span>
-        </div>
       </div>
     </div>
 
@@ -195,10 +146,8 @@ import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 import type {
-  GitAssistantFileGroup,
   GitAssistantFileView,
   GitAssistantStatusFilter,
-  GitAssistantSummary,
 } from '../git-assistant.types'
 
 const props = defineProps<{
@@ -206,90 +155,38 @@ const props = defineProps<{
   loading: boolean
   keyword: string
   statusFilter: GitAssistantStatusFilter
-  recommendedOnly: boolean
-  summary: GitAssistantSummary
-  groups: GitAssistantFileGroup[]
-  filteredCount: number
+  files: GitAssistantFileView[]
   totalCount: number
   activeFileRaw: string | null
-  reviewSelectedRaws: string[]
-  reviewScoring: boolean
-  hasReviewScores: boolean
-  reviewScoreProgress: {
-    completed: number
-    total: number
-    phase: string
-    filePath: string
-  }
+  selectedRaws: string[]
 }>()
 
 const emit = defineEmits<{
   (e: 'update:keyword', value: string): void
   (e: 'update:status-filter', value: string): void
-  (e: 'update:recommended-only', value: boolean): void
   (e: 'select-file', raw: string): void
   (e: 'open-diff', raw: string): void
   (e: 'request-refresh'): void
   (e: 'file-action', payload: { action: 'open-diff' | 'diff-previous' | 'file-history' | 'open-external' | 'mark-resolved' | 'revert' | 'stage' | 'unstage'; raw: string }): void
-  (e: 'toggle-review-selection', payload: { raw: string; checked: boolean }): void
-  (e: 'set-review-selection', raws: string[]): void
-  (e: 'request-review-score'): void
+  (e: 'toggle-file-selection', payload: { raw: string; checked: boolean }): void
+  (e: 'set-file-selection', raws: string[]): void
 }>()
 
 const statusMeta = STATUS_META
 const statusFilterOptions = STATUS_FILTER_OPTIONS
 const { t } = useLocale()
 const searchInput = ref<HTMLInputElement | null>(null)
-const reviewCategoryTones: Record<string, string> = {
-  security: 'danger',
-  data: 'warning',
-  api: 'info',
-  logic: 'warning',
-  types: 'info',
-  config: 'muted',
-  markup: 'info',
-  style: 'muted',
-  test: 'success',
-  i18n: 'muted',
-  resource: 'muted',
-  dependency: 'muted',
-  generated: 'muted',
-  docs: 'muted',
-}
-
-function reviewCategoryTone(category: string) {
-  return reviewCategoryTones[category] ?? 'muted'
-}
-
-const visibleFiles = computed(() => props.groups.flatMap(group => group.files))
-const visibleRaws = computed(() => visibleFiles.value.map(file => file.raw))
-const selectedRawSet = computed(() => new Set(props.reviewSelectedRaws))
+const visibleRaws = computed(() => props.files.map(file => file.raw))
+const selectedRawSet = computed(() => new Set(props.selectedRaws))
 const selectedVisibleCount = computed(() => visibleRaws.value.filter(raw => selectedRawSet.value.has(raw)).length)
 const allVisibleSelected = computed(() => visibleRaws.value.length > 0 && selectedVisibleCount.value === visibleRaws.value.length)
-const reviewProgressPercent = computed(() => {
-  if (!props.reviewScoreProgress.total) return 4
-  return Math.max(4, Math.round((props.reviewScoreProgress.completed / props.reviewScoreProgress.total) * 100))
-})
-const reviewProgressText = computed(() => {
-  const progress = props.reviewScoreProgress
-  if (progress.phase === 'profile') return t('gitAssistant.files.scoreProgressProfile')
-  if (progress.phase === 'complete') return t('gitAssistant.files.scoreProgressComplete')
-  if (progress.filePath) {
-    return t('gitAssistant.files.scoreProgressFile', {
-      completed: progress.completed,
-      total: progress.total,
-      file: progress.filePath.split(/[\\/]/).pop() || progress.filePath,
-    })
-  }
-  return t('gitAssistant.files.scoreProgressPreparing')
-})
 const partiallyVisibleSelected = computed(() => selectedVisibleCount.value > 0 && !allVisibleSelected.value)
-const unversionedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'untracked').map(file => file.raw))
-const versionedRaws = computed(() => visibleFiles.value.filter(file => file.type !== 'untracked').map(file => file.raw))
-const addedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'added').map(file => file.raw))
-const deletedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'deleted').map(file => file.raw))
-const modifiedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'modified').map(file => file.raw))
-const conflictedRaws = computed(() => visibleFiles.value.filter(file => file.type === 'updated-but-unmerged').map(file => file.raw))
+const unversionedRaws = computed(() => props.files.filter(file => file.type === 'untracked').map(file => file.raw))
+const versionedRaws = computed(() => props.files.filter(file => file.type !== 'untracked').map(file => file.raw))
+const addedRaws = computed(() => props.files.filter(file => file.type === 'added').map(file => file.raw))
+const deletedRaws = computed(() => props.files.filter(file => file.type === 'deleted').map(file => file.raw))
+const modifiedRaws = computed(() => props.files.filter(file => file.type === 'modified').map(file => file.raw))
+const conflictedRaws = computed(() => props.files.filter(file => file.type === 'updated-but-unmerged').map(file => file.raw))
 const headerCheckbox = ref<HTMLInputElement | null>(null)
 const contextFileRaw = ref('')
 const contextMenu = reactive({
@@ -303,8 +200,6 @@ const columnWidths = reactive({
   status: 110,
   added: 112,
   removed: 118,
-  score: 70,
-  reason: 340,
 })
 
 const resizableColumns = [
@@ -313,16 +208,14 @@ const resizableColumns = [
   { key: 'status', labelKey: 'gitAssistant.files.tableStatus' },
   { key: 'added', labelKey: 'gitAssistant.files.tableAdded' },
   { key: 'removed', labelKey: 'gitAssistant.files.tableRemoved' },
-  { key: 'score', labelKey: 'gitAssistant.files.tableScore' },
-  { key: 'reason', labelKey: 'gitAssistant.files.tableReviewReason' },
 ] as const
 
 type ResizableColumnKey = keyof typeof columnWidths
 
 const gridStyle = computed(() => ({
-  gridTemplateColumns: `34px ${columnWidths.path}px ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px ${columnWidths.score}px ${columnWidths.reason}px`,
+  gridTemplateColumns: `34px ${columnWidths.path}px ${columnWidths.extension}px ${columnWidths.status}px ${columnWidths.added}px ${columnWidths.removed}px`,
 }))
-const contextFile = computed(() => visibleFiles.value.find(file => file.raw === contextFileRaw.value) ?? null)
+const contextFile = computed(() => props.files.find(file => file.raw === contextFileRaw.value) ?? null)
 
 function menuIcon(icon: string) {
   return () => h(Icon, { icon, size: 16 })
@@ -445,14 +338,6 @@ function formatLineCount(value: number | null) {
   return value === null ? '-' : String(value)
 }
 
-function attentionBreakdownTitle(file: GitAssistantFileView) {
-  if (file.score === null) return ''
-  const details = file.scoreBreakdown
-    .filter(item => item.delta !== 0)
-    .map(item => `${item.factor}: ${item.delta > 0 ? '+' : ''}${item.delta} (${item.evidence})`)
-  return [`关注度 ${file.score}`, ...details].join('\n')
-}
-
 function handleFileContextMenu(raw: string, event: MouseEvent) {
   contextFileRaw.value = raw
   contextMenu.x = event.clientX
@@ -536,7 +421,7 @@ onUnmounted(() => {
   border-bottom: 0.5px solid var(--lumina-separator);
   display: grid;
   gap: 6px;
-  grid-template-columns: minmax(120px, 1fr) 104px auto;
+  grid-template-columns: minmax(120px, 1fr) 104px;
   min-height: 38px;
   padding: 5px 8px;
 
@@ -585,15 +470,6 @@ onUnmounted(() => {
   }
 }
 
-.recommended-filter {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 11px;
-  gap: 5px;
-  white-space: nowrap;
-}
-
 .check-toolbar {
   align-items: center;
   background: var(--lumina-surface-2);
@@ -639,127 +515,6 @@ onUnmounted(() => {
   height: 16px;
   margin: 0 2px;
   width: 1px;
-}
-
-.review-score-action {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  margin-left: auto;
-  min-width: 0;
-}
-
-.review-score-progress {
-  align-items: center;
-  display: flex;
-  gap: 7px;
-  width: 248px;
-
-  &.is-hidden {
-    visibility: hidden;
-  }
-
-  span {
-    flex: 1;
-    font-size: 10px;
-    overflow: hidden;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  i {
-    background: color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
-    border-radius: 999px;
-    display: block;
-    height: 3px;
-    overflow: hidden;
-    width: 92px;
-  }
-
-  b {
-    background: var(--lumina-primary);
-    border-radius: inherit;
-    display: block;
-    height: 100%;
-    transition: width 160ms ease;
-  }
-}
-
-.review-score-help {
-  align-items: center;
-  border: 1px solid var(--lumina-card-border);
-  border-radius: 50%;
-  color: var(--lumina-text-secondary);
-  cursor: help;
-  display: inline-flex;
-  flex: 0 0 auto;
-  font-size: 11px !important;
-  font-weight: 700;
-  height: 18px;
-  justify-content: center;
-  position: relative;
-  width: 18px;
-
-  &:hover,
-  &:focus-visible {
-    border-color: var(--lumina-primary);
-    color: var(--lumina-primary);
-    outline: none;
-  }
-}
-
-.review-score-help__popover {
-  background: var(--lumina-surface-1);
-  border: 1px solid var(--lumina-card-border);
-  border-radius: 8px;
-  bottom: calc(100% + 8px);
-  box-shadow: var(--lumina-shadow-md);
-  color: var(--lumina-text) !important;
-  font-size: 11px !important;
-  font-weight: 500;
-  line-height: 1.55;
-  opacity: 0;
-  padding: 9px 11px;
-  pointer-events: none;
-  position: absolute;
-  right: -44px;
-  text-align: left;
-  transform: translateY(3px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  visibility: hidden;
-  white-space: normal;
-  width: 300px;
-  z-index: 8;
-}
-
-.review-score-help:hover .review-score-help__popover,
-.review-score-help:focus-visible .review-score-help__popover {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
-}
-
-.check-toolbar .review-score-button {
-  background: var(--lumina-primary);
-  border-color: var(--lumina-primary);
-  color: var(--lumina-on-accent);
-  flex: 0 0 auto;
-  padding: 0 11px;
-
-  &:hover:not(:disabled) {
-    background: var(--lumina-primary-hover, var(--lumina-primary));
-    border-color: var(--lumina-primary-hover, var(--lumina-primary));
-    color: var(--lumina-on-accent);
-  }
-
-  &.is-running:disabled {
-    background: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
-    border-color: color-mix(in srgb, var(--lumina-primary) 78%, var(--lumina-surface-1));
-    color: var(--lumina-on-accent);
-    cursor: wait;
-    opacity: 1;
-  }
 }
 
 .panel-empty {
@@ -869,9 +624,7 @@ onUnmounted(() => {
 .path-cell,
 .extension-cell,
 .status-cell,
-.line-cell,
-.score-cell,
-.review-reason-cell {
+.line-cell {
   align-items: center;
   border-right: 1px solid color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
   display: flex;
@@ -894,8 +647,7 @@ onUnmounted(() => {
 
 .extension-cell,
 .status-cell,
-.line-cell,
-.score-cell {
+.line-cell {
   font-size: 11px;
   padding: 0 8px;
 }
@@ -910,42 +662,6 @@ onUnmounted(() => {
 
 .removed-lines {
   color: var(--lumina-danger);
-}
-
-.score-cell {
-  color: var(--lumina-text-secondary);
-  justify-content: flex-end;
-}
-
-.review-reason-cell {
-  align-items: center;
-  color: var(--lumina-text-secondary);
-  display: flex;
-  font-size: 11px;
-  gap: 5px;
-  overflow: hidden;
-  padding: 0 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.review-category {
-  background: color-mix(in srgb, currentColor 9%, transparent);
-  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 10px;
-  line-height: 18px;
-  padding: 0 7px;
-}
-
-.attention-dot {
-  background: var(--lumina-primary);
-  border-radius: 999px;
-  box-shadow: 0 0 0 2px var(--lumina-primary-soft);
-  flex: 0 0 auto;
-  height: 6px;
-  width: 6px;
 }
 
 .tone-warning {

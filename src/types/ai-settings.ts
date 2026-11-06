@@ -1,6 +1,6 @@
 export type AiProviderType = 'openai-compatible' | 'ollama'
 
-export type AiTaskType = 'commit-message' | 'change-summary' | 'light-review'
+export type AiTaskType = 'commit-message' | 'change-summary'
 
 export interface AiModelConfig {
   id: string

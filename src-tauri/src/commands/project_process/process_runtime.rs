@@ -341,20 +341,44 @@ pub(super) fn restart_process(
 pub(super) fn load_process_logs(
     state: &ProjectProcessState,
     process_id: &str,
+    previous_revision: Option<&str>,
 ) -> Result<ProjectProcessLogs, String> {
     let process = find_process(state, process_id)?;
-    let lines = process
-        .logs
-        .lock()
-        .map_err(|_| "读取进程日志失败。".to_string())?
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let (revision, lines) = {
+        let logs = process.logs.lock().map_err(|_| "读取进程日志失败。".to_string())?;
+        let revision = log_revision(&logs);
+        let lines = if previous_revision == Some(revision.as_str()) { None } else { Some(logs.iter().cloned().collect()) };
+        (revision, lines)
+    };
+    Ok(ProjectProcessLogs { revision, process: snapshot_process(&process), lines })
+}
 
-    Ok(ProjectProcessLogs {
-        process: snapshot_process(&process),
-        lines,
-    })
+fn log_revision(logs: &VecDeque<ProjectProcessLogLine>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    for line in logs {
+        line.timestamp.hash(&mut hash);
+        line.stream.hash(&mut hash);
+        line.text.hash(&mut hash);
+    }
+    hash.finish().to_string()
+}
+
+#[cfg(test)]
+mod log_revision_tests {
+    use super::*;
+    #[test]
+    fn detects_changes_when_a_full_ring_has_the_same_count_and_timestamps() {
+        let mut logs: VecDeque<_> = (0..LOG_LIMIT).map(|_| ProjectProcessLogLine {
+            stream: "stdout".into(), text: "initial".into(), timestamp: 1,
+        }).collect();
+        let initial = log_revision(&logs);
+        assert_eq!(initial, log_revision(&logs.clone()));
+        logs.pop_front();
+        logs.push_back(ProjectProcessLogLine { stream: "stdout".into(), text: "new output".into(), timestamp: 1 });
+        assert_eq!(logs.len(), LOG_LIMIT);
+        assert_ne!(initial, log_revision(&logs));
+    }
 }
 
 pub(super) fn start_process(

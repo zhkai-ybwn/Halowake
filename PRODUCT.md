@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Halowake is for local developers working in desktop project directories. They work alongside AI coding agents (Codex, Claude Code, OpenCode, Antigravity) and need to inspect Git state, prepare commits with AI assistance, manage project run/build tasks, review code, and track sessions from the same workspace.
+Halowake is for local developers working in desktop project directories. They work alongside AI coding agents (Codex, Claude Code, OpenCode, Antigravity) and need to inspect Git state, prepare commits with AI assistance, manage project run/build tasks, and track sessions from the same workspace.
 
 ## Product Purpose
 

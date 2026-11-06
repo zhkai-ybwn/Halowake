@@ -59,7 +59,7 @@
         :description="t('codexReport.emptyFilter')"
       >
         <template
-          v-if="selectedProjects.length && selectedProjects.length < allProjectCount"
+          v-if="selectedProjects !== null && selectedProjects.length < allProjectCount"
           #actions
         >
           <WorkbenchButton variant="secondary" @click="emit('reset-projects')">
@@ -79,7 +79,7 @@
           v-for="session in listSessions"
           :key="sessionSelectionKey(session)"
           class="session-card"
-          :class="{ 'is-included': includedIds.includes(sessionSelectionKey(session)) }"
+          :class="{ 'is-included': includedSet.has(sessionSelectionKey(session)) }"
         >
           <div class="card-checkbox">
             <NCheckbox :value="sessionSelectionKey(session)" />
@@ -101,10 +101,10 @@
             <div class="card-status">
               <span
                 class="status-tag"
-                :class="includedIds.includes(sessionSelectionKey(session)) ? 'tag-included' : hasWorkContent(session) ? 'tag-excluded' : 'tag-auto-excluded'"
+                :class="includedSet.has(sessionSelectionKey(session)) ? 'tag-included' : hasWorkContent(session) ? 'tag-excluded' : 'tag-auto-excluded'"
               >
                 {{
-                  includedIds.includes(sessionSelectionKey(session))
+                  includedSet.has(sessionSelectionKey(session))
                     ? t('codexReport.statusIncluded')
                     : hasWorkContent(session)
                       ? t('codexReport.statusExcluded')
@@ -120,6 +120,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NCheckbox, NCheckboxGroup } from 'naive-ui'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
@@ -134,7 +135,7 @@ import {
   sessionSelectionKey,
 } from '@/utils/codex-report'
 
-defineProps<{
+const props = defineProps<{
   loading: boolean
   sessions: CodexReportSession[]
   filteredSessions: CodexReportSession[]
@@ -143,7 +144,7 @@ defineProps<{
   listSessions: CodexReportSession[]
   includedIds: string[]
   sessionView: 'all' | 'included' | 'excluded'
-  selectedProjects: string[]
+  selectedProjects: string[] | null
   allProjectCount: number
 }>()
 
@@ -159,6 +160,7 @@ const { t } = useLocale()
 function onSelectionChange(val: (string | number)[]) {
   emit('update:includedIds', val as string[])
 }
+const includedSet = computed(() => new Set(props.includedIds))
 </script>
 
 <style scoped lang="scss">

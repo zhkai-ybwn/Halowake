@@ -12,7 +12,6 @@
     <WorkbenchTag :label="t('gitAssistant.repo.summaryUnstaged')" :value="summary.unstaged" />
     <WorkbenchTag :label="t('gitAssistant.repo.summaryUntracked')" :value="summary.untracked" />
     <WorkbenchTag v-if="summary.conflicted" :label="t('gitAssistant.repo.summaryConflicted')" :value="summary.conflicted" tone="danger" />
-    <WorkbenchTag :label="t('gitAssistant.repo.summaryRecommended')" :value="recommendedCount" tone="primary" />
 
     <template #actions>
       <NDropdown trigger="click" :options="viewOptions" @select="handleViewAction">
@@ -66,7 +65,6 @@ const props = defineProps<{
   pushing: boolean
   pulling: boolean
   summary: GitAssistantSummary
-  recommendedCount: number
   repositoryState: GitRepositoryState | null
   recentRepos: RecentGitRepo[]
   hasSnapshot: boolean

@@ -11,7 +11,7 @@
       </div>
 
       <template #actions>
-        <WorkbenchButton :disabled="loading" variant="primary" @click="loadSessions">
+        <WorkbenchButton :disabled="loading" variant="primary" @click="reloadReport">
           <Icon icon="solar:refresh-linear" :class="{ 'spin-anim': loading }" />
           {{ loading ? t('codexReport.loading') : t('codexReport.load') }}
         </WorkbenchButton>
@@ -37,6 +37,11 @@
       @open-project-modal="projectModalOpen = true"
     />
 
+    <div v-if="loadWarnings.length" class="report-warning" role="status">
+      {{ t('codexReport.partialLoad') }}
+      <ul><li v-for="warning in loadWarnings" :key="warning">{{ warning }}</li></ul>
+    </div>
+
     <!-- macOS Split Workspace Shell -->
     <section class="workspace-shell">
       <!-- Left Panel: Session Source List -->
@@ -51,8 +56,8 @@
         :list-sessions="listSessions"
         :selected-projects="selectedProjects"
         :all-project-count="allProjectList.length"
-        @load="loadSessions"
-        @reset-projects="selectedProjects = []"
+        @load="reloadReport"
+        @reset-projects="selectedProjects = null"
       />
 
       <!-- Right Panel: Editor / Preview Detail Area -->
@@ -79,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import WorkbenchTopbar from '@/components/workbench/WorkbenchTopbar.vue'
 import WorkbenchIdentity from '@/components/workbench/WorkbenchIdentity.vue'
@@ -122,10 +127,14 @@ const loading = ref(false)
 let loadSequence = 0
 let lastGeneratedRecord = ''
 let staleRecordWarningShown = false
+let loadTimer: ReturnType<typeof setTimeout> | undefined
 
 const availableProjects = ref<CodexProjectInfo[]>([])
 const projectsLoading = ref(false)
-const selectedProjects = ref<string[]>(readSavedProjects())
+const projectWarnings = ref<string[]>([])
+const sessionWarnings = ref<string[]>([])
+const loadWarnings = computed(() => [...new Set([...projectWarnings.value, ...sessionWarnings.value])])
+const selectedProjects = ref<string[] | null>(readSavedProjects())
 const projectModalOpen = ref(false)
 
 const keyword = ref('')
@@ -182,27 +191,30 @@ const allProjectList = computed<CodexProjectInfo[]>(() => {
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
 })
 
+const includedSet = computed(() => new Set(includedIds.value))
+const selectedProjectSet = computed(() => selectedProjects.value === null ? null : new Set(selectedProjects.value))
+
 const filteredSessions = computed(() =>
   sessions.value.filter(session => {
     const matchesProv = selectedProvider.value === 'all' || session.provider === selectedProvider.value
     const projName = session.projectName || getProjectName(session.cwd)
-    const matchesProj = !selectedProjects.value.length || selectedProjects.value.includes(projName)
+    const matchesProj = selectedProjectSet.value === null || selectedProjectSet.value.has(projName)
     const matchesKey = matchesKeyword(session, keyword.value)
     return matchesProv && matchesProj && matchesKey
   })
 )
 
 const includedSessions = computed(() =>
-  filteredSessions.value.filter(session => includedIds.value.includes(sessionSelectionKey(session)))
+  filteredSessions.value.filter(session => includedSet.value.has(sessionSelectionKey(session)))
 )
 
 const excludedSessions = computed(() =>
-  filteredSessions.value.filter(session => !includedIds.value.includes(sessionSelectionKey(session)))
+  filteredSessions.value.filter(session => !includedSet.value.has(sessionSelectionKey(session)))
 )
 
 const listSessions = computed(() =>
   sessionView.value === 'included'
-    ? filteredSessions.value.filter(session => includedIds.value.includes(sessionSelectionKey(session)))
+    ? includedSessions.value
     : sessionView.value === 'excluded'
       ? excludedSessions.value
       : filteredSessions.value
@@ -228,7 +240,7 @@ const combinedContent = computed(
 
 watch(selectedProjects, val => {
   try {
-    localStorage.setItem(SELECTED_PROJECTS_KEY, JSON.stringify(val))
+    localStorage.setItem(SELECTED_PROJECTS_KEY, JSON.stringify({ version: 2, projects: val }))
   } catch {
     // Ignore storage errors
   }
@@ -237,8 +249,9 @@ watch(selectedProjects, val => {
 watch(
   () => [dateRange.value?.[0], dateRange.value?.[1], selectedProvider.value],
   () => {
+    clearTimeout(loadTimer)
+    ++loadSequence
     if (!dateRange.value) {
-      ++loadSequence
       loading.value = false
       sessions.value = []
       includedIds.value = []
@@ -248,7 +261,8 @@ watch(
       }
       return
     }
-    void loadSessions()
+    loading.value = true
+    loadTimer = setTimeout(() => { void loadSessions() }, 150)
   }
 )
 
@@ -280,10 +294,15 @@ onMounted(() => {
   ])
 })
 
+function reloadReport() {
+  void fetchProjects()
+  void loadSessions()
+}
+
 async function fetchProjects() {
   projectsLoading.value = true
   try {
-    availableProjects.value = await loadCodexProjects()
+    availableProjects.value = await loadCodexProjects(warnings => { projectWarnings.value = warnings })
   } catch (error) {
     console.error('Failed to load projects:', error)
   } finally {
@@ -291,7 +310,10 @@ async function fetchProjects() {
   }
 }
 
+onUnmounted(() => { clearTimeout(loadTimer); ++loadSequence })
+
 async function loadSessions() {
+  clearTimeout(loadTimer)
   if (!dateRange.value) {
     message.warning(t('codexReport.selectDateRange'))
     return
@@ -318,7 +340,7 @@ async function loadSessions() {
       from: startDate.toISOString(),
       to: endDate.toISOString(),
       providers,
-    })
+    }, warnings => { if (request === loadSequence) sessionWarnings.value = warnings })
     if (request !== loadSequence) return
     sessions.value = loadedSessions
     includedIds.value = sessions.value
@@ -328,6 +350,8 @@ async function loadSessions() {
     if (workRecord.value === lastGeneratedRecord) generateWorkRecord()
   } catch (error) {
     if (request !== loadSequence) return
+    sessions.value = []
+    includedIds.value = []
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
     if (request === loadSequence) loading.value = false
@@ -342,19 +366,31 @@ function generateWorkRecord() {
   }
 }
 
-function readSavedProjects(): string[] {
+function readSavedProjects(): string[] | null {
   try {
     const raw = localStorage.getItem(SELECTED_PROJECTS_KEY)
-    if (!raw) return []
+    if (!raw) return null
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : []
+    if (parsed?.version === 2) {
+      return Array.isArray(parsed.projects) ? parsed.projects.filter((value: unknown): value is string => typeof value === 'string') : null
+    }
+    // Legacy [] meant all projects.
+    return Array.isArray(parsed) && parsed.length ? parsed.filter((value): value is string => typeof value === 'string') : null
   } catch {
-    return []
+    return null
   }
 }
 </script>
 
 <style scoped lang="scss">
+.report-warning {
+  color: var(--lumina-text-secondary);
+  font-size: 12px;
+  max-height: 100px;
+  overflow: auto;
+  padding: 8px 12px;
+}
+
 .codex-report-page {
   box-sizing: border-box;
   display: flex;

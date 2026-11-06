@@ -17,8 +17,8 @@
 | 标识符 / 路径 | 所属层次 | 保留原因与兼容性影响 |
 | :--- | :--- | :--- |
 | **`com.yubei.lumina`** | Tauri App Identifier (`tauri.conf.json`) | **应用数据目录寻址与自动更新核心**<br>• 决定了操作系统级应用数据目录（Windows: `%APPDATA%\com.yubei.lumina`；macOS: `~/Library/Application Support/com.yubei.lumina`；Linux: `~/.config/com.yubei.lumina`）。<br>• 决定了 Windows NSIS 安装注册表键与卸载链路。<br>• 保证 Tauri 增量自动升级（Tauri Updater）能够无缝覆盖安装，防止升级后用户本地数据目录被重置为空白。 |
-| **`lumina.db`** (及 `-wal`, `-shm`) | SQLite 数据库文件 (`src-tauri/src/storage/database.rs`) | **本地离线数据持久化核心**<br>• 存储了用户的 Git 提交历史、Local Code Review 审查记录、DevDock 运行日志与执行历史、AI Quota 账户与配额缓存、Codex 日报模板及本地存储清理偏好。<br>• 保留此文件名可确保现有用户升级到新版本后，原有历史记录与配置即时可用，避免数据断裂。 |
-| **`.lumina/` 目录** | 用户项目配置与 Git 规则 (`.lumina/project.json`, `.lumina/git-profile.json`) | **工作区向下兼容与团队共享**<br>• 用户已在本地或团队代码仓库中创建了 `.lumina/project.json`（DevDock 项目命令、环境变量、Python 解释器配置）与 `.lumina/git-profile.json`（Git AI Commit 提示词规则）。<br>• 保留 `.lumina/` 路径读取与写入，现有工程无需做任何迁移即可正常启动与审查。 |
+| **`lumina.db`** (及 `-wal`, `-shm`) | SQLite 数据库文件 (`src-tauri/src/storage/database.rs`) | **本地离线数据持久化核心**<br>• 存储了用户的 Git 提交历史、DevDock 运行与执行历史、Codex 日报模板等数据。旧版额度账户和审查历史保留在原库中，已过期且未固定的审查记录仍遵循原清理规则。<br>• 保留此文件名可确保现有用户升级到新版本后，原有历史记录与配置即时可用，避免数据断裂。 |
+| **`.lumina/` 目录** | 用户项目配置与 Git 规则 (`.lumina/project.json`, `.lumina/git-profile.json`) | **工作区向下兼容与团队共享**<br>• 用户已在本地或团队代码仓库中创建了 `.lumina/project.json`（DevDock 项目命令、环境变量、Python 解释器配置）与 `.lumina/git-profile.json`（Git AI Commit 提示词规则）。<br>• 保留 `.lumina/` 路径读取与写入，现有工程无需做任何迁移即可正常启动项目和生成提交说明。 |
 | **`lumina://request-exit`** | Tauri IPC 事件协议 (`src-tauri/src/lib.rs`, `MainLayout.vue`) | **主进程与前端受控退出协议**<br>• 托盘“退出并停止全部进程”通过该内部 IPC 事件通知前端优雅终止全部受管后台服务并清理进程树。<br>• 内部协议无需对外暴露，保留以避免事件名版本不匹配。 |
 | **`lumina.*`** | Webview `localStorage` 本地偏好键 | **用户界面偏好连续性**<br>• 包含 `lumina.preferences.locale`（语言）、`lumina.preferences.themeMode`（主题）、`lumina.preferences.closeAction`（关闭窗口行为）、`lumina.git.repoPath`（最近仓库）等。<br>• 保留这些 Key 可防止用户在升级桌面端后界面语言或主题被重置。 |
 | **`--lumina-*`** | 前端 CSS Token 命名空间 (`src/styles/tokens/`) | **内部样式系统命名**<br>• 内部设计系统变量（如 `--lumina-primary`, `--lumina-surface-secondary`）不具有外部品牌曝光属性，保留可避免全量样式重构带来的潜在视觉回归。 |

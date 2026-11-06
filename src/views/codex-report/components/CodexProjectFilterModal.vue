@@ -89,7 +89,7 @@
           <span class="modal-selected-summary">
             {{
               t('codexReport.projectSelectedSummary', {
-                selected: selectedProjects.length || allProjectNames.length,
+                selected: checkedProjects.length,
                 total: allProjectNames.length,
               })
             }}
@@ -118,20 +118,20 @@ import { formatSessionTime, getProviderLabel } from '@/utils/codex-report'
 const props = defineProps<{
   show: boolean
   projects: CodexProjectInfo[]
-  selectedProjects: string[]
+  selectedProjects: string[] | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
-  (e: 'update:selectedProjects', value: string[]): void
+  (e: 'update:selectedProjects', value: string[] | null): void
 }>()
 
 const { t } = useLocale()
 const projectSearch = ref('')
 
 const allProjectNames = computed(() => props.projects.map(p => p.name))
-// An empty whitelist means no project filter, including projects discovered later.
-const checkedProjects = computed(() => props.selectedProjects.length ? props.selectedProjects : allProjectNames.value)
+// null includes all projects, including projects discovered later.
+const checkedProjects = computed(() => props.selectedProjects ?? allProjectNames.value)
 
 const searchedProjectList = computed(() => {
   const query = projectSearch.value.trim().toLowerCase()
@@ -146,7 +146,7 @@ function onSelectionChange(value: (string | number)[]) {
 }
 
 function selectAllProjects() {
-  emit('update:selectedProjects', [])
+  emit('update:selectedProjects', null)
 }
 
 function clearSelectedProjects() {
@@ -154,7 +154,7 @@ function clearSelectedProjects() {
 }
 
 function invertProjectSelection() {
-  const current = new Set(props.selectedProjects)
+  const current = new Set(checkedProjects.value)
   emit('update:selectedProjects', allProjectNames.value.filter(name => !current.has(name)))
 }
 </script>

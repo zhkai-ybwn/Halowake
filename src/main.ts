@@ -22,7 +22,11 @@ async function bootstrap() {
   const app = createApp(App)
   app.use(pinia)
   usePreferencesStore(pinia).initPreferences()
-  await useAiSettingsStore(pinia).initSettings()
+  const aiSettingsReady = useAiSettingsStore(pinia).initSettings()
+  // Only routes that edit/use AI settings wait; the default workspace can mount immediately.
+  router.beforeResolve(async to => {
+    if (to.name === 'git-assistant' || to.name === 'settings') await aiSettingsReady
+  })
   void useStorageStore(pinia).initStorage()
   app.use(i18n)
   app.use(router)

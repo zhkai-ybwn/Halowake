@@ -20,7 +20,6 @@
 
       <div class="titlebar-actions" data-tauri-drag-region>
         <TopbarSkillsPill />
-        <TopbarQuotaPill />
         <div v-if="!isMac" class="windows-window-controls" @mousedown.stop @dblclick.stop>
           <button class="window-button" type="button" :title="t('topbar.minimize')" @click="minimizeWindow"><span class="caption-icon caption-icon--minimize" aria-hidden="true"></span></button>
           <button class="window-button" type="button" :title="maximizeTitle" @click="toggleMaximize"><span class="caption-icon" :class="isMaximized ? 'caption-icon--restore' : 'caption-icon--maximize'" aria-hidden="true"></span></button>
@@ -150,13 +149,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import WorkbenchIconButton from '@/components/workbench/WorkbenchIconButton.vue'
 import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
-import TopbarQuotaPill from '@/components/quota/TopbarQuotaPill.vue'
 import TopbarSkillsPill from '@/components/skills/TopbarSkillsPill.vue'
 import AppNavIcon from '@/components/common/AppNavIcon.vue'
 import { listProjectProcesses, stopAllProjectProcesses, type ProjectProcessSnapshot } from '@/services/project/project-service'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useSkillsStore } from '@/stores/skills'
-import { useQuotaStore } from '@/stores/quota'
 import { hasPrimaryModifier, isMacPlatform } from '@/utils/platform-shortcuts'
 
 const router = useRouter()
@@ -166,7 +163,6 @@ const message = useMessage()
 const appWindow = getCurrentWindow()
 const preferencesStore = usePreferencesStore()
 const skillsStore = useSkillsStore()
-const quotaStore = useQuotaStore()
 const isMac = isMacPlatform
 const SIDEBAR_STORAGE_KEY = 'lumina.shell.sidebarCollapsed'
 const isMaximized = ref(false)
@@ -207,13 +203,6 @@ const utilityItems = computed<ShellNavItem[]>(() => [
 const navItems = computed(() => [...workspaceItems.value, ...utilityItems.value])
 const commands = computed<ShellNavItem[]>(() => [
   ...navItems.value,
-  {
-    id: 'ai-quota',
-    label: t('workbench.aiQuota'),
-    icon: 'solar:wallet-money-linear',
-    description: t('workbench.aiQuotaDescription'),
-    action: () => quotaStore.openModal(),
-  },
   {
     id: 'skills',
     label: t('skills.title'),
@@ -293,15 +282,10 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if (mod && event.key === ',') { event.preventDefault(); void router.push({ name: 'settings' }); return }
   if (event.key === 'Escape' && commandPaletteOpen.value) { commandPaletteOpen.value = false; return }
 
-  // Quick switch 1~5 via Cmd+1~5 (Mac) / Alt+1~5 or Ctrl+1~5 (Windows/Linux)
-  const isAltNumber = event.altKey && ['1', '2', '3', '4', '5'].includes(event.key)
-  const isModNumber = mod && ['1', '2', '3', '4', '5'].includes(event.key)
+  // Quick switch 1~4 via Cmd+1~4 (Mac) / Alt+1~4 or Ctrl+1~4 (Windows/Linux)
+  const isAltNumber = event.altKey && ['1', '2', '3', '4'].includes(event.key)
+  const isModNumber = mod && ['1', '2', '3', '4'].includes(event.key)
   if (isAltNumber || isModNumber) {
-    if (event.key === '5') {
-      event.preventDefault()
-      quotaStore.toggleModal()
-      return
-    }
     const shortcutMap: Record<string, string> = {
       '1': 'devdock',
       '2': 'git-assistant',

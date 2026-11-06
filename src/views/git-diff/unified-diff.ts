@@ -30,7 +30,8 @@ export function parseUnifiedDiff(diff: string): UnifiedDiffHunk[] {
       continue
     }
 
-    if (!current || raw.startsWith('diff --git ') || raw.startsWith('index ') || raw.startsWith('--- ') || raw.startsWith('+++ ')) continue
+    if (raw.startsWith('diff --git ')) { current = null; continue }
+    if (!current) continue
 
     const id = `${current.id}-line-${current.lines.length}`
     if (raw.startsWith('+')) {
@@ -49,4 +50,12 @@ export function parseUnifiedDiff(diff: string): UnifiedDiffHunk[] {
   }
 
   return hunks
+}
+
+export const DIFF_ROW_HEIGHT = 20
+export function getDiffWindow(total: number, scrollTop: number, height: number, overscan = 16) {
+  const first = Math.max(0, Math.floor(scrollTop / DIFF_ROW_HEIGHT) - overscan)
+  const start = Math.min(first, Math.max(total - 1, 0))
+  const end = Math.min(total, Math.ceil((scrollTop + height) / DIFF_ROW_HEIGHT) + overscan)
+  return { start, end: Math.max(start, end), top: start * DIFF_ROW_HEIGHT, bottom: Math.max(0, total - end) * DIFF_ROW_HEIGHT }
 }
