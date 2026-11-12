@@ -32,8 +32,13 @@ pub struct SaveGitProjectProfilePayload {
 }
 
 #[tauri::command]
-pub async fn load_git_snapshot(repo_path: String) -> Result<GitSnapshot, String> {
-    run_git_task("加载仓库状态", move || runner::load_git_snapshot(&repo_path)).await
+pub async fn load_git_snapshot(repo_path: String, defer_stats: Option<bool>) -> Result<GitSnapshot, String> {
+    run_git_task("加载仓库状态", move || runner::load_git_snapshot(&repo_path, !defer_stats.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn load_git_file_stats(repo_path: String) -> Result<Vec<crate::git::models::GitFileStat>, String> {
+    run_git_task("加载文件行数统计", move || runner::load_file_stats(&repo_path)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,8 +236,8 @@ pub async fn load_git_commit_file_diff(payload: GitCommitFileDiffPayload) -> Res
 }
 
 #[tauri::command]
-pub fn ensure_git_project_profile(repo_path: String) -> Result<GitProjectProfileFile, String> {
-    profile::ensure_project_profile(&repo_path)
+pub async fn ensure_git_project_profile(repo_path: String) -> Result<GitProjectProfileFile, String> {
+    run_git_task("初始化 Git 项目配置", move || profile::ensure_project_profile(&repo_path)).await
 }
 
 #[tauri::command]

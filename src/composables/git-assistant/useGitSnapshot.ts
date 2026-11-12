@@ -1,7 +1,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useLocale } from '@/composables/useLocale'
-import { loadGitSnapshot, type GitSnapshot } from '@/services/git/git-service'
+import { loadGitFileStats, loadGitSnapshot, type GitSnapshot } from '@/services/git/git-service'
 import { ensureGitProjectProfile } from '@/services/git/git-profile-service'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
@@ -79,6 +79,20 @@ export function useGitSnapshot() {
     persistRecentRepos()
   }
 
+  const ensuredProfiles = new Map<string, Promise<unknown>>()
+
+  function ensureProjectProfile(path: string) {
+    let pending = ensuredProfiles.get(path)
+    if (!pending) {
+      pending = ensureGitProjectProfile(path).catch(error => {
+        ensuredProfiles.delete(path)
+        throw error
+      })
+      ensuredProfiles.set(path, pending)
+    }
+    return pending
+  }
+
   async function loadSnapshotByPath(path: string, silent = false) {
     if (!path) return
 
@@ -96,13 +110,19 @@ export function useGitSnapshot() {
       localStorage.setItem(GIT_REPO_STORAGE_KEY, result.repoRoot || path)
       rememberRecentRepo(result.repoRoot || path)
 
-      try {
-        await ensureGitProjectProfile(result.repoRoot || path)
-      } catch (profileErr) {
+      void ensureProjectProfile(result.repoRoot || path).catch(profileErr => {
         console.error(profileErr)
         if (requestId === snapshotRequestId) {
           error.value = profileErr instanceof Error ? profileErr.message : t('gitAssistant.errorFallback')
         }
+      })
+
+      const statuses = result.status.map(line => line.slice(0, 2)).filter(code => code !== '??' && code !== '!!')
+      const conflicts = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
+      if (result.repositoryState.hasCommits && statuses.length && !statuses.some(code => conflicts.has(code))) {
+        void loadGitFileStats(result.repoRoot || path).then(stats => {
+          if (requestId === snapshotRequestId && snapshot.value) snapshot.value.fileStats = stats
+        }).catch(statsError => console.error(statsError))
       }
     } catch (err) {
       console.error(err)
@@ -110,7 +130,7 @@ export function useGitSnapshot() {
         error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
       }
     } finally {
-      if (!silent && requestId === snapshotRequestId) {
+      if (requestId === snapshotRequestId) {
         loading.value = false
       }
     }

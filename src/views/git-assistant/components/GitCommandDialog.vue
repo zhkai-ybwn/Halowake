@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="dialog-mask">
-    <section class="command-dialog">
+    <section class="command-dialog" role="dialog" aria-modal="true" :aria-label="title">
       <WorkbenchCloseButton
         class="dialog-close"
         :label="closeLabel"
@@ -9,7 +9,6 @@
       />
       <header class="dialog-header">
         <div>
-          <span class="dialog-kicker">Halowake Git Operation</span>
           <h3>{{ title }}</h3>
           <p>{{ repoPath }}</p>
         </div>
@@ -21,11 +20,16 @@
 
       <section class="progress-summary">
         <div class="progress-summary__heading">
-          <strong>{{ currentActivity }}</strong>
-          <code>{{ activeCommand || commandSummary }}</code>
+          <strong role="status">{{ currentActivity }}</strong>
+          <code v-if="activeCommand || commandSummary">{{ activeCommand || commandSummary }}</code>
         </div>
-        <div class="progress-track" :aria-label="currentActivity">
-          <div class="progress-bar" :class="[statusTone, { determinate: progressPercent !== null }]" :style="progressStyle"></div>
+        <div
+          class="progress-track"
+          role="progressbar"
+          :aria-label="currentActivity"
+          :aria-valuenow="progressPercent ?? undefined"
+        >
+          <div class="progress-bar" :class="[statusTone, { indeterminate: running && progressPercent === null }]" :style="progressStyle"></div>
         </div>
         <div class="progress-details">
           <span v-if="progressPercent !== null">{{ progressPercent }}%</span>
@@ -37,7 +41,6 @@
       <section class="log-panel" :class="statusTone">
         <div class="log-toolbar">
           <span>{{ t('gitAssistant.gitCommand.output') }}</span>
-          <span>{{ elapsedLabel }}</span>
         </div>
         <div ref="logBox" class="log-box">
           <template v-for="(line, idx) in logLines" :key="idx">
@@ -77,7 +80,6 @@
         >
           {{ closeLabel }}
         </button>
-        <button v-if="running" class="action-btn" disabled type="button">{{ abortLabel }}</button>
       </footer>
     </section>
   </div>
@@ -110,7 +112,6 @@ const props = defineProps<{
   transfer: string
   nextActionLabel: string
   closeLabel: string
-  abortLabel: string
 }>()
 
 const emit = defineEmits<{
@@ -254,11 +255,25 @@ const statusLabel = computed(() => {
 
 const commandSummary = computed(() => {
   const lastCommand = props.command.split('\n').filter(Boolean).at(-1)
-  return lastCommand || props.message || 'preparing'
+  return lastCommand || ''
 })
 
+const commitPhases: Record<string, string> = {
+  'Validating files': 'validatingFiles',
+  'Preparing index': 'preparingIndex',
+  'Staging files': 'stagingFiles',
+  'Checking staged changes': 'checkingStagedChanges',
+  'Committing': 'committing',
+  'Restoring index': 'restoringIndex',
+  'Index synchronized': 'indexSynchronized',
+  'Commit completed': 'completed',
+}
+
 const currentActivity = computed(() => {
-  if (props.progressPhase) return props.progressPhase
+  if (props.progressPhase) {
+    const label = commitPhases[props.progressPhase]
+    return label ? t(`gitAssistant.gitCommand.${label}`) : props.progressPhase
+  }
   if (props.running) return props.phase || t('gitAssistant.gitCommand.running')
   if (props.phase && props.phase !== statusLabel.value) return props.phase
   return statusLabel.value
@@ -370,16 +385,6 @@ const progressStyle = computed(() => {
   justify-content: space-between;
   padding: 16px 56px 16px 18px;
 
-  .dialog-kicker {
-    color: var(--lumina-primary);
-    display: block;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-  }
-
   h3 {
     font-size: 18px;
     letter-spacing: 0;
@@ -390,6 +395,7 @@ const progressStyle = computed(() => {
     color: var(--lumina-text-secondary);
     font-size: 12px;
     margin: 0;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -484,12 +490,10 @@ const progressStyle = computed(() => {
   width: 100%;
   will-change: transform;
 
-  &.running {
-    animation: none;
-  }
-
-  &.determinate {
-    animation: none;
+  &.indeterminate {
+    animation: git-progress 1.35s ease-in-out infinite alternate;
+    transform: translateX(0);
+    width: 30%;
   }
 
   &.failed {
@@ -498,6 +502,21 @@ const progressStyle = computed(() => {
 
   &.done {
     background: var(--lumina-success);
+  }
+}
+
+@keyframes git-progress {
+  from { transform: translateX(0); }
+  to { transform: translateX(233%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar {
+    transition: none;
+
+    &.indeterminate {
+      animation: none;
+    }
   }
 }
 
@@ -547,7 +566,7 @@ const progressStyle = computed(() => {
 
   &.log-suggestion {
     background: color-mix(in srgb, var(--lumina-warning) 10%, transparent);
-    border-left: 3px solid var(--lumina-warning);
+    border-left: 1px solid var(--lumina-warning);
     border-radius: 4px;
     color: var(--lumina-warning);
     margin-top: 6px;

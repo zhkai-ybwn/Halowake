@@ -67,7 +67,7 @@
       <template #actions><WorkbenchButton @click="$emit('request-refresh')">{{ t('gitAssistant.repo.refreshRepo') }}</WorkbenchButton></template>
     </WorkbenchEmptyState>
 
-    <div v-else class="file-table">
+    <div v-else ref="fileTable" class="file-table" @scroll.passive="measureFileTable">
       <div class="table-header" :style="gridStyle">
         <span class="check-cell header-cell">
           <input
@@ -88,8 +88,9 @@
         </span>
       </div>
 
+      <div v-if="rowWindow.start" :style="{ height: `${rowWindow.start * FILE_ROW_HEIGHT}px` }" aria-hidden="true"></div>
       <div
-        v-for="file in files"
+        v-for="file in renderedFiles"
         :key="file.raw"
         class="file-row"
         :class="{ active: activeFileRaw === file.raw }"
@@ -100,7 +101,7 @@
       >
         <label class="commit-check" @click.stop>
           <input
-            :checked="selectedRaws.includes(file.raw)"
+            :checked="selectedRawSet.has(file.raw)"
             type="checkbox"
             @change="
               $emit('toggle-file-selection', {
@@ -121,6 +122,7 @@
         <div class="line-cell added-lines">{{ formatLineCount(file.addedLines) }}</div>
         <div class="line-cell removed-lines">{{ formatLineCount(file.removedLines) }}</div>
       </div>
+      <div v-if="rowWindow.end < files.length" :style="{ height: `${(files.length - rowWindow.end) * FILE_ROW_HEIGHT}px` }" aria-hidden="true"></div>
     </div>
 
     <NDropdown
@@ -137,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch, watchEffect } from 'vue'
 import { NDropdown, type DropdownOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { useLocale } from '@/composables/useLocale'
@@ -176,6 +178,37 @@ const statusMeta = STATUS_META
 const statusFilterOptions = STATUS_FILTER_OPTIONS
 const { t } = useLocale()
 const searchInput = ref<HTMLInputElement | null>(null)
+const FILE_ROW_HEIGHT = 30
+const fileTable = ref<HTMLElement | null>(null)
+const fileTableTop = ref(0)
+const fileTableHeight = ref(0)
+const rowWindow = computed(() => {
+  const total = props.files.length
+  if (total <= 200) return { start: 0, end: total }
+  const visibleCount = Math.ceil((fileTableHeight.value || 480) / FILE_ROW_HEIGHT)
+  const first = Math.min(Math.floor(fileTableTop.value / FILE_ROW_HEIGHT), Math.max(0, total - visibleCount))
+  return { start: Math.max(0, first - 12), end: Math.min(total, first + visibleCount + 12) }
+})
+const renderedFiles = computed(() => props.files.slice(rowWindow.value.start, rowWindow.value.end))
+
+function measureFileTable() {
+  fileTableTop.value = fileTable.value?.scrollTop ?? 0
+  fileTableHeight.value = fileTable.value?.clientHeight ?? 0
+}
+
+watch(fileTable, (table, _oldTable, onCleanup) => {
+  measureFileTable()
+  if (!table || typeof ResizeObserver === 'undefined') return
+  const observer = new ResizeObserver(measureFileTable)
+  observer.observe(table)
+  onCleanup(() => observer.disconnect())
+})
+
+watch(() => [props.keyword, props.statusFilter], () => {
+  if (fileTable.value) fileTable.value.scrollTop = 0
+  measureFileTable()
+})
+
 const visibleRaws = computed(() => props.files.map(file => file.raw))
 const selectedRawSet = computed(() => new Set(props.selectedRaws))
 const selectedVisibleCount = computed(() => visibleRaws.value.filter(raw => selectedRawSet.value.has(raw)).length)
@@ -605,10 +638,9 @@ onUnmounted(() => {
 
 .file-row {
   border-bottom: 1px solid color-mix(in srgb, var(--lumina-card-border) 72%, transparent);
-  content-visibility: auto;
-  contain-intrinsic-size: 0 30px;
+  box-sizing: border-box;
   cursor: default;
-  min-height: 30px;
+  height: 30px;
 
   &:hover {
     background: var(--lumina-button-secondary-hover);

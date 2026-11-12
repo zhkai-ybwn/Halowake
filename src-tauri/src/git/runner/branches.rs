@@ -3,6 +3,7 @@ use crate::git::models::{
     GitConfigureRemotePayload, GitRemoteBranchCheckoutPayload, GitRepairUpstreamPayload,
 };
 
+use super::diff::refresh_unchanged_index_entries;
 use super::process::{run_git, run_git_capture, run_git_raw};
 
 pub fn configure_origin_remote(payload: &GitConfigureRemotePayload) -> Result<GitCommandResult, String> {
@@ -101,12 +102,14 @@ pub fn load_branches(repo_path: &str) -> Result<Vec<GitBranch>, String> {
 
 pub fn create_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
     let branch = validate_branch_name(&payload.branch)?;
+    refresh_unchanged_index_entries(&payload.repo_path)?;
     let result = run_git_capture(&payload.repo_path, &["checkout", "-b", branch])?;
     Ok(GitCommandResult { message: format!("已创建并切换到分支: {}", branch), ..result })
 }
 
 pub fn switch_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
     let branch = validate_branch_name(&payload.branch)?;
+    refresh_unchanged_index_entries(&payload.repo_path)?;
     let result = run_git_capture(&payload.repo_path, &["checkout", branch])?;
     Ok(GitCommandResult { message: format!("已切换到分支: {}", branch), ..result })
 }
@@ -123,6 +126,7 @@ pub fn checkout_remote_branch(payload: &GitRemoteBranchCheckoutPayload) -> Resul
             branch: local_branch.to_string(),
         });
     }
+    refresh_unchanged_index_entries(&payload.repo_path)?;
     let result = run_git_capture(
         &payload.repo_path,
         &["checkout", "--track", "-b", local_branch, remote_branch],

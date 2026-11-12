@@ -616,7 +616,6 @@
       :transfer="gitCommandDialog.transfer"
       :next-action-label="gitCommandDialog.nextActionLabel"
       :close-label="t('gitAssistant.gitCommand.close')"
-      :abort-label="t('gitAssistant.gitCommand.abort')"
       @close="gitCommandDialog.visible = false"
       @next-action="handleCommandNextAction"
     />
@@ -1006,15 +1005,17 @@ watch(showConflictTools, (active, wasActive) => {
   if (!active) conflictDialogOpen.value = false
 })
 
-watch(selectedFile, file => {
+watch([() => selectedFile.value?.raw, snapshot], () => {
+  const file = selectedFile.value
   if (diffMode.value === 'head') return
   if (!file) { diffMode.value = 'unstaged'; return }
   diffMode.value = file.unstaged ? 'unstaged' : 'staged'
 }, { immediate: true })
 
-watch([selectedFile, diffMode, () => panelLayout.value.visible.diff, showDiff], async ([file, mode]) => {
+watch([() => selectedFile.value?.raw, snapshot, diffMode, () => panelLayout.value.visible.diff, showDiff], async () => {
+  const file = selectedFile.value
   if (!file || !displayRepoPath.value) { clearDiff(); return }
-  await loadDiffForFile(file, mode)
+  await loadDiffForFile(file, diffMode.value)
 }, { immediate: true })
 
 // MainLayout keeps this view alive. Route deactivation must not refresh the snapshot:

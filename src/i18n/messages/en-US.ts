@@ -109,6 +109,8 @@ export default {
     copyFailed: 'Copy failed: {error}',
   },
   gitDiff: {
+    showChanges: 'Show changes',
+    showFullContext: 'Show full context',
     title: 'Git Diff',
     loading: 'Loading diff…',
     empty: 'No changes to display.',
@@ -689,6 +691,12 @@ export default {
       submitDisabled: 'Select files and enter a commit title',
     },
     gitCommand: {
+      validatingFiles: 'Validating selected files',
+      preparingIndex: 'Preparing the index',
+      stagingFiles: 'Staging selected files',
+      checkingStagedChanges: 'Checking staged changes',
+      restoringIndex: 'Restoring staging for other files',
+      indexSynchronized: 'Index synchronized',
       commitTitle: 'Git Command Progress - Commit',
       fetchTitle: 'Git Command Progress - Fetch',
       pushTitle: 'Git Command Progress - Push',

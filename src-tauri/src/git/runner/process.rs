@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Seek, Write};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -178,12 +178,40 @@ pub fn kill_process_tree(child: &mut std::process::Child, _job: &Option<ProcessJ
 }
 
 pub fn run_command_with_timeout(
-    mut cmd: Command,
+    cmd: Command,
     timeout: Duration,
     label: &str,
 ) -> Result<Output, String> {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
+    run_command_with_input(cmd, Stdio::null(), timeout, label)
+}
+
+pub(super) fn run_git_with_paths<'a>(
+    mut cmd: Command,
+    args: &[&str],
+    paths: impl IntoIterator<Item = &'a str>,
+    timeout: Duration,
+) -> Result<Output, String> {
+    let mut input = tempfile::tempfile().map_err(|error| format!("创建 Git 路径列表失败: {error}"))?;
+    for path in paths {
+        if path.contains('\0') {
+            return Err("Git 文件路径包含 NUL 字符。".to_string());
+        }
+        input.write_all(path.as_bytes()).and_then(|_| input.write_all(&[0]))
+            .map_err(|error| format!("写入 Git 路径列表失败: {error}"))?;
+    }
+    input.rewind().map_err(|error| format!("读取 Git 路径列表失败: {error}"))?;
+    let label = format!("git {}", args.join(" "));
+    cmd.args(args);
+    run_command_with_input(cmd, Stdio::from(input), timeout, &label)
+}
+
+fn run_command_with_input(
+    mut cmd: Command,
+    input: Stdio,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, String> {
+    cmd.stdin(input).stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     #[cfg(windows)]
@@ -399,7 +427,26 @@ pub(super) fn run_git_capture(
     let mut cmd = git_command(repo_path);
     cmd.args(args)
         .env("GIT_TERMINAL_PROMPT", "0");
+    if args.first() == Some(&"clone") {
+        apply_git_proxy_env(&mut cmd, repo_path);
+    }
     let output = run_command_with_timeout(cmd, DEFAULT_GIT_COMMAND_TIMEOUT, &command)?;
+    capture_git_result(command, output)
+}
+
+pub(super) fn run_git_pathspec<'a>(
+    repo_path: &str,
+    action: &[&str],
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Result<GitCommandResult, String> {
+    let mut args = vec!["--literal-pathspecs"];
+    args.extend_from_slice(action);
+    args.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
+    let output = run_git_with_paths(git_command(repo_path), &args, paths, DEFAULT_GIT_COMMAND_TIMEOUT)?;
+    capture_git_result(format!("git {}", args.join(" ")), output)
+}
+
+fn capture_git_result(command: String, output: Output) -> Result<GitCommandResult, String> {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -448,6 +495,9 @@ where
 {
     let command_label = format!("git {}", args.join(" "));
     let mut cmd = git_command(repo_path);
+    if matches!(args.first(), Some(&("fetch" | "push" | "pull" | "clone"))) {
+        apply_git_proxy_env(&mut cmd, repo_path);
+    }
     cmd.args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -605,7 +655,6 @@ pub(super) fn git_command(repo_path: &str) -> Command {
     let mut command = silent_command("git");
     command.args(["-c", "core.quotePath=false"]);
     command.current_dir(repo_path);
-    apply_git_proxy_env(&mut command, repo_path);
     command.stdin(Stdio::null());
     command.env("GIT_TERMINAL_PROMPT", "0");
     command
@@ -661,7 +710,7 @@ pub(super) fn git_error_suggestion(stderr: &str) -> Option<String> {
     } else if lower.contains("no tracking information") || lower.contains("no upstream") {
         Some("当前分支没有 upstream。请先 push -u 设置上游分支，或选择远端分支。".to_string())
     } else if lower.contains("would be overwritten") {
-        Some("本地改动会被覆盖。请先提交、暂存或撤销相关改动后再拉取。".to_string())
+        Some("本地改动会被覆盖。请先提交或贮藏（git stash）相关改动，再重试当前操作。".to_string())
     } else if lower.contains("non-fast-forward") || lower.contains("fetch first") {
         Some("远端包含本地没有的提交。请先拉取远端变更，再重新推送。".to_string())
     } else if lower.contains("failed to connect")

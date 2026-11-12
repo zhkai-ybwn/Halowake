@@ -5,7 +5,12 @@
         <strong>{{ title }}</strong>
         <span>{{ request?.filePath || '' }}</span>
       </div>
-      <small>{{ comparisonLabel }}</small>
+      <div class="git-diff-actions">
+        <small>{{ comparisonLabel }}</small>
+        <WorkbenchButton v-if="request" :disabled="loading" @click="loadDiff(request, !fullContext)">
+          {{ t(fullContext ? 'gitDiff.showChanges' : 'gitDiff.showFullContext') }}
+        </WorkbenchButton>
+      </div>
     </header>
 
     <WorkbenchEmptyState v-if="loading" icon="solar:refresh-circle-linear" :title="t('gitDiff.loading')" />
@@ -25,11 +30,14 @@ import {
 } from '@/services/git/git-service'
 import type { GitDiffRequest } from '@/services/git/git-diff-window'
 import UnifiedDiffViewer from './UnifiedDiffViewer.vue'
+import WorkbenchButton from '@/components/workbench/WorkbenchButton.vue'
 import { useLocale } from '@/composables/useLocale'
 import WorkbenchEmptyState from '@/components/workbench/WorkbenchEmptyState.vue'
 
 const request = ref<GitDiffRequest | null>(null)
-const loading = ref(false)
+const loading = ref(true)
+const fullContext = ref(false)
+let requestId = 0
 const error = ref('')
 const diffText = ref('')
 const { t } = useLocale()
@@ -45,23 +53,25 @@ const comparisonLabel = computed(() => {
       : t('gitDiff.comparisonUnstaged')
 })
 
-async function loadDiff(nextRequest: GitDiffRequest) {
+async function loadDiff(nextRequest: GitDiffRequest, withFullContext = false) {
+  const id = ++requestId
   request.value = nextRequest
+  fullContext.value = withFullContext
   loading.value = true
   error.value = ''
   diffText.value = ''
 
   try {
     const result = nextRequest.kind === 'commit'
-      ? await loadGitCommitFileDiff(nextRequest.repoPath, nextRequest.hash, nextRequest.filePath, true)
+      ? await loadGitCommitFileDiff(nextRequest.repoPath, nextRequest.hash, nextRequest.filePath, withFullContext)
       : nextRequest.mode === 'head'
-        ? await loadGitFileHeadDiff(nextRequest.repoPath, nextRequest.filePath, true)
-        : await loadGitFileDiff({ repoPath: nextRequest.repoPath, filePath: nextRequest.filePath, staged: nextRequest.mode === 'staged', fullContext: true })
-    diffText.value = result.diff
+        ? await loadGitFileHeadDiff(nextRequest.repoPath, nextRequest.filePath, withFullContext)
+        : await loadGitFileDiff({ repoPath: nextRequest.repoPath, filePath: nextRequest.filePath, staged: nextRequest.mode === 'staged', fullContext: withFullContext })
+    if (id === requestId) diffText.value = result.diff
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('gitDiff.loadFailed')
+    if (id === requestId) error.value = err instanceof Error ? err.message : t('gitDiff.loadFailed')
   } finally {
-    loading.value = false
+    if (id === requestId) loading.value = false
   }
 }
 
@@ -126,6 +136,14 @@ onUnmounted(() => unlistenInit?.())
   display: flex;
   justify-content: center;
   padding: 24px;
+}
+
+.git-diff-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
 }
 
 .git-diff-state--error { color: var(--lumina-danger); }

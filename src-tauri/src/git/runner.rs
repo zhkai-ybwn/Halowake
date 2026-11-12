@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,14 +26,15 @@ mod sync;
 
 use process::{
     emit_manual_git_progress, git_command, run_git_capture, run_git_capture_streaming,
-    run_git_raw_owned,
+    run_git_pathspec, run_git_with_paths,
 };
 pub use branches::{
     checkout_remote_branch, configure_origin_remote, create_branch, delete_branch, load_branches,
     repair_upstream, set_branch_upstream, switch_branch,
 };
+pub(crate) use diff::{load_selected_file_diffs, load_untracked_file_diff};
 pub use diff::{
-    load_file_diff, load_file_head_diff, load_git_snapshot, load_git_status, load_selected_file_diff,
+    load_file_diff, load_file_head_diff, load_file_stats, load_git_snapshot, load_git_status, load_selected_file_diff,
 };
 pub use history::{load_git_commit_detail, load_git_commit_file_diff, load_git_log};
 pub use process::{
@@ -103,16 +105,28 @@ struct SelectedCommitFile {
 }
 
 fn validate_selected_files(repo_path: &str, selected_files: &[String]) -> Result<Vec<SelectedCommitFile>, String> {
-    let mut validated_files = Vec::with_capacity(selected_files.len());
-    for file in selected_files {
-        let normalized = file.trim();
-        if normalized.is_empty() {
-            return Err("选中文件路径为空，请刷新仓库状态后重新勾选文件。".to_string());
-        }
-
+    let paths: Vec<&str> = selected_files.iter().map(String::as_str).collect();
+    if paths.iter().any(|path| path.trim().is_empty()) {
+        return Err("选中文件路径为空，请刷新仓库状态后重新勾选文件。".to_string());
+    }
+    let tracked_raw = run_git_raw(repo_path, &["ls-files", "--cached", "-z"])?;
+    let tracked: HashSet<_> = tracked_raw.split_terminator('\0').collect();
+    let ignored_output = run_git_with_paths(
+        git_command(repo_path),
+        &["check-ignore", "--no-index", "-z", "--stdin"],
+        paths.iter().copied(),
+        DEFAULT_GIT_COMMAND_TIMEOUT,
+    )?;
+    if !matches!(ignored_output.status.code(), Some(0 | 1)) {
+        return Err(format!("检查 Git 忽略规则失败: {}", String::from_utf8_lossy(&ignored_output.stderr).trim()));
+    }
+    let ignored_raw = String::from_utf8_lossy(&ignored_output.stdout);
+    let ignored: HashSet<_> = ignored_raw.split_terminator('\0').collect();
+    let mut validated_files = Vec::with_capacity(paths.len());
+    for normalized in paths {
         let exists_in_worktree = Path::new(repo_path).join(normalized).exists();
-        let tracked_by_git = run_git(repo_path, &["ls-files", "--error-unmatch", "--", normalized]).is_ok();
-        let ignored_by_git = is_git_ignored(repo_path, normalized);
+        let tracked_by_git = tracked.contains(normalized.trim_end_matches('/'));
+        let ignored_by_git = ignored.contains(normalized);
         if ignored_by_git && !tracked_by_git {
             return Err(format!(
                 "选中文件已被 .gitignore 忽略，不能作为普通文件加入提交: {}\n\n建议: 请刷新仓库状态后重新勾选文件。",
@@ -135,33 +149,18 @@ fn validate_selected_files(repo_path: &str, selected_files: &[String]) -> Result
     Ok(validated_files)
 }
 
-fn is_git_ignored(repo_path: &str, file_path: &str) -> bool {
-    let mut cmd = git_command(repo_path);
-    cmd.args(["check-ignore", "--no-index", "--quiet", "--", file_path]);
-    cmd.stdin(std::process::Stdio::null());
-    cmd.env("GIT_TERMINAL_PROMPT", "0");
-    run_command_with_timeout(cmd, std::time::Duration::from_secs(5), "git check-ignore")
-        .is_ok_and(|out| out.status.success())
-}
-
 fn stage_selected_files_for_commit(repo_path: &str, selected_files: &[SelectedCommitFile]) -> Result<Vec<GitCommandResult>, String> {
     let (ignored_tracked, regular): (Vec<_>, Vec<_>) = selected_files
         .iter()
         .partition(|file| file.ignored_tracked);
-    let mut results = Vec::with_capacity(2);
 
+    let mut results = Vec::with_capacity(2);
     if !regular.is_empty() {
-        let mut args = vec!["add"];
-        args.push("--");
-        args.extend(regular.iter().map(|file| file.path.as_str()));
-        results.push(run_git_capture(repo_path, &args)?);
+        results.push(run_git_pathspec(repo_path, &["add"], regular.iter().map(|file| file.path.as_str()))?);
     }
     if !ignored_tracked.is_empty() {
-        let mut args = vec!["rm", "--cached", "--"];
-        args.extend(ignored_tracked.iter().map(|file| file.path.as_str()));
-        results.push(run_git_capture(repo_path, &args)?);
+        results.push(run_git_pathspec(repo_path, &["rm", "--cached"], ignored_tracked.iter().map(|file| file.path.as_str()))?);
     }
-
     Ok(results)
 }
 
@@ -184,16 +183,25 @@ where
         return Err("No files selected for commit".to_string());
     }
 
-    let selected_files = validate_selected_files(&payload.repo_path, &payload.selected_files)?;
-    let index_backup = IndexBackup::capture(&payload.repo_path)?;
+    let file_count = payload.selected_files.len();
     emit_manual_git_progress(
         &payload.repo_path,
-        "git commit",
-        "Preparing index",
-        Some(5),
+        "git ls-files / git check-ignore",
+        "Validating files",
+        None,
         None,
         &mut on_progress,
     );
+    let selected_files = validate_selected_files(&payload.repo_path, &payload.selected_files)?;
+    emit_manual_git_progress(
+        &payload.repo_path,
+        "git reset",
+        "Preparing index",
+        None,
+        None,
+        &mut on_progress,
+    );
+    let index_backup = IndexBackup::capture(&payload.repo_path)?;
 
     let mut stdout = String::new();
     let mut stderr = String::new();
@@ -205,13 +213,12 @@ where
         stdout.push_str(&clear_index.stdout);
         stderr.push_str(&clear_index.stderr);
 
-        let file_count = selected_files.len().max(1);
         emit_manual_git_progress(
             &payload.repo_path,
             "git add",
             "Staging files",
-            Some(10),
-            Some(format!("0 / {} files", file_count)),
+            None,
+            None,
             &mut on_progress,
         );
         for add in stage_selected_files_for_commit(&payload.repo_path, &selected_files)? {
@@ -221,10 +228,10 @@ where
         }
         emit_manual_git_progress(
             &payload.repo_path,
-            "git add",
-            "Staging files",
-            Some(70),
-            Some(format!("{} / {} files", file_count, file_count)),
+            "git diff --cached --name-only",
+            "Checking staged changes",
+            None,
+            Some(format!("{file_count} / {file_count}")),
             &mut on_progress,
         );
 
@@ -237,7 +244,7 @@ where
             &payload.repo_path,
             "git commit",
             "Committing",
-            Some(80),
+            None,
             None,
             &mut on_progress,
         );
@@ -277,18 +284,20 @@ where
         });
     };
 
-    index_backup.restore().map_err(|error| format!("提交已经完成，但{}", error))?;
     emit_manual_git_progress(
         &payload.repo_path,
         "git reset",
         "Restoring index",
-        Some(92),
+        None,
         None,
         &mut on_progress,
     );
-    let mut reset_args = vec!["reset".to_string(), "HEAD".to_string(), "--".to_string()];
-    reset_args.extend(selected_files.iter().map(|file| file.path.clone()));
-    run_git_raw_owned(&payload.repo_path, &reset_args)
+    index_backup.restore().map_err(|error| format!("提交已经完成，但{}", error))?;
+    run_git_pathspec(
+        &payload.repo_path,
+        &["reset", "--no-refresh", "HEAD"],
+        selected_files.iter().map(|file| file.path.as_str()),
+    )
         .map_err(|error| format!("提交已经完成，但恢复未选文件的暂存状态失败: {}", error))?;
     commands.push(commit.command);
     stdout.push_str(&commit.stdout);
@@ -349,85 +358,36 @@ pub fn open_file_external(payload: &GitFileActionPayload) -> Result<GitCommandRe
 }
 
 pub fn mark_files_resolved(payload: &GitFilesActionPayload) -> Result<GitCommandResult, String> {
-    let files = payload
-        .file_paths
-        .iter()
-        .map(|file| file.trim())
-        .filter(|file| !file.is_empty())
-        .collect::<Vec<_>>();
-
-    if files.is_empty() {
-        return Err("请选择需要标记为已解决的冲突文件。".to_string());
-    }
-
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut commands = Vec::new();
-
-    for file in files {
-        let result = run_git_capture(&payload.repo_path, &["add", "-A", "--", file])?;
-        commands.push(result.command);
-        stdout.push_str(&result.stdout);
-        stderr.push_str(&result.stderr);
-    }
-
-    Ok(GitCommandResult {
-        command: commands.join("\n"),
-        message: "冲突文件已标记为已解决".to_string(),
-        stdout,
-        stderr,
-        suggestion: None,
-    })
+    run_file_index_action(
+        payload,
+        &["add", "-A"],
+        "冲突文件已标记为已解决",
+        "请选择需要标记为已解决的冲突文件。",
+    )
 }
 
 pub fn stage_files(payload: &GitFilesActionPayload) -> Result<GitCommandResult, String> {
-    run_file_index_action(payload, "add", "已暂存文件", |repo_path, file_path| {
-        run_git_capture(repo_path, &["add", "-A", "--", file_path])
-    })
+    run_file_index_action(payload, &["add", "-A"], "已暂存文件", "没有可暂存的文件。")
 }
 
 pub fn unstage_files(payload: &GitFilesActionPayload) -> Result<GitCommandResult, String> {
-    run_file_index_action(payload, "restore --staged", "已取消暂存文件", |repo_path, file_path| {
-        run_git_capture(repo_path, &["restore", "--staged", "--", file_path])
-    })
+    run_file_index_action(payload, &["restore", "--staged"], "已取消暂存文件", "没有可取消暂存的文件。")
 }
 
-fn run_file_index_action<F>(
+fn run_file_index_action(
     payload: &GitFilesActionPayload,
-    action: &str,
+    args: &[&str],
     message: &str,
-    mut execute: F,
-) -> Result<GitCommandResult, String>
-where
-    F: FnMut(&str, &str) -> Result<GitCommandResult, String>,
-{
-    let files = payload
-        .file_paths
-        .iter()
-        .map(|file| file.trim())
-        .filter(|file| !file.is_empty())
-        .collect::<Vec<_>>();
+    empty_message: &str,
+) -> Result<GitCommandResult, String> {
+    let files: Vec<_> = payload.file_paths.iter().map(String::as_str)
+        .filter(|file| !file.trim().is_empty())
+        .collect();
     if files.is_empty() {
-        return Err(format!("没有可执行 {} 的文件。", action));
+        return Err(empty_message.to_string());
     }
-
-    let mut commands = Vec::new();
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    for file in files {
-        let result = execute(&payload.repo_path, file)?;
-        commands.push(result.command);
-        stdout.push_str(&result.stdout);
-        stderr.push_str(&result.stderr);
-    }
-
-    Ok(GitCommandResult {
-        command: commands.join("\n"),
-        message: message.to_string(),
-        stdout,
-        stderr,
-        suggestion: None,
-    })
+    let result = run_git_pathspec(&payload.repo_path, args, files)?;
+    Ok(GitCommandResult { message: message.to_string(), ..result })
 }
 
 pub fn init_repository(repo_path: &str) -> Result<GitCommandResult, String> {
@@ -731,7 +691,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 
         assert!(result
             .command
-            .contains("git rm --cached -- .lumina/commit-prompt-debug.json"));
+            .contains("git --literal-pathspecs rm --cached --pathspec-from-file=- --pathspec-file-nul"));
         assert!(lumina_file.exists());
 
         let tracked = Command::new("git")
@@ -886,7 +846,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 
         create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).expect("create branch");
         assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "feature/test");
-        assert!(load_git_snapshot(&repo_path).unwrap().branches.iter().any(|branch| branch.name == "feature/test"));
+        assert!(load_git_snapshot(&repo_path, true).unwrap().branches.iter().any(|branch| branch.name == "feature/test"));
         assert!(delete_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).is_err());
 
         let main_branch = run_git(&repo_path, &["branch", "--format=%(refname:short)"])
@@ -930,7 +890,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             repo_path: repo_path.clone(), source_branch: "incoming".to_string(), no_fast_forward: false,
         }).expect("conflict is a recoverable merge result");
         assert!(result.stdout.contains("CONFLICT"));
-        let snapshot = load_git_snapshot(&repo_path).expect("load conflicted repository");
+        let snapshot = load_git_snapshot(&repo_path, true).expect("load conflicted repository");
         assert!(snapshot.repository_state.merge_in_progress);
         assert!(snapshot.status.iter().any(|line| line.starts_with("UU translations.json")));
         assert!(snapshot.staged_files.iter().any(|path| path == "added.txt"));
@@ -943,7 +903,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         git(&repo, &["add", "--", "translations.json"]);
         continue_merge(&crate::git::models::GitRepoPayload { repo_path: repo_path.clone() }).expect("finish merge");
         write_file(&repo.join("translations.json"), "{\"value\":\"changed again\"}\n");
-        let resolved = load_git_snapshot(&repo_path).expect("statistics resume after resolution");
+        let resolved = load_git_snapshot(&repo_path, true).expect("statistics resume after resolution");
         assert!(resolved.file_stats.iter().any(|stat| stat.path == "translations.json"));
         assert!(!repo.join(".git/diff-helper-invoked").exists());
         fs::remove_dir_all(&repo).expect("remove temp repo");
@@ -1035,6 +995,194 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     }
 
     #[test]
+    fn checkout_and_commit_handle_path_lists_larger_than_windows_argv() {
+        let repo = tempfile::tempdir().expect("create repository fixture");
+        let root = repo.path();
+        let repo_path = root.to_string_lossy().into_owned();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Halowake Test"]);
+        git(root, &["config", "user.email", "halowake@example.test"]);
+        git(root, &["config", "core.autocrlf", "false"]);
+        write_file(&root.join(".gitattributes"), "*.ts text eol=crlf\n");
+        write_file(&root.join("other.txt"), "original\n");
+        let paths: Vec<_> = (0..410).map(|i| {
+            format!("fixtures/long-nested-directory-for-windows-command-line/long-source-name-for-pathspec-{i:04}.ts")
+        }).collect();
+        assert!(paths.iter().map(|path| path.len() + 1).sum::<usize>() > 32_767);
+        for path in &paths {
+            write_file(&root.join(path), "main\r\n");
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "base"]);
+        git(root, &["switch", "-c", "target"]);
+        for path in &paths {
+            write_file(&root.join(path), "target content\r\n");
+        }
+        git(root, &["commit", "-am", "target"]);
+        git(root, &["switch", "main"]);
+        for path in &paths {
+            write_file(&root.join(path), "main\n");
+        }
+        assert_eq!(run_git_raw(&repo_path, &["status", "--porcelain"]).unwrap().lines().count(), paths.len());
+        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap();
+        assert_eq!(fs::read(root.join(&paths[0])).unwrap(), b"target content\r\n");
+
+        for path in &paths {
+            write_file(&root.join(path), "new content\r\n");
+        }
+        write_file(&root.join("other.txt"), "staged separately\n");
+        git(root, &["add", "other.txt"]);
+        let mut phases = Vec::new();
+        commit_changes_with_progress(&GitCommitPayload {
+            repo_path: repo_path.clone(),
+            title: "bulk selected changes".to_string(),
+            body: String::new(),
+            selected_files: paths.clone(),
+        }, |event| {
+            if let Some(phase) = event.phase { phases.push(phase); }
+        }).unwrap();
+        assert_eq!(phases.first().map(String::as_str), Some("Validating files"));
+        assert!(phases.iter().any(|phase| phase == "Restoring index"));
+        assert_eq!(run_git(&repo_path, &["show", "--format=", "--name-only", "HEAD"]).unwrap().lines().count(), paths.len());
+        assert_eq!(run_git(&repo_path, &["diff", "--cached", "--name-only"]).unwrap(), "other.txt");
+        assert!(!root.join(".git/index.lock").exists());
+    }
+
+    #[test]
+    fn selected_patch_batch_keeps_staged_and_unstaged_patches_with_their_paths() {
+        let repo = tempfile::tempdir().expect("create repository fixture");
+        let root = repo.path();
+        let repo_path = root.to_string_lossy();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Halowake Test"]);
+        git(root, &["config", "user.email", "halowake@example.test"]);
+        for path in ["folder space/a b.txt", "中文[1].txt", "unselected.txt"] {
+            write_file(&root.join(path), "initial\n");
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "base"]);
+        write_file(&root.join("folder space/a b.txt"), "staged evidence\n");
+        git(root, &["add", "--", "folder space/a b.txt"]);
+        write_file(&root.join("folder space/a b.txt"), "worktree evidence\n");
+        write_file(&root.join("中文[1].txt"), "second file evidence\n");
+        write_file(&root.join("unselected.txt"), "unselected evidence\n");
+
+        let paths = ["中文[1].txt", "folder space/a b.txt"];
+        let batched = load_selected_file_diffs(&repo_path, &paths).unwrap();
+        for path in paths {
+            assert_eq!(batched[path], load_selected_file_diff(&repo_path, path).unwrap());
+        }
+        assert!(!batched.values().any(|diff| diff.contains("unselected evidence")));
+    }
+
+    #[test]
+    fn branch_actions_refresh_eol_phantoms_without_staging_real_edits() {
+        for action in ["local", "remote", "create"] {
+            let repo = temp_repo(&format!("branch-eol-{}", action));
+            git(&repo, &["init", "-b", "main"]);
+            git(&repo, &["config", "user.name", "Halowake Test"]);
+            git(&repo, &["config", "user.email", "halowake@example.test"]);
+            git(&repo, &["config", "core.autocrlf", "false"]);
+            write_file(&repo.join(".gitattributes"), "*.ts text eol=crlf\n");
+            let phantom_names = ["file.ts", "space name.ts", "中文.ts", "literal[1].ts"];
+            for name in phantom_names {
+                write_file(&repo.join(name), "base\r\n");
+            }
+            write_file(&repo.join("staged.txt"), "base\n");
+            write_file(&repo.join("unstaged.txt"), "base\n");
+            git(&repo, &["add", "."]);
+            git(&repo, &["commit", "-m", "base"]);
+            git(&repo, &["switch", "-c", "target"]);
+            for name in phantom_names {
+                write_file(&repo.join(name), "target\r\n");
+            }
+            git(&repo, &["add", "."]);
+            git(&repo, &["commit", "-m", "target"]);
+            git(&repo, &["remote", "add", "origin", "https://example.test/repo.git"]);
+            git(&repo, &["update-ref", "refs/remotes/origin/release", "HEAD"]);
+            git(&repo, &["switch", "main"]);
+            for name in phantom_names {
+                write_file(&repo.join(name), "base\n");
+            }
+            write_file(&repo.join("staged.txt"), "staged edit\n");
+            git(&repo, &["add", "staged.txt"]);
+            write_file(&repo.join("unstaged.txt"), "unstaged edit\n");
+            write_file(&repo.join("untracked.txt"), "untracked edit\n");
+            let repo_path = repo.to_string_lossy().to_string();
+            let staged_before = run_git_raw(&repo_path, &["diff", "--cached", "--binary"]).unwrap();
+            let index_before = fs::read(repo.join(".git/index")).unwrap();
+            assert!(load_git_status(&repo_path).unwrap().lines().all(|line| !line.ends_with(".ts")));
+            assert_eq!(fs::read(repo.join(".git/index")).unwrap(), index_before, "status must stay read-only");
+
+            let expected_branch = match action {
+                "local" => {
+                    switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap();
+                    "target"
+                }
+                "remote" => {
+                    checkout_remote_branch(&GitRemoteBranchCheckoutPayload {
+                        repo_path: repo_path.clone(), remote_branch: "origin/release".to_string(), local_branch: "release".to_string(),
+                    }).unwrap();
+                    assert_eq!(run_git(&repo_path, &["rev-parse", "--abbrev-ref", "@{u}"]).unwrap(), "origin/release");
+                    "release"
+                }
+                _ => {
+                    create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "new".to_string() }).unwrap();
+                    "new"
+                }
+            };
+            assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), expected_branch);
+            assert_eq!(run_git_raw(&repo_path, &["diff", "--cached", "--binary"]).unwrap(), staged_before);
+            assert_eq!(fs::read(repo.join("unstaged.txt")).unwrap(), b"unstaged edit\n");
+            assert_eq!(fs::read(repo.join("untracked.txt")).unwrap(), b"untracked edit\n");
+            let raw_status = run_git_raw(&repo_path, &["status", "--porcelain"]).unwrap();
+            assert!(raw_status.lines().all(|line| !line.ends_with(".ts")));
+            for name in phantom_names {
+                let expected: &[u8] = if action == "create" { b"base\n" } else { b"target\r\n" };
+                assert_eq!(fs::read(repo.join(name)).unwrap(), expected);
+            }
+            assert!(!repo.join(".git/index.lock").exists());
+            fs::remove_dir_all(&repo).expect("remove temp repo");
+        }
+    }
+
+    #[test]
+    fn branch_checkout_preserves_real_conflicting_edits() {
+        for staged in [false, true] {
+            let repo = temp_repo("branch-real-edit");
+            git(&repo, &["init", "-b", "main"]);
+            git(&repo, &["config", "user.name", "Halowake Test"]);
+            git(&repo, &["config", "user.email", "halowake@example.test"]);
+            git(&repo, &["config", "core.autocrlf", "false"]);
+            write_file(&repo.join(".gitattributes"), "*.ts text eol=crlf\n");
+            write_file(&repo.join("phantom.ts"), "base\r\n");
+            write_file(&repo.join("real.txt"), "base\n");
+            git(&repo, &["add", "."]);
+            git(&repo, &["commit", "-m", "base"]);
+            git(&repo, &["switch", "-c", "target"]);
+            write_file(&repo.join("real.txt"), "target\n");
+            git(&repo, &["add", "."]);
+            git(&repo, &["commit", "-m", "target"]);
+            git(&repo, &["switch", "main"]);
+            write_file(&repo.join("phantom.ts"), "base\n");
+            write_file(&repo.join("real.txt"), "local edit\n");
+            if staged { git(&repo, &["add", "real.txt"]); }
+            let repo_path = repo.to_string_lossy().to_string();
+            let staged_before = run_git_raw(&repo_path, &["diff", "--cached", "--binary"]).unwrap();
+            let error = switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap_err();
+            assert!(error.contains("would be overwritten"));
+            assert!(error.contains("git stash"));
+            assert!(!error.contains("再拉取"));
+            assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "main");
+            assert_eq!(run_git_raw(&repo_path, &["diff", "--cached", "--binary"]).unwrap(), staged_before);
+            assert_eq!(fs::read(repo.join("real.txt")).unwrap(), b"local edit\n");
+            assert_eq!(fs::read(repo.join("phantom.ts")).unwrap(), b"base\n");
+            assert!(!repo.join(".git/index.lock").exists());
+            fs::remove_dir_all(&repo).expect("remove temp repo");
+        }
+    }
+
+    #[test]
     fn snapshot_omits_eol_phantoms_and_tracked_empty_diff_stays_empty() {
         let repo = temp_repo("phantom-status");
         git(&repo, &["init"]);
@@ -1053,7 +1201,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         assert!(run_git_raw(&repo_path, &["status", "--porcelain"]).unwrap().contains("file.ts"));
         let index_before = fs::read(&index_path).unwrap();
 
-        assert!(load_git_snapshot(&repo_path).unwrap().status.is_empty());
+        assert!(load_git_snapshot(&repo_path, true).unwrap().status.is_empty());
         assert!(load_selected_file_diff(&repo_path, "file.ts").unwrap().is_empty());
         assert_eq!(fs::read(&index_path).unwrap(), index_before);
         assert_eq!(fs::read(repo.join("file.ts")).unwrap(), b"export const a = 1;\n");

@@ -15,7 +15,7 @@ pub(super) fn load_file_actions(repo_path: &str) -> BTreeMap<String, String> {
     status_raw
         .lines()
         .map(parse_git_status_line)
-        .map(|file| (normalize_match_path(&file.path), file.change_type))
+        .map(|file| (file.path, file.change_type))
         .collect()
 }
 

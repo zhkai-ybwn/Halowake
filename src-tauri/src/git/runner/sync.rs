@@ -41,12 +41,16 @@ fn working_tree_is_clean(repo_path: &str) -> Result<bool, String> {
     Ok(worktree_clean && index_clean && untracked.trim().is_empty())
 }
 
-fn git_path_exists(repo_path: &str, git_path: &str) -> bool {
-    let Ok(relative_path) = run_git(repo_path, &["rev-parse", "--git-path", git_path]) else {
-        return false;
+fn load_operation_state(repo_path: &str) -> (bool, bool) {
+    let Ok(paths) = run_git_raw(repo_path, &[
+        "rev-parse", "--git-path", "MERGE_HEAD", "--git-path", "rebase-merge", "--git-path", "rebase-apply",
+    ]) else {
+        return (false, false);
     };
-
-    Path::new(repo_path).join(relative_path.trim()).exists()
+    let root = Path::new(repo_path);
+    let mut exists = paths.lines().map(|path| root.join(path).exists());
+    let merge = exists.next().unwrap_or(false);
+    (merge, exists.any(|active| active))
 }
 
 pub(super) fn load_repository_state(repo_path: &str) -> GitRepositoryState {
@@ -75,6 +79,7 @@ pub(super) fn load_repository_state(repo_path: &str) -> GitRepositoryState {
         (0, 0)
     };
 
+    let (merge_in_progress, rebase_in_progress) = load_operation_state(repo_path);
     GitRepositoryState {
         has_commits,
         remote_name: remote_url.as_ref().map(|_| "origin".to_string()),
@@ -83,9 +88,8 @@ pub(super) fn load_repository_state(repo_path: &str) -> GitRepositoryState {
         upstream_gone,
         ahead,
         behind,
-        merge_in_progress: git_path_exists(repo_path, "MERGE_HEAD"),
-        rebase_in_progress: git_path_exists(repo_path, "rebase-merge")
-            || git_path_exists(repo_path, "rebase-apply"),
+        merge_in_progress,
+        rebase_in_progress,
     }
 }
 

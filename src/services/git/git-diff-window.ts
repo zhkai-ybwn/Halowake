@@ -16,23 +16,37 @@ export type GitDiffRequest =
     }
 
 let diffWindow: WebviewWindow | null = null
-let unlistenRequestInit: UnlistenFn | null = null
+let initListener: Promise<UnlistenFn> | null = null
+let ready = false
 let pendingRequest: GitDiffRequest | null = null
 
 export async function openGitDiffWindow(request: GitDiffRequest) {
   pendingRequest = request
 
   if (diffWindow) {
+    const current = diffWindow
     try {
-      await diffWindow.setFocus()
+      await current.setFocus()
       await sendRequest()
       return
     } catch {
-      diffWindow = null
+      if (diffWindow === current) resetWindow()
     }
   }
 
-  diffWindow = new WebviewWindow('git-diff', {
+  initListener ??= listen('git-diff-request-init', () => {
+    ready = true
+    void sendRequest().catch(error => console.error(error))
+  })
+  try {
+    await initListener
+  } catch (error) {
+    resetWindow()
+    throw error
+  }
+  if (diffWindow) return
+
+  const window = new WebviewWindow('git-diff', {
     title: 'Halowake - Git Diff',
     url: '/#/diff',
     width: 1200,
@@ -43,29 +57,24 @@ export async function openGitDiffWindow(request: GitDiffRequest) {
     resizable: true,
     center: true,
   })
-
-  diffWindow.once('tauri://error', () => {
-    diffWindow = null
-  })
-  diffWindow.once('tauri://destroyed', () => {
-    diffWindow = null
-    cleanupListener()
-  })
-
-  await setupRequestListener()
-  setTimeout(() => void sendRequest(), 500)
+  diffWindow = window
+  const resetCurrentWindow = () => {
+    if (diffWindow === window) resetWindow()
+  }
+  void window.once('tauri://error', resetCurrentWindow)
+  void window.once('tauri://destroyed', resetCurrentWindow)
 }
 
 async function sendRequest() {
-  if (pendingRequest) await emit('git-diff-init', pendingRequest)
+  if (!ready || !pendingRequest) return
+  const request = pendingRequest
+  pendingRequest = null
+  await emit('git-diff-init', request)
 }
 
-function cleanupListener() {
-  unlistenRequestInit?.()
-  unlistenRequestInit = null
-}
-
-async function setupRequestListener() {
-  cleanupListener()
-  unlistenRequestInit = await listen('git-diff-request-init', () => void sendRequest())
+function resetWindow() {
+  diffWindow = null
+  ready = false
+  void initListener?.then(unlisten => unlisten(), () => {})
+  initListener = null
 }

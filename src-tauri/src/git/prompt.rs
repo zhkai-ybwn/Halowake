@@ -21,7 +21,7 @@ mod profile;
 
 use classifier::{
     apply_group_budgets, build_budget_plan, classify_file, detect_action_from_diff_header,
-    group_weight, load_file_actions, normalize_match_path, preserve_small_source_changes,
+    group_weight, load_file_actions, preserve_small_source_changes,
 };
 use diff_cleaner::clean_diff_candidates;
 use profile::{
@@ -278,21 +278,38 @@ pub fn build_selected_commit_prompt(
     let mut raw_chars = 0;
     let mut files = Vec::new();
 
+    let tracked_paths: Vec<_> = selected_files.iter().map(String::as_str)
+        .filter(|path| action_map.get(*path).is_none_or(|action| action != "untracked"))
+        .collect();
+    let selected_diffs = runner::load_selected_file_diffs(repo_path, &tracked_paths)?;
+
     for file_path in selected_files {
-        let action = action_map
-            .get(&normalize_match_path(file_path))
+        let known_action = action_map.get(file_path);
+        let action = known_action
             .cloned()
             .unwrap_or_else(|| detect_action_from_diff_header(""));
         let classification = classify_file(file_path, &profile, &action);
-        let raw_diff = runner::load_selected_file_diff(repo_path, file_path)?;
+        let fallback;
+        let raw_diff = match selected_diffs.get(file_path.as_str()) {
+            Some(diff) => diff.as_str(),
+            None if action == "untracked" => {
+                fallback = runner::load_untracked_file_diff(repo_path, file_path, "--unified=3")?;
+                &fallback
+            }
+            None if known_action.is_none() => {
+                fallback = runner::load_selected_file_diff(repo_path, file_path)?;
+                &fallback
+            }
+            None => "",
+        };
         let action = if action == "modified" {
-            detect_action_from_diff_header(&raw_diff)
+            detect_action_from_diff_header(raw_diff)
         } else {
             action
         };
         let file_raw_chars = raw_diff.chars().count();
         raw_chars += file_raw_chars;
-        let clean_result = clean_diff_candidates(file_path, &raw_diff, &classification, &action);
+        let clean_result = clean_diff_candidates(file_path, raw_diff, &classification, &action);
 
         files.push(PreparedPromptFile {
             path: file_path.clone(),

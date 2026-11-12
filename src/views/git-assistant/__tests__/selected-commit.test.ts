@@ -6,15 +6,21 @@ import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
 import { useAiSettingsStore } from '@/stores/ai-settings'
 import { invokeMock, setTauriInvokeHandler } from '@/test/setup'
 import GitAssistantView from '../GitAssistantView.vue'
+import GitCommandDialog from '../components/GitCommandDialog.vue'
 
 vi.mock('naive-ui', async importOriginal => ({
   ...await importOriginal<typeof import('naive-ui')>(),
   useDialog: () => ({}),
 }))
-vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
 describe('Git Assistant selected-file commit', () => {
   it('previews one file while generating and committing only the checked file', async () => {
+    let finishListening!: () => void
+    listenMock.mockImplementation(() => new Promise<() => void>(resolve => {
+      finishListening = () => resolve(() => {})
+    }))
     const repoPath = '/projects/example'
     localStorage.setItem(GIT_REPO_STORAGE_KEY, repoPath)
     const pinia = createPinia()
@@ -30,6 +36,7 @@ describe('Git Assistant selected-file commit', () => {
             status: [' M checked.ts', 'M  staged.ts'], stagedFiles: ['staged.ts'],
             stagedDiff: '', fileStats: [], repositoryState: { hasCommits: true },
           }
+        case 'load_git_file_stats': return []
         case 'load_git_file_diff': return { diff: 'file diff' }
         case 'build_git_commit_prompt':
           return { prompt: 'selected changes', trace: { selectedFiles: [], rules: [], evidenceCount: 0 } }
@@ -64,10 +71,41 @@ describe('Git Assistant selected-file commit', () => {
       expect(wrapper.get<HTMLInputElement>('.field-input').element.value).toBe('Update checked file')
       await wrapper.get('.commit-submit-btn').trigger('click')
       await flushPromises()
+      expect(invokeMock).not.toHaveBeenCalledWith('commit_git_changes', expect.anything())
+      expect(wrapper.getComponent(GitCommandDialog).props('running')).toBe(true)
+      finishListening()
+      await flushPromises()
       expect(invokeMock).toHaveBeenCalledWith('commit_git_changes', {
         payload: { repoPath, title: 'Update checked file', body: 'One change', selectedFiles: ['checked.ts'] },
       })
       expect(wrapper.get('.commit-submit-btn').attributes('disabled')).toBeDefined()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})
+
+describe('Git command progress', () => {
+  it('shows activity while progress is unknown and switches to actual percent when available', async () => {
+    const wrapper = shallowMount(GitCommandDialog, {
+      global: { plugins: [i18n] },
+      props: {
+        visible: true, title: 'Commit', repoPath: '/projects/example', phase: 'Validating files',
+        running: true, success: null, command: '', activeCommand: '', stdout: '', stderr: '',
+        message: '', suggestion: '', startedAt: Date.now(), finishedAt: null,
+        progressPercent: null, progressPhase: '', transfer: '', nextActionLabel: '', closeLabel: 'Close',
+      },
+    })
+    try {
+      const bar = wrapper.get('[role="progressbar"]')
+      expect(bar.attributes('aria-valuenow')).toBeUndefined()
+      expect(bar.get('.progress-bar').classes()).toContain('indeterminate')
+      expect(wrapper.get('[role="status"]').text()).toBe('Validating files')
+
+      await wrapper.setProps({ progressPhase: 'Receiving objects', progressPercent: 42 })
+      expect(bar.attributes('aria-valuenow')).toBe('42')
+      expect(bar.get('.progress-bar').classes()).not.toContain('indeterminate')
+      expect(wrapper.get('[role="status"]').text()).toBe('Receiving objects')
     } finally {
       wrapper.unmount()
     }

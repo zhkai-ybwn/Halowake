@@ -109,6 +109,8 @@ export default {
     copyFailed: '复制失败：{error}',
   },
   gitDiff: {
+    showChanges: '显示变更',
+    showFullContext: '展开完整上下文',
     title: 'Git Diff',
     loading: '正在加载差异…',
     empty: '没有可显示的变更。',
@@ -681,6 +683,12 @@ export default {
       submitDisabled: '请选择文件并填写提交标题',
     },
     gitCommand: {
+      validatingFiles: '正在核对所选文件',
+      preparingIndex: '正在准备暂存区',
+      stagingFiles: '正在暂存所选文件',
+      checkingStagedChanges: '正在检查已暂存的变更',
+      restoringIndex: '正在恢复其他文件的暂存状态',
+      indexSynchronized: '暂存区已同步',
       commitTitle: 'Git 命令进度 - Commit',
       fetchTitle: 'Git 命令进度 - Fetch',
       pushTitle: 'Git 命令进度 - Push',

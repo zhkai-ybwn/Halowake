@@ -71,6 +71,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::git::load_git_snapshot,
+            commands::git::load_git_file_stats,
             commands::git::load_git_file_diff,
             commands::git::load_git_file_head_diff,
             commands::git::commit_git_changes,

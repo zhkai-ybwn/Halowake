@@ -26,7 +26,7 @@ export function useGitCommit(
   getSelectedFileViews: () => GitAssistantFileView[],
   getConflictedFiles: () => GitAssistantFileView[],
   setError: (msg: string) => void,
-  startGitCommand: (title: string, phase: string, nextAction?: '' | 'push' | 'pull') => void,
+  startGitCommand: (title: string, phase: string, nextAction?: '' | 'push' | 'pull') => Promise<void>,
   finishGitCommand: (result: { command: string; stdout: string; stderr: string; message: string; suggestion?: string | null }, nextActionLabel?: string) => void,
   failGitCommand: (err: unknown) => void,
   loadSnapshotByPath: (path: string) => Promise<void>,
@@ -229,9 +229,8 @@ export function useGitCommit(
     commitLoading.value = true
     setError('')
     saveCommitMessageHistory('manual')
-    startGitCommand(t('gitAssistant.gitCommand.commitTitle'), t('gitAssistant.gitCommand.committing'), 'push')
-
     try {
+      await startGitCommand(t('gitAssistant.gitCommand.commitTitle'), t('gitAssistant.gitCommand.validatingFiles'), 'push')
       const result = await commitGitChanges({
         repoPath: displayRepoPath,
         title: commitTitle.value,

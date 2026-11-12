@@ -93,8 +93,7 @@ export function useGitRemote(
     nextAction: '',
   })
 
-  function startGitCommand(title: string, phase: string, nextAction: '' | 'push' | 'pull' = '') {
-    void startGitProgressListener(getDisplayRepoPath())
+  async function startGitCommand(title: string, phase: string, nextAction: '' | 'push' | 'pull' = '') {
     gitCommandDialog.value = {
       visible: true,
       title,
@@ -117,6 +116,7 @@ export function useGitRemote(
       nextActionLabel: '',
       nextAction,
     }
+    await startGitProgressListener(getDisplayRepoPath()).catch(error => console.error(error))
   }
 
   function finishGitCommand(result: GitCommandResult, nextActionLabel = '', phase?: string) {
@@ -127,7 +127,7 @@ export function useGitRemote(
       running: false,
       success: true,
       finishedAt: Date.now(),
-      progressPercent: gitCommandDialog.value.progressPercent ?? 100,
+      progressPercent: 100,
       progressPhase: '',
       command: result.command,
       activeCommand: getLastCommand(result.command) || gitCommandDialog.value.activeCommand,
@@ -177,7 +177,7 @@ export function useGitRemote(
     if (!repoPath) return
     const unlisten = await listen<GitCommandProgressEvent>('git-command-progress', (event) => {
       const payload = event.payload
-      if (payload.repoPath !== repoPath || !gitCommandDialog.value.running) return
+      if (token !== progressListenerToken || payload.repoPath !== repoPath || !gitCommandDialog.value.running) return
 
       const current = gitCommandDialog.value
       const commandChanged = payload.command !== current.activeCommand
@@ -196,9 +196,9 @@ export function useGitRemote(
         stderr: stderr?.text ?? current.stderr,
         stdoutCarriageReturnPending: stdout?.carriageReturnPending ?? current.stdoutCarriageReturnPending,
         stderrCarriageReturnPending: stderr?.carriageReturnPending ?? current.stderrCarriageReturnPending,
-        progressPercent: payload.percent ?? (commandChanged ? null : current.progressPercent),
+        progressPercent: payload.percent ?? (commandChanged || payload.phase ? null : current.progressPercent),
         progressPhase: payload.phase ?? (commandChanged ? '' : current.progressPhase),
-        transfer: payload.transfer ?? (commandChanged ? '' : current.transfer),
+        transfer: payload.transfer ?? (commandChanged || payload.phase ? '' : current.transfer),
       }
     })
     if (token === progressListenerToken) {
@@ -301,7 +301,7 @@ export function useGitRemote(
 
     pushLoading.value = true
     setError('')
-    startGitCommand(t('gitAssistant.gitCommand.pushTitle'), t('gitAssistant.gitCommand.checkingRemote'))
+    await startGitCommand(t('gitAssistant.gitCommand.pushTitle'), t('gitAssistant.gitCommand.checkingRemote'))
     try {
       const syncStatus = await syncGitStatus(displayRepoPath)
       const action = syncStatus.recommendedAction
@@ -352,7 +352,7 @@ export function useGitRemote(
 
     fetchLoading.value = true
     setError('')
-    startGitCommand(t('gitAssistant.gitCommand.fetchTitle'), t('gitAssistant.gitCommand.fetching'))
+    await startGitCommand(t('gitAssistant.gitCommand.fetchTitle'), t('gitAssistant.gitCommand.fetching'))
     try {
       const result = await fetchGitChanges(displayRepoPath)
       finishGitCommand(result)
@@ -371,7 +371,7 @@ export function useGitRemote(
 
     pullLoading.value = true
     setError('')
-    startGitCommand(t('gitAssistant.gitCommand.pullTitle'), t('gitAssistant.gitCommand.pulling'), 'push')
+    await startGitCommand(t('gitAssistant.gitCommand.pullTitle'), t('gitAssistant.gitCommand.pulling'), 'push')
     try {
       const result = await pullGitChanges(displayRepoPath)
       finishGitCommand(result, t('gitAssistant.gitCommand.pushNext'))
@@ -390,7 +390,7 @@ export function useGitRemote(
 
     rebaseLoading.value = true
     setError('')
-    startGitCommand(t('gitAssistant.gitCommand.rebaseTitle'), t('gitAssistant.gitCommand.rebasing'))
+    await startGitCommand(t('gitAssistant.gitCommand.rebaseTitle'), t('gitAssistant.gitCommand.rebasing'))
     try {
       const result = await rebaseGitChanges(displayRepoPath)
       finishGitCommand(result)
