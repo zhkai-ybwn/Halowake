@@ -1,8 +1,21 @@
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 import { loadGitFileDiff, loadGitFileHeadDiff } from '@/services/git/git-service'
 import type { GitAssistantFileView } from '@/views/git-assistant/git-assistant.types'
 import type { GitFileStatus } from '@/types/git'
+
+const DIFF_PREVIEW_DELAY_MS = 50
+type DiffMode = 'head' | 'staged' | 'unstaged'
+interface DiffPreviewRequest {
+  id: number
+  repoPath: string
+  path: string
+  mode: DiffMode
+  revision?: unknown
+  immediate: boolean
+  promise: Promise<void>
+  resolve: () => void
+}
 
 export function useGitDiff(
   getDisplayRepoPath: () => string,
@@ -12,7 +25,7 @@ export function useGitDiff(
   const { t } = useLocale()
 
   const currentDiff = ref('')
-  const diffMode = ref<'head' | 'staged' | 'unstaged'>('unstaged')
+  const diffMode = ref<DiffMode>('unstaged')
   const diffLoading = ref(false)
   const showDiff = ref(false)
   const activeFileRaw = ref<string | null>(null)
@@ -22,45 +35,93 @@ export function useGitDiff(
   const logFileDiffLoading = ref(false)
   const logDiffFileView = ref<GitAssistantFileView | null>(null)
   let diffRequestId = 0
+  let running = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let pending: DiffPreviewRequest | undefined
+  let latest: DiffPreviewRequest | undefined
+
+  function clearPending() {
+    clearTimeout(timer)
+    timer = undefined
+    pending?.resolve()
+    pending = undefined
+  }
 
   function clearDiff() {
     diffRequestId += 1
+    latest = undefined
+    clearPending()
     currentDiff.value = ''
     diffLoading.value = false
   }
 
-  async function loadDiffForFile(file: GitFileStatus, mode: 'head' | 'staged' | 'unstaged') {
+  function loadDiffForFile(file: GitFileStatus, mode: DiffMode, options?: { revision?: unknown; immediate?: boolean }): Promise<void> {
     const repoPath = getDisplayRepoPath()
-    if (!repoPath || (!isInlineDiffVisible() && !showDiff.value)) {
-      clearDiff()
-      return
-    }
-
     const staged = mode === 'staged'
-    if (mode !== 'head' && (staged ? !file.staged : !file.unstaged)) {
+    if (!repoPath || (!isInlineDiffVisible() && !showDiff.value)
+      || (mode !== 'head' && (staged ? !file.staged : !file.unstaged))) {
       clearDiff()
-      return
+      return Promise.resolve()
     }
 
-    const requestId = ++diffRequestId
-    diffLoading.value = true
-    try {
-      const result = mode === 'head'
-        ? await loadGitFileHeadDiff(repoPath, file.path)
-        : await loadGitFileDiff({ repoPath, filePath: file.path, staged })
-      if (requestId === diffRequestId && repoPath === getDisplayRepoPath()) {
-        currentDiff.value = result.diff
+    const { revision, immediate = showDiff.value } = options ?? {}
+    if (latest?.repoPath === repoPath && latest.path === file.path && latest.mode === mode && latest.revision === revision) {
+      if (immediate && latest === pending) {
+        latest.immediate = true
+        if (!running) {
+          clearTimeout(timer)
+          void runPending()
+        }
       }
+      return latest.promise
+    }
+
+    clearPending()
+    currentDiff.value = ''
+    diffLoading.value = true
+    let resolve!: () => void
+    const promise = new Promise<void>(done => { resolve = done })
+    latest = pending = { id: ++diffRequestId, repoPath, path: file.path, mode, revision, immediate, promise, resolve }
+    if (!running) dispatchPending()
+    return promise
+  }
+
+  function dispatchPending() {
+    if (!pending) return
+    if (pending.immediate) void runPending()
+    else timer = setTimeout(runPending, DIFF_PREVIEW_DELAY_MS)
+  }
+
+  async function runPending() {
+    const request = pending
+    pending = undefined
+    timer = undefined
+    if (!request) return
+
+    const { id, repoPath, path, mode, resolve } = request
+    const isCurrent = () => id === diffRequestId && repoPath === getDisplayRepoPath()
+    running = true
+    try {
+      if (!isCurrent()) return
+      const result = mode === 'head' ? await loadGitFileHeadDiff(repoPath, path)
+        : await loadGitFileDiff({ repoPath, filePath: path, staged: mode === 'staged' })
+      if (isCurrent()) currentDiff.value = result.diff
     } catch (err) {
-      if (requestId === diffRequestId && repoPath === getDisplayRepoPath()) {
+      if (isCurrent()) {
+        latest = undefined
         console.error(err)
         currentDiff.value = ''
-        setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+        setError(typeof err === 'string' ? err : err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
       }
     } finally {
-      if (requestId === diffRequestId) diffLoading.value = false
+      running = false
+      if (id === diffRequestId) diffLoading.value = false
+      resolve()
+      dispatchPending()
     }
   }
+
+  onScopeDispose(clearDiff, true)
 
   function closeDiff() {
     showDiff.value = false

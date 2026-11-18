@@ -1,13 +1,13 @@
 import { computed, type Ref } from 'vue'
 import type { SelectGroupOption, SelectOption } from 'naive-ui'
-import type { GitSnapshot } from '@/services/git/git-service'
+import type { GitBranch } from '@/services/git/git-service'
 
 type Translate = (key: string) => string
 type BranchOption = SelectOption | SelectGroupOption
 
-export function useGitBranchOptions(snapshot: Ref<GitSnapshot | null>, t: Translate) {
+export function useGitBranchOptions(branchRefs: Ref<GitBranch[] | null>, t: Translate) {
   const branchOptions = computed<BranchOption[]>(() => {
-    const branches = snapshot.value?.branches ?? []
+    const branches = branchRefs.value ?? []
     const localBranches = branches.filter(branch => branch.kind === 'local')
     const remoteBranches = branches.filter(branch => branch.kind === 'remote' && !branch.name.endsWith('/HEAD'))
     const options: BranchOption[] = []
@@ -31,12 +31,12 @@ export function useGitBranchOptions(snapshot: Ref<GitSnapshot | null>, t: Transl
   })
 
   const currentBranchValue = computed(() => {
-    const branch = snapshot.value?.branches.find(item => item.current)
+    const branch = branchRefs.value?.find(item => item.current)
     return branch ? `${branch.kind}:${branch.name}` : null
   })
 
   const mergeSourceOptions = computed<BranchOption[]>(() => {
-    const branches = (snapshot.value?.branches ?? []).filter(branch => !branch.current && !branch.name.endsWith('/HEAD'))
+    const branches = (branchRefs.value ?? []).filter(branch => !branch.current && !branch.name.endsWith('/HEAD'))
     const localBranches = branches.filter(branch => branch.kind === 'local')
     const remoteBranches = branches.filter(branch => branch.kind === 'remote')
     const options: BranchOption[] = []

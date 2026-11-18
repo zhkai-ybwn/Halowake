@@ -147,6 +147,8 @@ const logKeyword = ref('')
 const logAuthorFilter = ref('all')
 const logDateFrom = ref<number | null>(null)
 const logDateTo = ref<number | null>(null)
+let logRequestId = 0
+let detailRequestId = 0
 
 // ── Helpers ──
 function parseGitLogDate(date: string) {
@@ -220,61 +222,83 @@ const filteredGitLogEntries = computed(() => {
 
 // ── Actions ──
 async function loadLog() {
-  if (!repoPath.value) return
+  const path = repoPath.value
+  if (!path) return
+  const requestId = ++logRequestId
+  ++detailRequestId
+  gitLogEntries.value = []
+  gitLogDetail.value = null
+  activeLogHash.value = ''
+  activeLogFilePath.value = ''
+  logDetailLoading.value = false
   logLoading.value = true
   try {
-    gitLogEntries.value = await loadGitLog(repoPath.value, filePath.value)
-    setDefaultLogDateRange(gitLogEntries.value)
-    if (gitLogEntries.value.length) {
-      await handleSelectLogEntry(gitLogEntries.value[0].hash)
-    }
+    const entries = await loadGitLog(path, filePath.value)
+    if (requestId !== logRequestId) return
+    gitLogEntries.value = entries
+    setDefaultLogDateRange(entries)
+    const firstEntry = entries[0]
+    if (firstEntry) void handleSelectLogEntry(firstEntry.hash)
   } catch (err) {
-    console.error(err)
-    gitLogEntries.value = []
+    if (requestId === logRequestId) console.error(err)
   } finally {
-    logLoading.value = false
+    if (requestId === logRequestId) logLoading.value = false
   }
 }
 
 async function handleSelectLogEntry(hash: string) {
-  if (!repoPath.value || !hash) return
+  const path = repoPath.value
+  if (!path || !hash) return
+  const requestId = ++detailRequestId
   activeLogHash.value = hash
   activeLogFilePath.value = ''
+  gitLogDetail.value = null
   logDetailLoading.value = true
   try {
-    const detail = await loadGitCommitDetail(repoPath.value, hash)
+    const detail = await loadGitCommitDetail(path, hash)
+    if (requestId !== detailRequestId) return
     gitLogDetail.value = detail
     activeLogFilePath.value = filePath.value || detail.changedFiles[0]?.path || ''
   } catch (err) {
-    console.error(err)
-    gitLogDetail.value = null
+    if (requestId === detailRequestId) console.error(err)
   } finally {
-    logDetailLoading.value = false
+    if (requestId === detailRequestId) logDetailLoading.value = false
   }
 }
 
 async function handleOpenLogFileDiff(file: GitCommitChangedFile) {
-  if (!repoPath.value || !activeLogHash.value || !file.path) return
+  const detail = gitLogDetail.value
+  if (!repoPath.value || !detail?.changedFiles.includes(file) || !file.path) return
   activeLogFilePath.value = file.path
-  await openGitDiffWindow({ kind: 'commit', repoPath: repoPath.value, hash: activeLogHash.value, filePath: file.path })
+  await openGitDiffWindow({ kind: 'commit', repoPath: repoPath.value, hash: detail.hash, filePath: file.path })
 }
 
 // ── Tauri Events ──
 let unlistenInit: (() => void) | null = null
+let unmounted = false
 
 onMounted(async () => {
-  unlistenInit = await listen<{ repoPath: string; filePath: string; branch: string }>('git-log-init', async (event) => {
+  const unlisten = await listen<{ repoPath: string; filePath: string; branch: string }>('git-log-init', (event) => {
+    if (unmounted) return
     repoPath.value = event.payload.repoPath
     filePath.value = event.payload.filePath
     branch.value = event.payload.branch
-    await loadLog()
+    void loadLog()
   })
+  if (unmounted) {
+    unlisten()
+    return
+  }
+  unlistenInit = unlisten
 
   // Request init data from main window
   await tauriEmit('git-log-request-init')
 })
 
 onUnmounted(() => {
+  unmounted = true
+  ++logRequestId
+  ++detailRequestId
   unlistenInit?.()
 })
 </script>

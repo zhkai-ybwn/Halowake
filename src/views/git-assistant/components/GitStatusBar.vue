@@ -1,20 +1,35 @@
 <template>
-  <WorkbenchTopbar>
+  <WorkbenchTopbar class="git-status-bar" :class="{ 'git-status-bar--compact': compact }">
     <WorkbenchIdentity :label="t('gitAssistant.repo.currentRepoShort')" :value="currentRecentLabel" :title="repoPath || t('gitAssistant.repo.emptyPath')">
       <button class="repo-switcher-manage" type="button" :title="t('gitAssistant.repo.recentRepoManage')" @click="$emit('manage-repos')">
         <Icon icon="solar:settings-linear" />
       </button>
     </WorkbenchIdentity>
 
-    <WorkbenchTag :label="t('gitAssistant.repo.branchShort')" :value="branch || '--'" />
-    <WorkbenchTag :label="t('gitAssistant.repo.summaryTotal')" :value="summary.total" />
-    <WorkbenchTag :label="t('gitAssistant.repo.summaryStaged')" :value="summary.staged" />
-    <WorkbenchTag :label="t('gitAssistant.repo.summaryUnstaged')" :value="summary.unstaged" />
-    <WorkbenchTag :label="t('gitAssistant.repo.summaryUntracked')" :value="summary.untracked" />
+    <div class="branch-controls">
+      <WorkbenchTag
+        class="branch-tag"
+        :label="t('gitAssistant.repo.branchShort')"
+        :value="branch || '--'"
+        :title="branch || undefined"
+      />
+      <WorkbenchButton
+        v-if="hasSnapshot"
+        :disabled="loading || branchLoading"
+        aria-haspopup="dialog"
+        @click="$emit('open-branch-selector', $event.currentTarget as HTMLElement)"
+      >
+        {{ t('gitAssistant.repo.switchBranch') }}
+      </WorkbenchButton>
+    </div>
+    <WorkbenchTag v-if="!compact" :label="t('gitAssistant.repo.summaryTotal')" :value="summary.total" />
+    <WorkbenchTag v-if="!compact" :label="t('gitAssistant.repo.summaryStaged')" :value="summary.staged" />
+    <WorkbenchTag v-if="!compact" :label="t('gitAssistant.repo.summaryUnstaged')" :value="summary.unstaged" />
+    <WorkbenchTag v-if="!compact" :label="t('gitAssistant.repo.summaryUntracked')" :value="summary.untracked" />
     <WorkbenchTag v-if="summary.conflicted" :label="t('gitAssistant.repo.summaryConflicted')" :value="summary.conflicted" tone="danger" />
 
     <template #actions>
-      <NDropdown trigger="click" :options="viewOptions" @select="handleViewAction">
+      <NDropdown v-if="!compact" trigger="click" :options="viewOptions" @select="handleViewAction">
         <WorkbenchButton>
           <Icon icon="solar:sidebar-minimalistic-linear" />
           {{ t('gitAssistant.layout.view') }}
@@ -60,6 +75,9 @@ import { hasPrimaryModifier } from '@/utils/platform-shortcuts'
 const props = defineProps<{
   repoPath: string
   branch: string
+  compact?: boolean
+  shortcutsActive?: boolean
+  branchLoading: boolean
   loading: boolean
   fetching: boolean
   pushing: boolean
@@ -80,7 +98,7 @@ const emit = defineEmits<{
   (e: 'refresh'): void
   (e: 'sync-action', value: string): void
   (e: 'manage-repos'): void
-  (e: 'open-branch-selector'): void
+  (e: 'open-branch-selector', trigger: HTMLElement): void
   (e: 'open-merge'): void
   (e: 'clone-repository'): void
   (e: 'init-repository'): void
@@ -159,7 +177,6 @@ const viewOptions = computed<DropdownOption[]>(() => [
   { label: t('gitAssistant.layout.reset'), key: 'reset' },
 ])
 const projectOptions = computed<DropdownOption[]>(() => props.hasSnapshot ? [
-  { label: t('gitAssistant.repo.manageBranches'), key: 'branches' },
   { label: t('gitAssistant.repo.mergeBranch'), key: 'merge' },
   { label: t('gitAssistant.repositoryRules.title'), key: 'repository-rules' },
   { type: 'divider', key: 'repo-divider' },
@@ -182,8 +199,7 @@ function handleViewAction(key: string | number) {
 }
 
 function handleProjectAction(key: string | number) {
-  if (key === 'branches') emit('open-branch-selector')
-  else if (key === 'merge') emit('open-merge')
+  if (key === 'merge') emit('open-merge')
   else if (key === 'repository-rules') emit('open-repository-rules')
   else if (key === 'clone') emit('clone-repository')
   else if (key === 'init') emit('init-repository')
@@ -191,6 +207,7 @@ function handleProjectAction(key: string | number) {
 }
 
 function handleRefreshShortcut(event: KeyboardEvent) {
+  if (props.shortcutsActive === false || event.defaultPrevented || document.querySelector('[aria-modal="true"]')) return
   if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'r') return
   if (!props.hasSnapshot || props.loading || !props.repoPath) return
   event.preventDefault()
@@ -212,6 +229,37 @@ function normalizePath(path: string) {
 </script>
 
 <style scoped lang="scss">
+.branch-controls {
+  align-items: center;
+  display: inline-grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, max-content) auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.branch-tag { max-width: min(19vw, 210px); }
+
+.branch-tag :deep(strong) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-status-bar {
+  :deep(.workbench-identity) { flex: 0 1 230px; min-width: 30px; }
+}
+
+.git-status-bar--compact {
+  flex-wrap: wrap;
+  overflow: visible;
+
+  :deep(.workbench-topbar-main) { flex: 1 1 300px; }
+  :deep(.workbench-topbar-actions) { flex-wrap: wrap; }
+  :deep(.workbench-identity) { flex-basis: 150px; }
+}
+
 .action-group {
   align-items: center;
   display: inline-flex;

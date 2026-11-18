@@ -34,12 +34,13 @@ pub use branches::{
 };
 pub(crate) use diff::{load_selected_file_diffs, load_untracked_file_diff};
 pub use diff::{
-    load_file_diff, load_file_head_diff, load_file_stats, load_git_snapshot, load_git_status, load_selected_file_diff,
+    load_file_diff, load_file_head_diff, load_file_stats, load_git_snapshot,
+    load_git_snapshot_with_details, load_git_status, load_selected_file_diff,
 };
 pub use history::{load_git_commit_detail, load_git_commit_file_diff, load_git_log};
 pub use process::{
     kill_process_tree, run_command_with_timeout, run_git, run_git_raw, run_git_with_timeout,
-    DEFAULT_GIT_COMMAND_TIMEOUT, DEFAULT_HEAVY_GIT_TIMEOUT, DEFAULT_NETWORK_GIT_TIMEOUT,
+    DEFAULT_GIT_COMMAND_TIMEOUT, DEFAULT_NETWORK_GIT_TIMEOUT,
     GIT_CLONE_TIMEOUT, ProcessJobGuard,
 };
 pub use sync::{
@@ -844,7 +845,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         git(&repo, &["commit", "-m", "initial"]);
         let repo_path = repo.to_string_lossy().to_string();
 
-        create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).expect("create branch");
+        create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }, |_| {}).expect("create branch");
         assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "feature/test");
         assert!(load_git_snapshot(&repo_path, true).unwrap().branches.iter().any(|branch| branch.name == "feature/test"));
         assert!(delete_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).is_err());
@@ -855,9 +856,10 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             .find(|branch| *branch != "feature/test")
             .expect("base branch")
             .to_string();
-        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: main_branch }).expect("switch branch");
+        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: main_branch }, |_| {}).expect("switch branch");
         delete_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "feature/test".to_string() }).expect("delete branch");
         assert!(load_branches(&repo_path).unwrap().iter().all(|branch| branch.name != "feature/test"));
+        assert!(switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "file.txt".to_string() }, |_| {}).is_err());
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 
@@ -895,6 +897,14 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         assert!(snapshot.status.iter().any(|line| line.starts_with("UU translations.json")));
         assert!(snapshot.staged_files.iter().any(|path| path == "added.txt"));
         assert!(snapshot.file_stats.is_empty(), "conflict refresh must not compute line statistics");
+        let lightweight = load_git_snapshot_with_details(&repo_path, false, false)
+            .expect("load working tree without branch and staged-file details");
+        assert_eq!(lightweight.repo_root, snapshot.repo_root);
+        assert_eq!(lightweight.branch, snapshot.branch);
+        assert_eq!(lightweight.status, snapshot.status);
+        assert!(lightweight.repository_state.merge_in_progress);
+        assert!(lightweight.branches.is_empty());
+        assert!(lightweight.staged_files.is_empty());
         let diff = load_file_diff(&repo_path, "translations.json", false, false).expect("built-in conflict diff");
         assert!(!diff.diff.is_empty());
         assert!(!repo.join(".git/diff-helper-invoked").exists());
@@ -966,6 +976,42 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     }
 
     #[test]
+    fn merge_waits_for_slow_worktree_write() {
+        let repo = tempfile::tempdir().expect("create repository fixture");
+        let root = repo.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Halowake Test"]);
+        git(root, &["config", "user.email", "halowake@example.test"]);
+        write_file(&root.join(".gitattributes"), "slow.ts text eol=lf filter=slow\n");
+        git(root, &["add", ".gitattributes"]);
+        git(root, &["commit", "-m", "base"]);
+        git(root, &["switch", "-c", "target"]);
+        let target_content = "export const branch = 'target'\n";
+        write_file(&root.join("slow.ts"), target_content);
+        git(root, &["add", "slow.ts"]);
+        git(root, &["commit", "-m", "target"]);
+        git(root, &["switch", "main"]);
+        git(root, &["config", "filter.slow.clean", "cat"]);
+        git(root, &["config", "filter.slow.smudge", "sleep 61 && cat"]);
+        git(root, &["config", "filter.slow.required", "true"]);
+
+        let repo_path = root.to_string_lossy().into_owned();
+        let start = std::time::Instant::now();
+        merge_branch(&GitMergePayload {
+            repo_path: repo_path.clone(),
+            source_branch: "target".to_string(),
+            no_fast_forward: false,
+        })
+        .expect("let Git finish writing even after the old merge deadline");
+
+        assert!(start.elapsed() > std::time::Duration::from_secs(60));
+        assert_eq!(run_git(&repo_path, &["rev-parse", "HEAD"]).unwrap(), run_git(&repo_path, &["rev-parse", "target"]).unwrap());
+        assert_eq!(fs::read_to_string(root.join("slow.ts")).unwrap(), target_content);
+        assert!(run_git(&repo_path, &["status", "--porcelain"]).unwrap().is_empty());
+        assert!(!root.join(".git/index.lock").exists());
+    }
+
+    #[test]
     fn lists_remote_branches_and_checks_them_out_with_tracking() {
         let repo = temp_repo("remote-branch-checkout");
         git(&repo, &["init"]);
@@ -981,17 +1027,59 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
         let branches = load_branches(&repo_path).expect("load branches");
         assert!(branches.iter().any(|branch| branch.name == "origin/release" && matches!(branch.kind, GitBranchKind::Remote)));
 
-        checkout_remote_branch(&GitRemoteBranchCheckoutPayload {
+        let payload = GitRemoteBranchCheckoutPayload {
             repo_path: repo_path.clone(),
             remote_branch: "origin/release".to_string(),
             local_branch: "release".to_string(),
-        })
-        .expect("checkout tracked remote branch");
+        };
+        checkout_remote_branch(&payload, |_| {}).expect("checkout tracked remote branch");
 
         assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.remote"]).unwrap(), "origin");
         assert_eq!(run_git(&repo_path, &["config", "branch.release.merge"]).unwrap(), "refs/heads/release");
+        let branches = load_branches(&repo_path).unwrap();
+        assert!(branches.iter().any(|branch| branch.name == "release" && branch.current && branch.upstream.as_deref() == Some("origin/release")));
+
+        git(&repo, &["switch", "-"]);
+        checkout_remote_branch(&payload, |_| {}).expect("switch to existing branch with matching upstream");
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release");
         fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn remote_checkout_refuses_same_name_with_different_upstream() {
+        let repo = tempfile::tempdir().expect("create repository fixture");
+        let root = repo.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Halowake Test"]);
+        git(root, &["config", "user.email", "halowake@example.test"]);
+        git(root, &["commit", "--allow-empty", "-m", "base"]);
+        git(root, &["remote", "add", "origin", "https://example.test/repo.git"]);
+        git(root, &["remote", "add", "backup", "https://example.test/backup.git"]);
+        git(root, &["update-ref", "refs/remotes/origin/release", "HEAD"]);
+        git(root, &["update-ref", "refs/remotes/backup/release", "HEAD"]);
+        git(root, &["branch", "--track", "release", "refs/remotes/backup/release"]);
+
+        let repo_path = root.to_string_lossy().into_owned();
+        let mut payload = GitRemoteBranchCheckoutPayload {
+            repo_path: repo_path.clone(),
+            remote_branch: "origin/release".to_string(),
+            local_branch: "release".to_string(),
+        };
+        let error = checkout_remote_branch(&payload, |_| {}).expect_err("refuse mismatched upstream");
+        assert!(error.contains("backup/release"));
+        assert!(error.contains("其他本地分支名"));
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "main");
+        assert_eq!(run_git(&repo_path, &["config", "branch.release.remote"]).unwrap(), "backup");
+
+        git(root, &["branch", "--unset-upstream", "release"]);
+        assert!(checkout_remote_branch(&payload, |_| {}).unwrap_err().contains("未设置"));
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "main");
+
+        payload.local_branch = "release-origin".to_string();
+        checkout_remote_branch(&payload, |_| {}).expect("check out with an alternate local name");
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "release-origin");
+        assert_eq!(run_git(&repo_path, &["rev-parse", "--symbolic-full-name", "@{u}"]).unwrap(), "refs/remotes/origin/release");
     }
 
     #[test]
@@ -1024,7 +1112,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             write_file(&root.join(path), "main\n");
         }
         assert_eq!(run_git_raw(&repo_path, &["status", "--porcelain"]).unwrap().lines().count(), paths.len());
-        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap();
+        switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }, |_| {}).unwrap();
         assert_eq!(fs::read(root.join(&paths[0])).unwrap(), b"target content\r\n");
 
         for path in &paths {
@@ -1116,18 +1204,18 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 
             let expected_branch = match action {
                 "local" => {
-                    switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap();
+                    switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }, |_| {}).unwrap();
                     "target"
                 }
                 "remote" => {
                     checkout_remote_branch(&GitRemoteBranchCheckoutPayload {
                         repo_path: repo_path.clone(), remote_branch: "origin/release".to_string(), local_branch: "release".to_string(),
-                    }).unwrap();
+                    }, |_| {}).unwrap();
                     assert_eq!(run_git(&repo_path, &["rev-parse", "--abbrev-ref", "@{u}"]).unwrap(), "origin/release");
                     "release"
                 }
                 _ => {
-                    create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "new".to_string() }).unwrap();
+                    create_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "new".to_string() }, |_| {}).unwrap();
                     "new"
                 }
             };
@@ -1144,6 +1232,52 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             assert!(!repo.join(".git/index.lock").exists());
             fs::remove_dir_all(&repo).expect("remove temp repo");
         }
+    }
+
+    #[test]
+    fn branch_checkout_waits_for_slow_worktree_write() {
+        let repo = tempfile::tempdir().expect("create checkout repository");
+        let root = repo.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Halowake Test"]);
+        git(root, &["config", "user.email", "halowake@example.test"]);
+        git(root, &["config", "checkout.workers", "1"]);
+        write_file(&root.join(".gitattributes"), "*.ts text eol=lf\nslow.ts filter=slow\n");
+        write_file(&root.join("first.ts"), "export const branch = 'main'\n");
+        write_file(&root.join("slow.ts"), "export const branch = 'main'\n");
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "base"]);
+        git(root, &["switch", "-c", "target"]);
+        write_file(&root.join("first.ts"), "export const branch = 'target'\n");
+        write_file(&root.join("slow.ts"), "export const branch = 'target'\n");
+        git(root, &["commit", "-am", "target"]);
+        git(root, &["switch", "main"]);
+
+        // The smudge filter runs inside checkout before Git writes the file
+        // or commits its index. It takes longer than the old 30-second limit.
+        git(root, &["config", "filter.slow.clean", "cat"]);
+        git(root, &["config", "filter.slow.smudge", "printf 'filter started\\n' >&2; sleep 31 && cat"]);
+        git(root, &["config", "filter.slow.required", "true"]);
+        let repo_path = root.to_string_lossy().into_owned();
+        let start = std::time::Instant::now();
+
+        let mut progress = Vec::new();
+        switch_branch(&GitBranchPayload {
+            repo_path: repo_path.clone(),
+            branch: "target".to_string(),
+        }, |event| progress.push(event))
+        .expect("finish the checkout even when the file filter is slow");
+
+        assert!(start.elapsed() > std::time::Duration::from_secs(30));
+        assert_eq!(run_git(&repo_path, &["branch", "--show-current"]).unwrap(), "target");
+        let target_content = b"export const branch = 'target'\n";
+        assert_eq!(fs::read(root.join("first.ts")).unwrap(), target_content);
+        assert_eq!(fs::read(root.join("slow.ts")).unwrap(), target_content);
+        assert!(run_git(&repo_path, &["status", "--porcelain"]).unwrap().is_empty());
+        assert!(!root.join(".git/index.lock").exists());
+        assert_eq!(progress[0].phase.as_deref(), Some("Preparing index"));
+        assert_eq!(progress[1].phase.as_deref(), Some("Updating worktree"));
+        assert!(progress.iter().any(|event| event.stream == "stderr" && event.text.contains("filter started")));
     }
 
     #[test]
@@ -1169,7 +1303,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             if staged { git(&repo, &["add", "real.txt"]); }
             let repo_path = repo.to_string_lossy().to_string();
             let staged_before = run_git_raw(&repo_path, &["diff", "--cached", "--binary"]).unwrap();
-            let error = switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }).unwrap_err();
+            let error = switch_branch(&GitBranchPayload { repo_path: repo_path.clone(), branch: "target".to_string() }, |_| {}).unwrap_err();
             assert!(error.contains("would be overwritten"));
             assert!(error.contains("git stash"));
             assert!(!error.contains("再拉取"));

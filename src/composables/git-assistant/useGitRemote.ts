@@ -21,6 +21,9 @@ import {
 export interface GitCommandDialogState {
   visible: boolean
   title: string
+  repoPath: string
+  detail: string
+  resultDetail: string
   phase: string
   running: boolean
   success: boolean | null
@@ -73,6 +76,9 @@ export function useGitRemote(
   const gitCommandDialog = ref<GitCommandDialogState>({
     visible: false,
     title: '',
+    repoPath: '',
+    detail: '',
+    resultDetail: '',
     phase: '',
     running: false,
     success: null,
@@ -93,10 +99,14 @@ export function useGitRemote(
     nextAction: '',
   })
 
-  async function startGitCommand(title: string, phase: string, nextAction: '' | 'push' | 'pull' = '') {
+  async function startGitCommand(title: string, phase: string, nextAction: '' | 'push' | 'pull' = '', detail = '') {
+    const repoPath = getDisplayRepoPath()
     gitCommandDialog.value = {
       visible: true,
       title,
+      repoPath,
+      detail,
+      resultDetail: '',
       phase,
       running: true,
       success: null,
@@ -116,10 +126,10 @@ export function useGitRemote(
       nextActionLabel: '',
       nextAction,
     }
-    await startGitProgressListener(getDisplayRepoPath()).catch(error => console.error(error))
+    if (repoPath) await startGitProgressListener(repoPath).catch(error => console.error(error))
   }
 
-  function finishGitCommand(result: GitCommandResult, nextActionLabel = '', phase?: string) {
+  function finishGitCommand(result: GitCommandResult, nextActionLabel = '', phase?: string, resultDetail = '') {
     stopGitProgressListener()
     gitCommandDialog.value = {
       ...gitCommandDialog.value,
@@ -137,11 +147,12 @@ export function useGitRemote(
       stderrCarriageReturnPending: false,
       message: result.message,
       suggestion: result.suggestion ?? '',
+      resultDetail,
       nextActionLabel,
     }
   }
 
-  function failGitCommand(err: unknown) {
+  function failGitCommand(err: unknown, resultDetail = '') {
     stopGitProgressListener()
     const message = err instanceof Error ? err.message : String(err)
     const lowerMessage = message.toLowerCase()
@@ -156,11 +167,11 @@ export function useGitRemote(
       running: false,
       success: false,
       finishedAt: Date.now(),
-      phase: gitCommandDialog.value.phase || t('gitAssistant.gitCommand.failed'),
+      phase: t('gitAssistant.gitCommand.failed'),
       progressPhase: '',
-      stderr: normalizeGitOutput(message),
-      message: t('gitAssistant.gitCommand.failed'),
+      message,
       suggestion: '',
+      resultDetail,
       nextActionLabel:
         nextAction === 'pull'
           ? t('gitAssistant.gitCommand.pullNext')

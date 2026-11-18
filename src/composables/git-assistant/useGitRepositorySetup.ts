@@ -3,7 +3,6 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { cloneGitRepository, initGitRepository } from '@/services/git/git-service'
 
 interface UseGitRepositorySetupOptions {
-  repoPath: { value: string }
   setError: (message: string) => void
   translate: (key: string) => string
   loadSnapshot: (path: string) => Promise<void>
@@ -43,7 +42,6 @@ export function useGitRepositorySetup(options: UseGitRepositorySetupOptions) {
         : await initGitRepository(repositoryPathDraft.value)
       options.finishGitCommand(result)
       repositorySetupOpen.value = false
-      options.repoPath.value = repositoryPathDraft.value
       await options.loadSnapshot(repositoryPathDraft.value)
     } catch (error) {
       console.error(error)

@@ -142,6 +142,14 @@ pub(super) fn refresh_unchanged_index_entries(repo_path: &str) -> Result<(), Str
 }
 
 pub fn load_git_snapshot(repo_path: &str, include_stats: bool) -> Result<GitSnapshot, String> {
+    load_git_snapshot_with_details(repo_path, include_stats, true)
+}
+
+pub fn load_git_snapshot_with_details(
+    repo_path: &str,
+    include_stats: bool,
+    include_details: bool,
+) -> Result<GitSnapshot, String> {
     let (repo_root, branch, repository_state, status_raw, staged_files_raw, file_stats, branches) =
         thread::scope(|scope| {
             let repo_root =
@@ -149,9 +157,14 @@ pub fn load_git_snapshot(repo_path: &str, include_stats: bool) -> Result<GitSnap
             let branch = scope.spawn(|| run_git(repo_path, &["branch", "--show-current"]));
             let repository_state = scope.spawn(|| load_repository_state(repo_path));
             let status_raw = scope.spawn(|| load_git_status(repo_path));
-            let staged_files_raw =
-                scope.spawn(|| run_git(repo_path, &["diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv"]));
-            let branches = scope.spawn(|| load_branches(repo_path));
+            let details = include_details.then(|| {
+                let staged_files = scope.spawn(|| {
+                    run_git(repo_path, &[
+                        "diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv",
+                    ])
+                });
+                (staged_files, scope.spawn(|| load_branches(repo_path)))
+            });
             let status_raw = status_raw
                 .join()
                 .map_err(|_| "读取文件状态任务异常".to_string())??;
@@ -159,6 +172,13 @@ pub fn load_git_snapshot(repo_path: &str, include_stats: bool) -> Result<GitSnap
                 load_file_stats(repo_path)?
             } else {
                 vec![]
+            };
+            let (staged_files_raw, branches) = match details {
+                Some((staged_files, branches)) => (
+                    staged_files.join().map_err(|_| "读取暂存文件任务异常".to_string())??,
+                    branches.join().map_err(|_| "读取分支任务异常".to_string())??,
+                ),
+                None => (String::new(), vec![]),
             };
 
             Ok::<_, String>((
@@ -172,13 +192,9 @@ pub fn load_git_snapshot(repo_path: &str, include_stats: bool) -> Result<GitSnap
                     .join()
                     .map_err(|_| "读取仓库状态任务异常".to_string())?,
                 status_raw,
-                staged_files_raw
-                    .join()
-                    .map_err(|_| "读取暂存文件任务异常".to_string())??,
+                staged_files_raw,
                 file_stats,
-                branches
-                    .join()
-                    .map_err(|_| "读取分支任务异常".to_string())??,
+                branches,
             ))
         })?;
 

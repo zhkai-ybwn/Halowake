@@ -40,7 +40,7 @@ describe('Git diff loading', () => {
     vi.mocked(loadGitFileDiff).mockReturnValue(new Promise(resolve => { finish = resolve }))
     let visible = true
     const state = useGitDiff(() => 'repo', vi.fn(), () => visible)
-    const pending = state.loadDiffForFile(file, 'unstaged')
+    const pending = state.loadDiffForFile(file, 'unstaged', { immediate: true })
     visible = false
     await state.loadDiffForFile(file, 'unstaged')
     finish({ filePath: file.path, staged: false, diff: 'obsolete diff' })
@@ -49,16 +49,35 @@ describe('Git diff loading', () => {
     expect(state.diffLoading.value).toBe(false)
   })
 
-  it('keeps the most recent selection when requests finish out of order', async () => {
+  it('keeps one request in flight and replaces intermediate selections with the latest', async () => {
     let finish!: (value: Awaited<ReturnType<typeof loadGitFileDiff>>) => void
     vi.mocked(loadGitFileDiff)
       .mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
       .mockResolvedValueOnce({ filePath: 'next.json', staged: false, diff: 'latest diff' })
     const state = useGitDiff(() => 'repo', vi.fn())
-    const first = state.loadDiffForFile(file, 'unstaged')
-    await state.loadDiffForFile({ ...file, path: 'next.json' }, 'unstaged')
+    const first = state.loadDiffForFile(file, 'unstaged', { immediate: true })
+    const skipped = state.loadDiffForFile({ ...file, path: 'skipped.json' }, 'unstaged')
+    const last = state.loadDiffForFile({ ...file, path: 'next.json' }, 'unstaged')
+    expect(loadGitFileDiff).toHaveBeenCalledOnce()
     finish({ filePath: file.path, staged: false, diff: 'obsolete diff' })
-    await first
+    await Promise.all([first, skipped, last])
+    expect(loadGitFileDiff).toHaveBeenCalledTimes(2)
+    expect(loadGitFileDiff).toHaveBeenLastCalledWith({ repoPath: 'repo', filePath: 'next.json', staged: false })
     expect(state.currentDiff.value).toBe('latest diff')
+  })
+
+  it('coalesces duplicate requests and starts an explicit preview without waiting', async () => {
+    vi.mocked(loadGitFileDiff).mockResolvedValue({ filePath: file.path, staged: false, diff: 'diff' })
+    const state = useGitDiff(() => 'repo', vi.fn())
+    const implicit = state.loadDiffForFile(file, 'unstaged', { revision: 1 })
+    expect(loadGitFileDiff).not.toHaveBeenCalled()
+    const explicit = state.loadDiffForFile(file, 'unstaged', { revision: 1, immediate: true })
+    expect(implicit).toBe(explicit)
+    expect(loadGitFileDiff).toHaveBeenCalledOnce()
+    await explicit
+    await state.loadDiffForFile(file, 'unstaged', { revision: 1 })
+    expect(loadGitFileDiff).toHaveBeenCalledOnce()
+    await state.loadDiffForFile(file, 'unstaged', { revision: 2, immediate: true })
+    expect(loadGitFileDiff).toHaveBeenCalledTimes(2)
   })
 })

@@ -65,6 +65,42 @@
   overflow: hidden;
 }
 
+.compact-panel-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+
+  button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--lumina-radius-sm);
+    color: var(--lumina-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    padding: 5px 10px;
+  }
+
+  button[aria-pressed='true'] {
+    background: var(--lumina-primary-soft);
+    color: var(--lumina-primary);
+  }
+}
+
+.branch-dialog { position: relative; }
+
+.branch-collision,
+.branch-list-error {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
+
+  p { margin: 0; }
+  p, span { overflow-wrap: anywhere; }
+  .repository-action-field { width: 100%; }
+}
+
 .sheet-footer-split {
   align-items: center;
   display: flex;

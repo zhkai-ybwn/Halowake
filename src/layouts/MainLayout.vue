@@ -1,13 +1,15 @@
 <template>
-  <div class="layout-root" :class="{ 'sidebar-is-collapsed': sidebarCollapsed, 'platform-macos': isMac }">
-    <header class="window-titlebar" data-tauri-drag-region @dblclick="toggleMaximize">
+  <div class="layout-root" :class="{ 'sidebar-is-collapsed': isSidebarCollapsed, 'platform-macos': isMac }">
+    <header class="window-titlebar" data-tauri-drag-region @dblclick="!isMac && toggleMaximize()">
       <div class="titlebar-leading" data-tauri-drag-region>
-        <div v-if="isMac" class="macos-window-controls" @mousedown.stop @dblclick.stop>
-          <button class="traffic-light traffic-light--close" type="button" :aria-label="t('topbar.close')" @click="closeWindow"><span>×</span></button>
-          <button class="traffic-light traffic-light--minimize" type="button" :aria-label="t('topbar.minimize')" @click="minimizeWindow"><span>−</span></button>
-          <button class="traffic-light traffic-light--maximize" type="button" :aria-label="maximizeTitle" @click="toggleMaximize"><span>+</span></button>
-        </div>
-        <WorkbenchIconButton icon="solar:sidebar-minimalistic-linear" :label="t('topbar.toggleSidebar')" :active="!sidebarCollapsed" @click.stop="toggleSidebar" @dblclick.stop />
+        <WorkbenchIconButton
+          v-if="!compactSidebar"
+          icon="solar:sidebar-minimalistic-linear"
+          :label="t('topbar.toggleSidebar')"
+          :active="!isSidebarCollapsed"
+          @click.stop="toggleSidebar"
+          @dblclick.stop
+        />
         <div class="titlebar-identity" data-tauri-drag-region>
           <img src="@/assets/logo.png" alt="" data-tauri-drag-region />
           <div data-tauri-drag-region><strong data-tauri-drag-region>Halowake</strong><span data-tauri-drag-region>{{ currentModuleLabel }}</span></div>
@@ -43,7 +45,8 @@
               class="sidebar-item"
               :class="{ active: route.name === item.route }"
               type="button"
-              :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
+              :aria-label="item.label"
+              :title="isSidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
               <AppNavIcon :name="item.route || ''" :size="20" :fallback-icon="item.icon" />
@@ -69,7 +72,8 @@
               class="sidebar-item"
               :class="{ active: route.name === item.route }"
               type="button"
-              :title="sidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
+              :aria-label="item.label"
+              :title="isSidebarCollapsed ? `${item.label} (${shortcutLabel(item.shortcut)})` : undefined"
               @click="router.push({ name: item.route })"
             >
               <AppNavIcon :name="item.route || ''" :size="20" :fallback-icon="item.icon" />
@@ -80,7 +84,7 @@
         </div>
 
         <footer class="sidebar-footer">
-          <button class="sidebar-item" :class="{ active: route.name === 'settings' }" type="button" :title="sidebarCollapsed ? `${t('topbar.settings')} (${isMac ? '⌘,' : 'Ctrl+,'})` : undefined" @click="toggleSettings">
+          <button class="sidebar-item" :class="{ active: route.name === 'settings' }" type="button" :aria-label="t('topbar.settings')" :title="isSidebarCollapsed ? `${t('topbar.settings')} (${isMac ? '⌘,' : 'Ctrl+,'})` : undefined" @click="toggleSettings">
             <AppNavIcon name="settings" :size="20" fallback-icon="solar:settings-linear" />
             <span class="item-title">{{ t('topbar.settings') }}</span>
             <kbd class="shortcut-kbd">{{ isMac ? '⌘,' : 'Ctrl+,' }}</kbd>
@@ -166,7 +170,10 @@ const skillsStore = useSkillsStore()
 const isMac = isMacPlatform
 const SIDEBAR_STORAGE_KEY = 'lumina.shell.sidebarCollapsed'
 const isMaximized = ref(false)
+const compactWindow = isMac ? window.matchMedia('(max-width: 960px)') : null
+const compactSidebar = ref(compactWindow?.matches ?? false)
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1')
+const isSidebarCollapsed = computed(() => compactSidebar.value || sidebarCollapsed.value)
 const commandPaletteOpen = ref(false)
 const commandQuery = ref('')
 const selectedCommandIndex = ref(0)
@@ -245,8 +252,11 @@ watch(filteredCommands, () => { selectedCommandIndex.value = 0 })
 watch(commandPaletteOpen, open => { if (open) void nextTick(() => commandInput.value?.focus()); else commandQuery.value = '' })
 
 onMounted(async () => {
-  await refreshMaximizedState()
-  unlistenResize = await appWindow.onResized(handleWindowResized)
+  compactWindow?.addEventListener('change', handleCompactWindowChange)
+  if (!isMac) {
+    await refreshMaximizedState()
+    unlistenResize = await appWindow.onResized(handleWindowResized)
+  }
   unlistenCloseRequested = await appWindow.onCloseRequested(event => { event.preventDefault(); void handleCloseRequest() })
   unlistenTrayExit = await listen('lumina://request-exit', () => { void requestExit() })
   window.addEventListener('keydown', handleGlobalKeydown)
@@ -259,6 +269,7 @@ onMounted(async () => {
   })
 })
 onUnmounted(() => {
+  compactWindow?.removeEventListener('change', handleCompactWindowChange)
   if (resizeDebounceTimer) {
     clearTimeout(resizeDebounceTimer)
     resizeDebounceTimer = null
@@ -268,6 +279,10 @@ onUnmounted(() => {
   unlistenTrayExit?.()
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
+
+function handleCompactWindowChange(event: MediaQueryListEvent) {
+  compactSidebar.value = event.matches
+}
 
 function handleWindowResized() {
   if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer)
@@ -326,6 +341,13 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 <style scoped lang="scss">
 .layout-root { background: var(--lumina-window-bg); color: var(--lumina-text); display: flex; flex-direction: column; height: 100vh; min-height: 720px; min-width: 1120px; overflow: hidden; width: 100%; }
 .window-titlebar { align-items: center; background: var(--lumina-toolbar-bg); border-bottom: 0.5px solid var(--lumina-separator); display: grid; flex: 0 0 var(--lumina-titlebar-height); grid-template-columns: minmax(280px, 1fr) minmax(220px, 360px) minmax(280px, 1fr); height: var(--lumina-titlebar-height); padding-left: 10px; user-select: none; backdrop-filter: var(--lumina-vibrancy); }
+.layout-root.platform-macos { min-height: 0; min-width: 0; }
+.platform-macos .window-titlebar {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 360px) minmax(0, 1fr);
+  padding-inline: 88px 12px;
+}
+.platform-macos .titlebar-identity img { flex-shrink: 0; }
+.platform-macos .titlebar-identity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .titlebar-leading, .titlebar-actions { align-items: center; display: flex; gap: 8px; min-width: 0; }
 .titlebar-actions { height: 100%; justify-content: flex-end; }
 .titlebar-identity { align-items: center; display: flex; gap: 9px; min-width: 0; }
@@ -337,11 +359,6 @@ async function refreshMaximizedState() { isMaximized.value = await appWindow.isM
 .command-trigger:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }
 .command-trigger svg { height: 15px; width: 15px; }
 .command-trigger > span { overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.macos-window-controls { align-items: center; display: flex; gap: 8px; margin: 0 6px 0 2px; }
-.traffic-light { align-items: center; border: 0; border-radius: 50%; color: rgb(50 50 50 / 78%); cursor: default; display: flex; font-size: 10px; height: 12px; justify-content: center; padding: 0; width: 12px; }
-.traffic-light span { opacity: 0; transform: translateY(-0.5px); }
-.macos-window-controls:hover .traffic-light span { opacity: 1; }
-.traffic-light--close { background: #ff5f57; }.traffic-light--minimize { background: #febc2e; }.traffic-light--maximize { background: #28c840; }
 .windows-window-controls { align-items: center; align-self: stretch; display: flex; margin-left: 4px; }
 .window-button { align-items: center; align-self: stretch; background: transparent; border: 0; color: var(--lumina-text-secondary); cursor: pointer; display: flex; justify-content: center; width: 46px; }
 .window-button:hover { background: var(--lumina-control-hover); color: var(--lumina-text); }.window-button--close:hover { background: #c42b1c; color: var(--lumina-on-danger); }

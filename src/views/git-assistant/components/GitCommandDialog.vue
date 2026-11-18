@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="dialog-mask">
-    <section class="command-dialog" role="dialog" aria-modal="true" :aria-label="title">
+    <section ref="dialog" class="command-dialog" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1" @keydown="handleDialogKeys">
       <WorkbenchCloseButton
         class="dialog-close"
         :label="closeLabel"
@@ -11,6 +11,7 @@
         <div>
           <h3>{{ title }}</h3>
           <p>{{ repoPath }}</p>
+          <p v-if="detail" class="command-detail">{{ detail }}</p>
         </div>
         <div class="status-chip" :class="statusTone">
           <span></span>
@@ -36,13 +37,18 @@
           <span v-if="transfer">{{ transfer }}</span>
           <span>{{ elapsedLabel }}</span>
         </div>
+        <p v-if="resultDetail" class="result-detail" role="status">{{ resultDetail }}</p>
       </section>
 
       <section class="log-panel" :class="statusTone">
         <div class="log-toolbar">
           <span>{{ t('gitAssistant.gitCommand.output') }}</span>
+          <button v-if="!running && logLines.length" type="button" class="copy-output" @click="copyOutput">
+            {{ t('gitAssistant.gitCommand.copyOutput') }}
+          </button>
+          <span v-if="copyStatus" role="status">{{ copyStatus }}</span>
         </div>
-        <div ref="logBox" class="log-box">
+        <div ref="logBox" class="log-box" tabindex="0" @scroll.passive="updateLogFollow">
           <template v-for="(line, idx) in logLines" :key="idx">
             <div
               class="log-line"
@@ -86,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 import WorkbenchCloseButton from '@/components/workbench/WorkbenchCloseButton.vue'
 
@@ -96,6 +102,9 @@ const props = defineProps<{
   visible: boolean
   title: string
   repoPath: string
+  detail?: string
+  resultDetail?: string
+  returnFocusTo?: HTMLElement | null
   phase: string
   running: boolean
   success: boolean | null
@@ -261,6 +270,7 @@ const commandSummary = computed(() => {
 const commitPhases: Record<string, string> = {
   'Validating files': 'validatingFiles',
   'Preparing index': 'preparingIndex',
+  'Updating worktree': 'updatingWorktree',
   'Staging files': 'stagingFiles',
   'Checking staged changes': 'checkingStagedChanges',
   'Committing': 'committing',
@@ -280,7 +290,11 @@ const currentActivity = computed(() => {
 })
 
 const ticker = ref(Date.now())
+const copyStatus = ref('')
+const dialog = ref<HTMLElement | null>(null)
+let previousFocus: HTMLElement | null = null
 const logBox = ref<HTMLElement | null>(null)
+let followLogTail = true
 let timerId: number | undefined
 
 function stopTicker() {
@@ -305,18 +319,57 @@ watch(
 
 onBeforeUnmount(stopTicker)
 
-function handleEscape(event: KeyboardEvent) {
-  if (event.key === 'Escape' && props.visible && !props.running) emit('close')
+function handleDialogKeys(event: KeyboardEvent) {
+  if (event.key === 'Escape' && !props.running) {
+    event.stopPropagation()
+    emit('close')
+  }
+  if (event.key !== 'Tab') return
+  const buttons = dialog.value?.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')
+  const first = buttons?.[0]
+  const last = buttons?.[buttons.length - 1]
+  if (!first || !last || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+    event.preventDefault()
+    const destination = event.shiftKey ? last : first
+    destination?.focus()
+  } else if (event.shiftKey && document.activeElement === dialog.value) {
+    event.preventDefault()
+    last.focus()
+  }
 }
 
-onMounted(() => window.addEventListener('keydown', handleEscape))
-onBeforeUnmount(() => window.removeEventListener('keydown', handleEscape))
+watch(() => props.visible, async visible => {
+  if (visible) {
+    previousFocus = props.returnFocusTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    followLogTail = true
+    copyStatus.value = ''
+  }
+  await nextTick()
+  if (props.visible !== visible) return
+  if (visible) dialog.value?.focus({ preventScroll: true })
+  else if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+}, { immediate: true })
+
+async function copyOutput() {
+  const output = [props.repoPath, props.detail, props.resultDetail, ...logLines.value.map(line => line.text)].filter(Boolean).join('\n')
+  try {
+    await navigator.clipboard.writeText(output)
+    copyStatus.value = t('gitAssistant.gitCommand.outputCopied')
+  } catch {
+    copyStatus.value = t('gitAssistant.gitCommand.outputCopyFailed')
+  }
+}
+
+function updateLogFollow() {
+  const box = logBox.value
+  if (box) followLogTail = box.scrollHeight - box.scrollTop - box.clientHeight < 24
+}
 
 watch(
   () => [props.command, props.stdout, props.stderr] as const,
   () => {
     void nextTick(() => {
-      if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight
+      if (logBox.value && followLogTail) logBox.value.scrollTop = logBox.value.scrollHeight
     })
   },
 )
@@ -362,7 +415,7 @@ const progressStyle = computed(() => {
   box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--lumina-text) 8%, transparent), 0 2px 8px rgb(0 0 0 / 10%), 0 18px 52px rgb(0 0 0 / 18%);
   display: grid;
   gap: 14px;
-  grid-template-rows: auto auto minmax(240px, 1fr) auto;
+  grid-template-rows: auto auto minmax(104px, 1fr) auto;
   height: min(680px, 86vh);
   max-height: min(680px, 86vh);
   overflow: hidden;
@@ -396,6 +449,12 @@ const progressStyle = computed(() => {
     font-size: 12px;
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  .command-detail {
+    color: var(--lumina-text);
+    font-weight: 600;
+    margin-block-start: 6px;
   }
 }
 
@@ -479,6 +538,13 @@ const progressStyle = computed(() => {
   font-family: Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 11px;
   gap: 12px;
+}
+
+.result-detail {
+  color: var(--lumina-text-secondary);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .progress-bar {
@@ -611,10 +677,22 @@ const progressStyle = computed(() => {
   color: var(--lumina-text-secondary);
   display: flex;
   font-size: 11px;
+  gap: 8px;
   justify-content: space-between;
   min-height: 32px;
   padding: 0 10px;
 
+}
+
+.copy-output {
+  background: transparent;
+  border: 0;
+  border-radius: var(--lumina-radius-xs);
+  color: var(--lumina-primary);
+  cursor: pointer;
+  font: inherit;
+  margin-inline-start: auto;
+  padding: 4px 6px;
 }
 
 .dialog-actions {

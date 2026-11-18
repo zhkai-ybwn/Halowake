@@ -7,7 +7,7 @@ use crate::git::models::{
 
 use super::process::{
     emit_manual_git_progress, format_command_error, git_command, git_error_suggestion, run_git,
-    run_git_capture, run_git_capture_status, run_git_capture_streaming, run_git_raw,
+    run_git_capture_streaming, run_git_raw, run_git_worktree, run_git_worktree_status,
 };
 
 fn has_unmerged_files(repo_path: &str) -> bool {
@@ -61,11 +61,7 @@ pub(super) fn load_repository_state(repo_path: &str) -> GitRepositoryState {
     } else {
         None
     };
-    let upstream_gone = upstream
-        .as_ref()
-        .is_some_and(|value| run_git(repo_path, &["rev-parse", "--verify", value]).is_err());
-
-    let (ahead, behind) = if has_commits && upstream.is_some() && !upstream_gone {
+    let counts = upstream.as_ref().and_then(|_| {
         run_git(repo_path, &["rev-list", "--left-right", "--count", "HEAD...@{u}"])
             .ok()
             .and_then(|value| {
@@ -74,10 +70,10 @@ pub(super) fn load_repository_state(repo_path: &str) -> GitRepositoryState {
                 let behind = parts.next()?.parse::<usize>().ok()?;
                 Some((ahead, behind))
             })
-            .unwrap_or((0, 0))
-    } else {
-        (0, 0)
-    };
+    });
+    let upstream_gone = counts.is_none() && upstream.as_ref()
+        .is_some_and(|value| run_git(repo_path, &["rev-parse", "--verify", value]).is_err());
+    let (ahead, behind) = counts.unwrap_or((0, 0));
 
     let (merge_in_progress, rebase_in_progress) = load_operation_state(repo_path);
     GitRepositoryState {
@@ -254,7 +250,7 @@ pub fn merge_branch(payload: &GitMergePayload) -> Result<GitCommandResult, Strin
         args.push("--no-ff");
     }
     args.push(source_branch);
-    let (success, result) = run_git_capture_status(&payload.repo_path, &args)?;
+    let (success, result) = run_git_worktree_status(&payload.repo_path, &args)?;
 
     if !success {
         if has_unmerged_files(&payload.repo_path) {
@@ -307,7 +303,7 @@ where
     }
 
     let (merge_success, merge) =
-        run_git_capture_status(&payload.repo_path, &["merge", "--no-edit", &upstream])?;
+        run_git_worktree_status(&payload.repo_path, &["merge", "--no-edit", &upstream])?;
     commands.push(merge.command);
     stdout.push_str(&merge.stdout);
     stderr.push_str(&merge.stderr);
@@ -374,7 +370,7 @@ where
         ));
     }
 
-    let (rebase_success, rebase) = run_git_capture_status(&payload.repo_path, &["rebase", &upstream])?;
+    let (rebase_success, rebase) = run_git_worktree_status(&payload.repo_path, &["rebase", &upstream])?;
     commands.push(rebase.command);
     stdout.push_str(&rebase.stdout);
     stderr.push_str(&rebase.stderr);
@@ -413,7 +409,7 @@ where
 }
 
 pub fn continue_rebase(payload: &GitRepoPayload) -> Result<GitCommandResult, String> {
-    let (success, result) = run_git_capture_status(&payload.repo_path, &["rebase", "--continue"])?;
+    let (success, result) = run_git_worktree_status(&payload.repo_path, &["rebase", "--continue"])?;
     if success {
         return Ok(GitCommandResult {
             message: if result.stdout.trim().is_empty() {
@@ -443,7 +439,7 @@ pub fn continue_rebase(payload: &GitRepoPayload) -> Result<GitCommandResult, Str
 }
 
 pub fn abort_rebase(payload: &GitRepoPayload) -> Result<GitCommandResult, String> {
-    let result = run_git_capture(&payload.repo_path, &["rebase", "--abort"])?;
+    let result = run_git_worktree(&payload.repo_path, &["rebase", "--abort"])?;
 
     Ok(GitCommandResult {
         message: "Rebase 已中止".to_string(),
@@ -452,7 +448,7 @@ pub fn abort_rebase(payload: &GitRepoPayload) -> Result<GitCommandResult, String
 }
 
 pub fn continue_merge(payload: &GitRepoPayload) -> Result<GitCommandResult, String> {
-    let result = run_git_capture(&payload.repo_path, &["commit", "--no-edit"])?;
+    let result = run_git_worktree(&payload.repo_path, &["commit", "--no-edit"])?;
 
     Ok(GitCommandResult {
         message: "Merge commit 已完成".to_string(),
@@ -481,7 +477,7 @@ where
 }
 
 pub fn abort_merge(payload: &GitRepoPayload) -> Result<GitCommandResult, String> {
-    let result = run_git_capture(&payload.repo_path, &["merge", "--abort"])?;
+    let result = run_git_worktree(&payload.repo_path, &["merge", "--abort"])?;
 
     Ok(GitCommandResult {
         message: "Merge 已中止".to_string(),

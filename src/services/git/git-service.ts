@@ -31,7 +31,9 @@ export interface GitFileStat {
 }
 
 export async function loadGitSnapshot(repoPath: string): Promise<GitSnapshot> {
-  return await invoke<GitSnapshot>('load_git_snapshot', { repoPath, deferStats: true })
+  return await invoke<GitSnapshot>('load_git_snapshot', {
+    repoPath, deferStats: true, deferDetails: true,
+  })
 }
 
 export async function loadGitFileStats(repoPath: string): Promise<GitFileStat[]> {

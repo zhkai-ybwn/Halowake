@@ -122,6 +122,7 @@ const props = withDefaults(
     pushing: boolean
     pulling: boolean
     submitDisabled: boolean
+    shortcutsActive?: boolean
     selectedCount: number
     title: string
     body: string
@@ -133,6 +134,7 @@ const props = withDefaults(
   }>(),
   {
     aiLoading: false,
+    shortcutsActive: true,
     canGenerate: false,
     promptGenerationStep: '',
     currentModelLabel: '',
@@ -154,7 +156,7 @@ const hasExistingContent = computed(() => Boolean(props.title.trim() || props.bo
 const shortcutLabel = computed(() => formatPrimaryShortcut('Enter'))
 
 function handleSubmitShortcut(event: KeyboardEvent) {
-  if (!hasPrimaryModifier(event) || event.key !== 'Enter') return
+  if (!props.shortcutsActive || event.repeat || event.isComposing || !hasPrimaryModifier(event) || event.key !== 'Enter') return
   if (event.defaultPrevented || document.querySelector('[aria-modal="true"]')) return
   if (props.submitDisabled || props.committing || props.pulling || props.pushing) return
   event.preventDefault()

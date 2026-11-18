@@ -1,4 +1,6 @@
 import { createApp } from 'vue'
+import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import App from './App.vue'
 import router from './router'
 import pinia from './stores'
@@ -19,15 +21,18 @@ async function bootstrap() {
   // Bundle the icons used by the app so they also render when Iconify's API is unreachable.
   addCollection(solarIcons)
   addCollection(mdiIcons)
-  const app = createApp(App)
+  const mainWindow = !isTauri() || getCurrentWindow().label === 'main'
+  const app = createApp(App, { mainWindow })
   app.use(pinia)
   usePreferencesStore(pinia).initPreferences()
-  const aiSettingsReady = useAiSettingsStore(pinia).initSettings()
-  // Only routes that edit/use AI settings wait; the default workspace can mount immediately.
-  router.beforeResolve(async to => {
-    if (to.name === 'git-assistant' || to.name === 'settings') await aiSettingsReady
-  })
-  void useStorageStore(pinia).initStorage()
+  if (mainWindow) {
+    const aiSettingsReady = useAiSettingsStore(pinia).initSettings()
+    // Only routes that edit/use AI settings wait; the default workspace can mount immediately.
+    router.beforeResolve(async to => {
+      if (to.name === 'git-assistant' || to.name === 'settings') await aiSettingsReady
+    })
+    void useStorageStore(pinia).initStorage()
+  }
   app.use(i18n)
   app.use(router)
   app.use(naive)

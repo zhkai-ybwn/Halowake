@@ -2,11 +2,13 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 import { i18n } from '@/i18n'
+import { isMacPlatform } from '@/utils/platform-shortcuts'
 import { GIT_REPO_STORAGE_KEY } from '@/constants/git'
 import { useAiSettingsStore } from '@/stores/ai-settings'
 import { invokeMock, setTauriInvokeHandler } from '@/test/setup'
 import GitAssistantView from '../GitAssistantView.vue'
 import GitCommandDialog from '../components/GitCommandDialog.vue'
+import GitCommitAssistant from '../components/GitCommitAssistant.vue'
 
 vi.mock('naive-ui', async importOriginal => ({
   ...await importOriginal<typeof import('naive-ui')>(),
@@ -16,6 +18,28 @@ const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
 describe('Git Assistant selected-file commit', () => {
+  it('does not submit from the keyboard while the cached Git view is inactive', async () => {
+    const wrapper = shallowMount(GitCommitAssistant, {
+      global: { plugins: [createPinia(), i18n] },
+      props: {
+        committing: false, pulling: false, pushing: false, submitDisabled: false,
+        selectedCount: 1, title: 'A change', body: '', shortcutsActive: false,
+      },
+    })
+    const pressShortcut = () => window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: !isMacPlatform, metaKey: isMacPlatform, cancelable: true,
+    }))
+    try {
+      pressShortcut()
+      expect(wrapper.emitted('submit')).toBeUndefined()
+      await wrapper.setProps({ shortcutsActive: true })
+      pressShortcut()
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('previews one file while generating and committing only the checked file', async () => {
     let finishListening!: () => void
     listenMock.mockImplementation(() => new Promise<() => void>(resolve => {
@@ -59,10 +83,9 @@ describe('Git Assistant selected-file commit', () => {
       expect(generate.attributes('disabled')).toBeDefined()
       await rows[0]!.get('input[type="checkbox"]').setValue(true)
       await rows[1]!.trigger('click')
-      await flushPromises()
-      expect(invokeMock).toHaveBeenCalledWith('load_git_file_diff', {
+      await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('load_git_file_diff', {
         payload: { repoPath, filePath: 'staged.ts', staged: true },
-      })
+      }))
       await generate.trigger('click')
       await flushPromises()
       expect(invokeMock).toHaveBeenCalledWith('build_git_commit_prompt', {

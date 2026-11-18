@@ -1,10 +1,11 @@
 use crate::git::models::{
-    GitBranch, GitBranchKind, GitBranchPayload, GitBranchUpstreamPayload, GitCommandResult,
-    GitConfigureRemotePayload, GitRemoteBranchCheckoutPayload, GitRepairUpstreamPayload,
+    GitBranch, GitBranchKind, GitBranchPayload, GitBranchUpstreamPayload, GitCommandProgressEvent,
+    GitCommandResult, GitConfigureRemotePayload, GitRemoteBranchCheckoutPayload,
+    GitRepairUpstreamPayload,
 };
 
 use super::diff::refresh_unchanged_index_entries;
-use super::process::{run_git, run_git_capture, run_git_raw};
+use super::process::{emit_manual_git_progress, run_git, run_git_capture, run_git_checkout, run_git_raw};
 
 pub fn configure_origin_remote(payload: &GitConfigureRemotePayload) -> Result<GitCommandResult, String> {
     let remote_url = payload.remote_url.trim();
@@ -67,26 +68,24 @@ pub fn repair_upstream(payload: &GitRepairUpstreamPayload) -> Result<GitCommandR
 }
 
 pub fn load_branches(repo_path: &str) -> Result<Vec<GitBranch>, String> {
-    let output = run_git_raw(repo_path, &["branch", "--all", "--no-color"])?;
+    let output = read_branch_refs(repo_path, &["refs/heads/", "refs/remotes/"])?;
     let branches = output
         .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let current = line.starts_with('*');
-            let name = line.trim_start_matches('*').trim();
-            if name.is_empty() || name.contains(" -> ") {
-                return None;
-            }
-            let (kind, name) = if let Some(name) = name.strip_prefix("remotes/") {
-                (GitBranchKind::Remote, name)
-            } else {
+        .filter_map(parse_branch_ref)
+        .filter_map(|branch| {
+            let (kind, name) = if let Some(name) = branch.name.strip_prefix("refs/heads/") {
                 (GitBranchKind::Local, name)
+            } else {
+                if !branch.symbolic_target.is_empty() {
+                    return None;
+                }
+                (GitBranchKind::Remote, branch.name.strip_prefix("refs/remotes/")?)
             };
             Some(GitBranch {
                 name: name.to_string(),
                 kind,
-                current,
-                upstream: None,
+                current: branch.current,
+                upstream: display_upstream(branch.upstream).map(str::to_string),
                 upstream_status: None,
             })
         })
@@ -100,41 +99,103 @@ pub fn load_branches(repo_path: &str) -> Result<Vec<GitBranch>, String> {
     Ok(branches)
 }
 
-pub fn create_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
+struct BranchRef<'a> {
+    name: &'a str,
+    upstream: &'a str,
+    symbolic_target: &'a str,
+    current: bool,
+}
+
+fn read_branch_refs(repo_path: &str, refs: &[&str]) -> Result<String, String> {
+    let mut args = vec!["for-each-ref", "--format=%(refname)%09%(upstream)%09%(symref)%09%(HEAD)"];
+    args.extend_from_slice(refs);
+    run_git_raw(repo_path, &args)
+}
+
+fn parse_branch_ref(line: &str) -> Option<BranchRef<'_>> {
+    let mut fields = line.split('\t');
+    Some(BranchRef {
+        name: fields.next()?,
+        upstream: fields.next()?,
+        symbolic_target: fields.next()?,
+        current: fields.next()? == "*",
+    })
+}
+
+fn display_upstream(upstream: &str) -> Option<&str> {
+    (!upstream.is_empty()).then(|| upstream.strip_prefix("refs/remotes/").unwrap_or(upstream))
+}
+
+pub fn create_branch<F>(payload: &GitBranchPayload, mut on_progress: F) -> Result<GitCommandResult, String>
+where
+    F: FnMut(GitCommandProgressEvent),
+{
     let branch = validate_branch_name(&payload.branch)?;
-    refresh_unchanged_index_entries(&payload.repo_path)?;
-    let result = run_git_capture(&payload.repo_path, &["checkout", "-b", branch])?;
+    let result = checkout_worktree(&payload.repo_path, &["checkout", "--progress", "-b", branch], &mut on_progress)?;
     Ok(GitCommandResult { message: format!("已创建并切换到分支: {}", branch), ..result })
 }
 
-pub fn switch_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {
+pub fn switch_branch<F>(payload: &GitBranchPayload, mut on_progress: F) -> Result<GitCommandResult, String>
+where
+    F: FnMut(GitCommandProgressEvent),
+{
     let branch = validate_branch_name(&payload.branch)?;
-    refresh_unchanged_index_entries(&payload.repo_path)?;
-    let result = run_git_capture(&payload.repo_path, &["checkout", branch])?;
+    let result = checkout_worktree(&payload.repo_path, &["switch", "--progress", "--no-guess", branch], &mut on_progress)?;
     Ok(GitCommandResult { message: format!("已切换到分支: {}", branch), ..result })
 }
 
-pub fn checkout_remote_branch(payload: &GitRemoteBranchCheckoutPayload) -> Result<GitCommandResult, String> {
+pub fn checkout_remote_branch<F>(payload: &GitRemoteBranchCheckoutPayload, mut on_progress: F) -> Result<GitCommandResult, String>
+where
+    F: FnMut(GitCommandProgressEvent),
+{
     let remote_branch = payload.remote_branch.trim();
     let local_branch = validate_branch_name(&payload.local_branch)?;
     if !remote_branch.contains('/') || remote_branch.starts_with('-') {
         return Err("远端分支无效。".to_string());
     }
-    if run_git(&payload.repo_path, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", local_branch)]).is_ok() {
-        return switch_branch(&GitBranchPayload {
-            repo_path: payload.repo_path.clone(),
-            branch: local_branch.to_string(),
-        });
+
+    let remote_ref = format!("refs/remotes/{remote_branch}");
+    let local_ref = format!("refs/heads/{local_branch}");
+    let refs = read_branch_refs(&payload.repo_path, &[&remote_ref, &local_ref])?;
+    let refs = refs.lines().filter_map(parse_branch_ref).collect::<Vec<_>>();
+    if !refs.iter().any(|branch| branch.name == remote_ref && branch.symbolic_target.is_empty()) {
+        return Err(format!("本地没有远端跟踪分支“{remote_branch}”。请 Fetch 后重新选择。"));
     }
-    refresh_unchanged_index_entries(&payload.repo_path)?;
-    let result = run_git_capture(
+
+    if let Some(existing) = refs.iter().find(|branch| branch.name == local_ref) {
+        if existing.upstream != remote_ref {
+            let upstream = display_upstream(existing.upstream).unwrap_or("未设置");
+            return Err(format!(
+                "本地分支“{local_branch}”已存在（上游：{upstream}）。请使用其他本地分支名检出“{remote_branch}”，或直接选择该本地分支。"
+            ));
+        }
+
+        return switch_branch(
+            &GitBranchPayload { repo_path: payload.repo_path.clone(), branch: local_branch.to_string() },
+            on_progress,
+        );
+    }
+
+    let result = checkout_worktree(
         &payload.repo_path,
-        &["checkout", "--track", "-b", local_branch, remote_branch],
+        &["checkout", "--progress", "--track", "-b", local_branch, &remote_ref],
+        &mut on_progress,
     )?;
     Ok(GitCommandResult {
         message: format!("已检出远端分支 {} 到本地分支 {}", remote_branch, local_branch),
         ..result
     })
+}
+
+fn checkout_worktree<F>(repo_path: &str, args: &[&str], on_progress: &mut F) -> Result<GitCommandResult, String>
+where
+    F: FnMut(GitCommandProgressEvent),
+{
+    let command = format!("git {}", args.join(" "));
+    emit_manual_git_progress(repo_path, &command, "Preparing index", None, None, on_progress);
+    refresh_unchanged_index_entries(repo_path)?;
+    emit_manual_git_progress(repo_path, &command, "Updating worktree", None, None, on_progress);
+    run_git_checkout(repo_path, args, on_progress)
 }
 
 pub fn delete_branch(payload: &GitBranchPayload) -> Result<GitCommandResult, String> {

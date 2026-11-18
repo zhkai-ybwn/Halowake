@@ -190,6 +190,7 @@ export function useGitWorkspaceLayout(t: (key: string) => string) {
   return {
     PANEL_LIMITS,
     workspaceBody,
+    workspaceWidth,
     panelLayout,
     workspaceGridStyle,
     effectiveCommitWidth,

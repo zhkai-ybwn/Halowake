@@ -140,7 +140,7 @@
         ref="docViewer"
         :content="currentFileContent"
         :file-path="currentFilePath"
-        @file-dropped="handleViewerFileOpen"
+        @file-dropped="openFile"
         @stats-updated="updateStats"
       />
 
@@ -187,7 +187,7 @@
               :key="item.path"
               type="button"
               class="recent-card"
-              @click="loadFile(item.path)"
+              @click="openFile(item.path)"
             >
               <div class="recent-card-icon">
                 <Icon icon="solar:document-text-linear" />
@@ -244,6 +244,7 @@ const currentFileContent = ref('')
 const lastModifiedAt = ref<number | null>(null)
 const loading = ref(false)
 const isDraggingWelcome = ref(false)
+let fileRequestId = 0
 
 const stats = ref({
   wordCount: 0,
@@ -262,33 +263,39 @@ const recentDropdownOptions = computed(() => {
 watch(
   () => route.query.file,
   queryFile => {
-    if (typeof queryFile === 'string' && queryFile.trim()) {
+    if (route.name === 'markdown-preview' && typeof queryFile === 'string' && queryFile.trim()) {
       void loadFile(queryFile)
     }
   },
-  { immediate: true }
+  { immediate: true, flush: 'sync' }
 )
 
 async function loadFile(filePath: string) {
-  if (!filePath) return
+  const requestId = ++fileRequestId
   loading.value = true
   try {
     const fileInfo = await readMarkdownFile(filePath)
+    if (requestId !== fileRequestId) return false
     currentFilePath.value = fileInfo.path
     currentFileName.value = fileInfo.name
     currentFileContent.value = fileInfo.content
     lastModifiedAt.value = fileInfo.modifiedAt
 
     historyStore.addRecentFile(fileInfo.path, fileInfo.name)
+    return true
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    if (requestId === fileRequestId) message.error(err instanceof Error ? err.message : String(err))
+    return false
   } finally {
-    loading.value = false
+    if (requestId === fileRequestId) loading.value = false
   }
 }
 
-async function handleViewerFileOpen(filePath: string) {
-  await loadFile(filePath)
+function openFile(filePath: string) {
+  if (route.query.file === filePath) {
+    if (!loading.value) void loadFile(filePath)
+    return
+  }
   void router.replace({ query: { ...route.query, file: filePath } })
 }
 
@@ -306,8 +313,7 @@ async function selectAndOpenFile() {
     })
 
     if (selected && typeof selected === 'string') {
-      await loadFile(selected)
-      void router.replace({ query: { ...route.query, file: selected } })
+      openFile(selected)
     }
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
@@ -315,18 +321,17 @@ async function selectAndOpenFile() {
 }
 
 function handleRecentSelect(key: string | number) {
-  const path = String(key)
-  void loadFile(path)
-  void router.replace({ query: { ...route.query, file: path } })
+  openFile(String(key))
 }
 
 async function reloadCurrentFile() {
   if (!currentFilePath.value) return
-  await loadFile(currentFilePath.value)
-  message.success(t('markdownPreview.reloaded'))
+  if (await loadFile(currentFilePath.value)) message.success(t('markdownPreview.reloaded'))
 }
 
 function closeCurrentFile() {
+  fileRequestId++
+  loading.value = false
   currentFilePath.value = ''
   currentFileName.value = ''
   currentFileContent.value = ''
@@ -373,22 +378,22 @@ function handleWelcomeDrop(event: DragEvent) {
   const file = files[0]
   const filePath = (file as unknown as { path?: string }).path
   if (filePath && /\.(md|markdown|mdown|mkd|txt)$/i.test(filePath)) {
-    void loadFile(filePath)
-    void router.replace({ query: { ...route.query, file: filePath } })
+    openFile(filePath)
   }
 }
 
 useVisiblePolling(async () => {
   const path = currentFilePath.value
+  const requestId = fileRequestId
   try {
     const meta = await getMarkdownMetadata(path)
-    if (currentFilePath.value !== path || meta.modifiedAt === lastModifiedAt.value) return
+    if (requestId !== fileRequestId || meta.modifiedAt === lastModifiedAt.value) return
     const updated = await readMarkdownFile(path)
-    if (currentFilePath.value !== path) return
+    if (requestId !== fileRequestId) return
     currentFileContent.value = updated.content
     lastModifiedAt.value = updated.modifiedAt
   } catch { /* A file can temporarily disappear while an editor replaces it. */ }
-}, 3000, () => Boolean(currentFilePath.value))
+}, 3000, () => Boolean(currentFilePath.value) && !loading.value)
 
 function handleGlobalKeydown(e: KeyboardEvent) {
   if (route.name !== 'markdown-preview') return

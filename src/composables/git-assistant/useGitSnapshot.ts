@@ -1,9 +1,10 @@
 import { computed, nextTick, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useLocale } from '@/composables/useLocale'
-import { loadGitFileStats, loadGitSnapshot, type GitSnapshot } from '@/services/git/git-service'
+import { loadGitBranches, loadGitFileStats, loadGitSnapshot, type GitBranch, type GitSnapshot } from '@/services/git/git-service'
 import { ensureGitProjectProfile } from '@/services/git/git-profile-service'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { parseGitStatusLine } from '@/utils/git-status'
 import {
   GIT_RECENT_REPOS_STORAGE_KEY,
   GIT_REPO_STORAGE_KEY,
@@ -11,6 +12,15 @@ import {
 import { normalizePath, getRepoDisplayName } from './utils'
 
 const MAX_RECENT_REPOS = 8
+const CONFLICT_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
+
+function sameRepository(left: string, right: string) {
+  const normalize = (path: string) => {
+    const normalized = normalizePath(path).replace(/\/$/, '')
+    return /^(?:[a-z]:\/|\/\/)/i.test(normalized) ? normalized.toLowerCase() : normalized
+  }
+  return normalize(left) === normalize(right)
+}
 
 export interface RecentGitRepo {
   path: string
@@ -24,15 +34,54 @@ export function useGitSnapshot() {
 
   const loading = ref(false)
   const error = ref('')
-  const repoPath = ref('')
   const snapshot = ref<GitSnapshot | null>(null)
+  const repoPath = computed(() => snapshot.value?.repoRoot || snapshot.value?.repoPath || '')
+  const selectedRaws = ref<string[]>([])
+  const branches = ref<GitBranch[] | null>(null)
+  const branchListLoading = ref(false)
+  const branchListError = ref('')
   const recentRepos = ref<RecentGitRepo[]>([])
   const editingAliasPath = ref<string | null>(null)
   const aliasInputRefs = new Map<string, HTMLInputElement>()
   let snapshotRequestId = 0
+  let pendingSnapshotPath = ''
+  let branchRequestId = 0
+  let branchRequest: Promise<void> | undefined
 
-  const displayRepoPath = computed(() => repoPath.value || snapshot.value?.repoPath || '')
+  const displayRepoPath = repoPath
   const repositoryState = computed(() => snapshot.value?.repositoryState ?? null)
+
+  function describeError(err: unknown) {
+    return typeof err === 'string' ? err : err instanceof Error ? err.message : t('gitAssistant.errorFallback')
+  }
+
+  function invalidateBranches() {
+    branchRequestId += 1
+    branchRequest = undefined
+    branches.value = null
+    branchListLoading.value = false
+    branchListError.value = ''
+  }
+
+  function ensureBranches() {
+    const path = repoPath.value
+    if (!path || branches.value) return Promise.resolve()
+    if (branchRequest) return branchRequest
+
+    const requestId = ++branchRequestId
+    branchListLoading.value = true
+    branchListError.value = ''
+    branchRequest = loadGitBranches(path).then(result => {
+      if (requestId === branchRequestId) branches.value = result
+    }).catch(err => {
+      if (requestId === branchRequestId) branchListError.value = describeError(err)
+    }).finally(() => {
+      if (requestId !== branchRequestId) return
+      branchRequest = undefined
+      branchListLoading.value = false
+    })
+    return branchRequest
+  }
 
   function loadRecentRepos() {
     try {
@@ -93,10 +142,11 @@ export function useGitSnapshot() {
     return pending
   }
 
-  async function loadSnapshotByPath(path: string, silent = false) {
+  async function requestSnapshot(path: string, silent = false) {
     if (!path) return
 
     const requestId = ++snapshotRequestId
+    pendingSnapshotPath = path
     if (!silent) loading.value = true
     error.value = ''
 
@@ -104,39 +154,68 @@ export function useGitSnapshot() {
       const result = await loadGitSnapshot(path)
       if (requestId !== snapshotRequestId) return
 
-      snapshot.value = result
-      selectedRaws.value = []
-      workspaceStore.setCurrentProjectPath(result.repoRoot || path)
-      localStorage.setItem(GIT_REPO_STORAGE_KEY, result.repoRoot || path)
-      rememberRecentRepo(result.repoRoot || path)
+      const root = result.repoRoot || path
+      const previous = snapshot.value
+      const sameBranch = sameRepository(repoPath.value, root) && previous?.branch === result.branch
+      const statuses = result.status.map(line => line.slice(0, 2)).filter(code => code !== '??' && code !== '!!')
+      const loadStats = result.repositoryState.hasCommits && statuses.length && !statuses.some(code => CONFLICT_CODES.has(code))
+      if (loadStats && sameBranch && previous && !result.fileStats.length) {
+        result.fileStats = previous.fileStats
+      }
+      if (!sameBranch) selectedRaws.value = []
+      else if (selectedRaws.value.length) {
+        const rawByPath = new Map(result.status.map(raw => [parseGitStatusLine(raw).path, raw]))
+        selectedRaws.value = selectedRaws.value.flatMap(raw => {
+          const currentRaw = rawByPath.get(parseGitStatusLine(raw).path)
+          return currentRaw ? [currentRaw] : []
+        })
+      }
+      snapshot.value = { ...result, repoRoot: root }
+      invalidateBranches()
+      workspaceStore.setCurrentProjectPath(root)
+      localStorage.setItem(GIT_REPO_STORAGE_KEY, root)
+      rememberRecentRepo(root)
 
-      void ensureProjectProfile(result.repoRoot || path).catch(profileErr => {
+      void ensureProjectProfile(root).catch(profileErr => {
         console.error(profileErr)
         if (requestId === snapshotRequestId) {
-          error.value = profileErr instanceof Error ? profileErr.message : t('gitAssistant.errorFallback')
+          error.value = describeError(profileErr)
         }
       })
 
-      const statuses = result.status.map(line => line.slice(0, 2)).filter(code => code !== '??' && code !== '!!')
-      const conflicts = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
-      if (result.repositoryState.hasCommits && statuses.length && !statuses.some(code => conflicts.has(code))) {
-        void loadGitFileStats(result.repoRoot || path).then(stats => {
+      if (loadStats) {
+        void loadGitFileStats(root).then(stats => {
           if (requestId === snapshotRequestId && snapshot.value) snapshot.value.fileStats = stats
         }).catch(statsError => console.error(statsError))
       }
+      return snapshot.value
     } catch (err) {
       console.error(err)
       if (requestId === snapshotRequestId) {
-        error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
+        error.value = sameRepository(path, repoPath.value)
+          ? describeError(err)
+          : t('gitAssistant.repo.openFailed', { path, reason: describeError(err) })
       }
     } finally {
       if (requestId === snapshotRequestId) {
+        pendingSnapshotPath = ''
         loading.value = false
       }
     }
   }
 
-  const selectedRaws = ref<string[]>([])
+  async function loadSnapshotByPath(path: string, silent = false) {
+    await refreshCurrentSnapshot(path, silent)
+  }
+
+  async function refreshCurrentSnapshot(path: string, silent = false) {
+    if (!sameRepository(path, repoPath.value) || (pendingSnapshotPath && !sameRepository(path, pendingSnapshotPath))) return
+    return requestSnapshot(path, silent)
+  }
+
+  async function selectRepository(path: string) {
+    await requestSnapshot(path)
+  }
 
   async function handleSelectDirectory() {
     try {
@@ -149,11 +228,10 @@ export function useGitSnapshot() {
 
       if (!selected || Array.isArray(selected)) return
 
-      repoPath.value = selected
-      await loadSnapshotByPath(selected)
+      await selectRepository(selected)
     } catch (err) {
       console.error(err)
-      error.value = err instanceof Error ? err.message : t('gitAssistant.errorFallback')
+      error.value = describeError(err)
     }
   }
 
@@ -163,11 +241,8 @@ export function useGitSnapshot() {
   }
 
   async function handleSwitchRecentRepo(path: string) {
-    if (!path || path === displayRepoPath.value) return
-    repoPath.value = path
-    snapshot.value = null
-    selectedRaws.value = []
-    await loadSnapshotByPath(path)
+    if (!path || sameRepository(path, displayRepoPath.value)) return
+    await selectRepository(path)
   }
 
   function renameRecentRepo(path: string, name: string) {
@@ -225,8 +300,14 @@ export function useGitSnapshot() {
     displayRepoPath,
     repositoryState,
     selectedRaws,
+    branches,
+    ensureBranches,
+    branchListLoading,
+    branchListError,
     loadRecentRepos,
+    selectRepository,
     loadSnapshotByPath,
+    refreshCurrentSnapshot,
     handleSelectDirectory,
     handleRefresh,
     handleSwitchRecentRepo,

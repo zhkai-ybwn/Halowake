@@ -48,7 +48,6 @@ export const useStorageStore = defineStore('storage', {
       try {
         this.settings = await loadStorageSettings()
         await this.runCleanup(false)
-        await this.refreshOverview()
         this.initialized = true
         this.startCleanupTimer()
       } catch (error) {

@@ -32,8 +32,19 @@ pub struct SaveGitProjectProfilePayload {
 }
 
 #[tauri::command]
-pub async fn load_git_snapshot(repo_path: String, defer_stats: Option<bool>) -> Result<GitSnapshot, String> {
-    run_git_task("加载仓库状态", move || runner::load_git_snapshot(&repo_path, !defer_stats.unwrap_or(false))).await
+pub async fn load_git_snapshot(
+    repo_path: String,
+    defer_stats: Option<bool>,
+    defer_details: Option<bool>,
+) -> Result<GitSnapshot, String> {
+    run_git_task("加载仓库状态", move || {
+        let include_stats = !defer_stats.unwrap_or_default();
+        if defer_details.unwrap_or_default() {
+            runner::load_git_snapshot_with_details(&repo_path, include_stats, false)
+        } else {
+            runner::load_git_snapshot(&repo_path, include_stats)
+        }
+    }).await
 }
 
 #[tauri::command]
@@ -161,18 +172,33 @@ pub async fn load_git_branches(repo_path: String) -> Result<Vec<GitBranch>, Stri
 }
 
 #[tauri::command]
-pub async fn create_git_branch(payload: GitBranchPayload) -> Result<GitCommandResult, String> {
-    run_git_task("创建并切换分支", move || runner::create_branch(&payload)).await
+pub async fn create_git_branch(app: AppHandle, payload: GitBranchPayload) -> Result<GitCommandResult, String> {
+    run_git_task("创建并切换分支", move || {
+        runner::create_branch(&payload, |event| {
+            let _ = app.emit("git-command-progress", event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn switch_git_branch(payload: GitBranchPayload) -> Result<GitCommandResult, String> {
-    run_git_task("切换分支", move || runner::switch_branch(&payload)).await
+pub async fn switch_git_branch(app: AppHandle, payload: GitBranchPayload) -> Result<GitCommandResult, String> {
+    run_git_task("切换分支", move || {
+        runner::switch_branch(&payload, |event| {
+            let _ = app.emit("git-command-progress", event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn checkout_git_remote_branch(payload: GitRemoteBranchCheckoutPayload) -> Result<GitCommandResult, String> {
-    run_git_task("检出远端分支", move || runner::checkout_remote_branch(&payload)).await
+pub async fn checkout_git_remote_branch(app: AppHandle, payload: GitRemoteBranchCheckoutPayload) -> Result<GitCommandResult, String> {
+    run_git_task("检出远端分支", move || {
+        runner::checkout_remote_branch(&payload, |event| {
+            let _ = app.emit("git-command-progress", event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]

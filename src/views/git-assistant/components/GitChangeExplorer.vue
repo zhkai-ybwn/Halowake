@@ -1,5 +1,5 @@
 <template>
-  <section class="change-explorer">
+  <section class="change-explorer" :aria-busy="loading">
     <header class="change-header">
       <div>
         <span>{{ t('gitAssistant.files.title') }}</span>
@@ -62,7 +62,7 @@
     </div>
 
     <WorkbenchEmptyState v-if="!hasSnapshot && !loading" icon="solar:folder-open-linear" :title="t('gitAssistant.files.emptyNoRepoTitle')" :description="t('gitAssistant.files.emptyNoRepo')" />
-    <WorkbenchEmptyState v-else-if="loading" icon="solar:refresh-circle-linear" :title="t('gitAssistant.files.emptyLoadingTitle')" :description="t('gitAssistant.files.emptyLoading')" />
+    <WorkbenchEmptyState v-else-if="!hasSnapshot" icon="solar:refresh-circle-linear" :title="t('gitAssistant.files.emptyLoadingTitle')" :description="t('gitAssistant.files.emptyLoading')" />
     <WorkbenchEmptyState v-else-if="!files.length" icon="solar:check-circle-linear" :title="totalCount ? t('gitAssistant.files.emptyNoMatchTitle') : t('gitAssistant.files.emptyCleanTitle')" :description="totalCount ? t('gitAssistant.files.emptyNoMatch') : t('gitAssistant.files.emptyClean')">
       <template #actions><WorkbenchButton @click="$emit('request-refresh')">{{ t('gitAssistant.repo.refreshRepo') }}</WorkbenchButton></template>
     </WorkbenchEmptyState>
@@ -155,6 +155,7 @@ import type {
 const props = defineProps<{
   hasSnapshot: boolean
   loading: boolean
+  shortcutsActive?: boolean
   keyword: string
   statusFilter: GitAssistantStatusFilter
   files: GitAssistantFileView[]
@@ -395,6 +396,7 @@ function handleContextMenuSelect(key: string | number) {
 }
 
 function handleFindShortcut(event: KeyboardEvent) {
+  if (props.shortcutsActive === false) return
   if (!hasPrimaryModifier(event) || event.key.toLowerCase() !== 'f') return
   if (document.querySelector('.macos-skills-window') || document.querySelector('.n-modal-container')) return
   if (!searchInput.value?.offsetParent) return

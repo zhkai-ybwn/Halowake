@@ -10,6 +10,7 @@
     <GitStatusBar
       :repo-path="displayRepoPath"
       :branch="snapshot?.branch ?? ''"
+      :branch-loading="branchLoading"
       :loading="loading"
       :fetching="fetchLoading"
       :pushing="pushLoading"
@@ -19,11 +20,13 @@
       :recent-repos="recentRepos"
       :has-snapshot="Boolean(snapshot)"
       :panel-visibility="panelLayout.visible"
+      :shortcuts-active="viewActive"
+      :compact="compactLayout"
       @pick-directory="handleSelectDirectory"
       @refresh="handleRefresh"
       @sync-action="handleSyncAction"
       @manage-repos="recentRepoManagerOpen = true"
-      @open-branch-selector="openBranchSelector"
+      @open-branch-selector="showBranchSelector"
       @open-merge="openMergeDialog"
       @clone-repository="openRepositorySetup('clone')"
       @init-repository="openRepositorySetup('init')"
@@ -32,9 +35,22 @@
       @reset-layout="resetPanelLayout"
     />
 
-    <section ref="workspaceBody" class="workspace-body" :style="workspaceGridStyle">
+    <div v-if="compactLayout" class="compact-panel-switcher" role="group" :aria-label="t('gitAssistant.layout.view')">
+      <button
+        v-for="panel in compactPanels"
+        :key="panel"
+        type="button"
+        :aria-pressed="compactPanel === panel"
+        @click="compactPanel = panel"
+      >
+        {{ t(`gitAssistant.layout.${panel}`) }}
+      </button>
+    </div>
+
+    <section ref="workspaceBody" class="workspace-body" :style="compactLayout ? undefined : workspaceGridStyle">
       <GitChangeExplorer
-        v-if="panelLayout.visible.changes"
+        v-if="visiblePanels.changes"
+        :key="snapshotIdentity"
         class="change-table"
         :has-snapshot="Boolean(snapshot)"
         :loading="loading"
@@ -44,6 +60,7 @@
         :total-count="allFiles.length"
         :active-file-raw="activeFileRaw"
         :selected-raws="selectedRaws"
+        :shortcuts-active="viewActive"
         @update:keyword="keyword = $event"
         @update:status-filter="handleStatusFilterChange"
         @select-file="handleSelectFile"
@@ -55,7 +72,7 @@
       />
 
       <WorkbenchSplitHandle
-        v-if="panelLayout.visible.changes && (panelLayout.visible.diff || panelLayout.visible.commit)"
+        v-if="visiblePanels.changes && (visiblePanels.diff || visiblePanels.commit)"
         :label="leadingHandleLabel"
         :value="leadingHandleValue"
         :min="leadingHandleMin"
@@ -65,7 +82,7 @@
       />
 
       <GitDiffViewer
-        v-if="panelLayout.visible.diff"
+        v-if="visiblePanels.diff"
         class="inline-diff"
         :has-snapshot="Boolean(snapshot)"
         :active-file="selectedFile"
@@ -76,7 +93,7 @@
       />
 
       <WorkbenchSplitHandle
-        v-if="panelLayout.visible.diff && panelLayout.visible.commit"
+        v-if="visiblePanels.diff && visiblePanels.commit"
         :label="t('gitAssistant.layout.resizeCommit')"
         :value="effectiveCommitWidth"
         :min="PANEL_LIMITS.commit.min"
@@ -85,13 +102,14 @@
         @reset="resetPanelWidth('commit')"
       />
 
-      <aside v-if="panelLayout.visible.commit" class="commit-inspector">
+      <aside v-if="visiblePanels.commit" class="commit-inspector">
         <GitCommitAssistant
           class="commit-workbench"
           :committing="commitLoading"
           :pushing="pushLoading"
           :pulling="pullLoading"
-          :submit-disabled="!snapshot || !selectedRaws.length || !commitTitle.trim()"
+          :submit-disabled="loading || gitCommandDialog.running || branchLoading || !snapshot || !selectedRaws.length || !commitTitle.trim()"
+          :shortcuts-active="viewActive"
           :selected-count="selectedRaws.length"
           :title="commitTitle"
           :body="commitBody"
@@ -308,50 +326,79 @@
         </WorkbenchSheet>
       </NModal>
 
-      <!-- Filterable selects teleport their menus; keep this modal focus policy intact. -->
-      <NModal v-model:show="branchSelectorOpen" class="repository-action-modal" :auto-focus="false" :mask-closable="true" :trap-focus="false">
-        <WorkbenchSheet
-          icon="solar:branching-paths-down-linear"
-          :title="t('gitAssistant.repo.manageBranches')"
-          :description="snapshot?.branch ? `${t('gitAssistant.repo.branch')}：${snapshot.branch}` : ''"
-          :close-label="t('gitAssistant.prompt.close')"
-          :busy="branchLoading"
-          @close="branchSelectorOpen = false"
-        >
-          <label class="repository-action-field">
-            <span>{{ t('gitAssistant.repo.selectBranch') }}</span>
-            <NSelect
-              v-model:value="branchSelectionValue"
-              :options="branchOptions"
-              :loading="branchLoading"
-              filterable
-              to="body"
-              :placeholder="branchLoading ? t('gitAssistant.repo.loadingBranches') : t('gitAssistant.repo.selectBranch')"
-              @update:value="value => handleBranchSelection(String(value ?? ''))"
-            />
-          </label>
-          <label class="repository-action-field">
-            <span>{{ t('gitAssistant.repo.createBranch') }}</span>
-            <div class="repository-action-create">
-              <NInput
-                v-model:value="newBranchDraft"
-                :placeholder="t('gitAssistant.repo.branchNamePlaceholder')"
-                @keydown.enter="handleCreateBranch"
+      <NModal
+        v-model:show="branchSelectorOpen"
+        class="repository-action-modal"
+        :auto-focus="false"
+        @after-enter="branchSelect?.focusInput()"
+        @after-leave="restoreBranchFocus"
+      >
+        <div class="branch-dialog" role="dialog" aria-modal="true" :aria-label="t('gitAssistant.repo.manageBranches')">
+          <WorkbenchSheet
+            role="presentation"
+            :aria-modal="undefined"
+            icon="solar:branching-paths-down-linear"
+            :title="t('gitAssistant.repo.manageBranches')"
+            :description="snapshot?.branch ? `${t('gitAssistant.repo.branch')}：${snapshot.branch}` : ''"
+            :close-label="t('gitAssistant.prompt.close')"
+            :busy="branchLoading"
+            @close="branchSelectorOpen = false"
+          >
+            <label class="repository-action-field">
+              <span>{{ t('gitAssistant.repo.selectBranch') }}</span>
+              <NSelect
+                ref="branchSelect"
+                v-model:value="branchSelectionValue"
+                :options="branchOptions"
+                :loading="branchListLoading"
+                filterable
+                :to="`#${branchMenuId}`"
+                :placeholder="branchListLoading ? t('gitAssistant.repo.loadingBranches') : t('gitAssistant.repo.selectBranch')"
+                @update:value="value => handleBranchSelection(String(value ?? ''))"
               />
-              <NButton
-                type="primary"
-                :disabled="!newBranchDraft.trim() || branchLoading"
-                :loading="branchLoading"
-                @click="handleCreateBranch"
-              >
-                {{ t('gitAssistant.repo.createBranch') }}
-              </NButton>
+            </label>
+            <div v-if="branchListError" class="branch-list-error" role="alert">
+              <span>{{ branchListError }}</span>
+              <NButton size="small" @click="ensureBranches">{{ t('gitAssistant.repo.retryBranches') }}</NButton>
             </div>
-          </label>
-          <template #footer>
-            <NButton @click="branchSelectorOpen = false">{{ t('common.dismiss') }}</NButton>
-          </template>
-        </WorkbenchSheet>
+            <section v-if="remoteCollision" class="branch-collision">
+              <p role="status">{{ t('gitAssistant.repo.trackingCollision', { local: remoteCollision.local, remote: remoteCollision.remote }) }}</p>
+              <NButton size="small" @click="chooseCollisionAction(true)">{{ t('gitAssistant.repo.switchExistingLocal') }}</NButton>
+              <label class="repository-action-field">
+                <span>{{ t('gitAssistant.repo.trackingBranchName') }}</span>
+                <div class="repository-action-create">
+                  <NInput
+                    v-model:value="trackingBranchDraft"
+                    :status="trackingNameTaken ? 'error' : undefined"
+                    :placeholder="t('gitAssistant.repo.branchNamePlaceholder')"
+                    @keydown.enter="chooseCollisionAction(false)"
+                  />
+                  <NButton type="primary" :disabled="!trackingBranchDraft.trim() || trackingNameTaken" @click="chooseCollisionAction(false)">
+                    {{ t('gitAssistant.repo.createTrackingBranch') }}
+                  </NButton>
+                </div>
+              </label>
+              <p v-if="trackingNameTaken" role="alert">{{ t('gitAssistant.repo.trackingNameTaken') }}</p>
+            </section>
+            <label v-else class="repository-action-field">
+              <span>{{ t('gitAssistant.repo.createBranch') }}</span>
+              <div class="repository-action-create">
+                <NInput
+                  v-model:value="newBranchDraft"
+                  :placeholder="t('gitAssistant.repo.branchNamePlaceholder')"
+                  @keydown.enter="handleCreateBranch"
+                />
+                <NButton type="primary" :disabled="!newBranchDraft.trim() || branchLoading" :loading="branchLoading" @click="handleCreateBranch">
+                  {{ t('gitAssistant.repo.createBranch') }}
+                </NButton>
+              </div>
+            </label>
+            <template #footer>
+              <NButton @click="branchSelectorOpen = false">{{ t('common.dismiss') }}</NButton>
+            </template>
+          </WorkbenchSheet>
+          <div :id="branchMenuId"></div>
+        </div>
       </NModal>
 
 
@@ -436,11 +483,16 @@
             <NSelect
               v-model:value="mergeSourceValue"
               :options="mergeSourceOptions"
+              :loading="branchListLoading"
               filterable
               to="body"
               :placeholder="t('gitAssistant.repo.mergeSourcePlaceholder')"
             />
           </label>
+          <div v-if="branchListError" class="branch-list-error" role="alert">
+            <span>{{ branchListError }}</span>
+            <NButton size="small" @click="ensureBranches">{{ t('gitAssistant.repo.retryBranches') }}</NButton>
+          </div>
           <label class="repository-action-field">
             <span>{{ t('gitAssistant.repo.mergeMode') }}</span>
             <NSelect v-model:value="mergeMode" :options="mergeModeOptions" to="body" />
@@ -448,7 +500,7 @@
           <p class="repository-action-hint">{{ t('gitAssistant.repo.mergeCleanWorktreeHint') }}</p>
           <template #footer>
             <NButton @click="mergeDialogOpen = false">{{ t('common.dismiss') }}</NButton>
-            <NButton type="primary" :loading="mergeLoading" :disabled="!mergeSourceValue" @click="handleMergeBranch">
+            <NButton type="primary" :loading="mergeLoading" :disabled="!mergeSourceValue || branchListLoading" @click="handleMergeBranch">
               {{ t('gitAssistant.repo.mergeStart') }}
             </NButton>
           </template>
@@ -599,7 +651,10 @@
     <GitCommandDialog
       :visible="gitCommandDialog.visible"
       :title="gitCommandDialog.title"
-      :repo-path="displayRepoPath"
+      :repo-path="gitCommandDialog.repoPath || displayRepoPath"
+      :detail="gitCommandDialog.detail"
+      :result-detail="gitCommandDialog.resultDetail"
+      :return-focus-to="gitCommandDialog.detail ? branchTrigger : null"
       :phase="gitCommandDialog.phase"
       :running="gitCommandDialog.running"
       :success="gitCommandDialog.success"
@@ -622,8 +677,8 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSelect, useDialog } from 'naive-ui'
+import { computed, defineAsyncComponent, onActivated, onDeactivated, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue'
+import { NButton, NCheckbox, NInput, NModal, NSelect, useDialog, type SelectInst } from 'naive-ui'
 import { useLocale } from '@/composables/useLocale'
 import {
   openGitFileExternal,
@@ -661,12 +716,16 @@ const GitDiffViewer = defineAsyncComponent(() => import('./components/GitDiffVie
 const { t } = useLocale()
 const dialog = useDialog()
 const aiSettings = useAiSettingsStore()
+const viewActive = ref(true)
+onActivated(() => { viewActive.value = true })
+onDeactivated(() => { viewActive.value = false })
 
 // ── Composables ──
 const {
-  loading, error, repoPath, snapshot, recentRepos, editingAliasPath,
+  loading, error, snapshot, recentRepos, editingAliasPath,
   displayRepoPath, repositoryState, selectedRaws,
-  loadRecentRepos, loadSnapshotByPath, handleSelectDirectory, handleRefresh,
+  branches, ensureBranches, branchListLoading, branchListError,
+  loadRecentRepos, loadSnapshotByPath, refreshCurrentSnapshot, selectRepository, handleSelectDirectory, handleRefresh,
   handleSwitchRecentRepo, renameRecentRepo, setAliasInputRef,
   startEditAlias, finishEditAlias, cancelEditAlias, removeRecentRepo,
 } = useGitSnapshot()
@@ -675,7 +734,7 @@ function clearFileSelection() { selectedRaws.value = [] }
 
 const {
   currentDiff, diffMode, diffLoading, showDiff, activeFileRaw, loadDiffForFile, clearDiff,
-} = useGitDiff(() => displayRepoPath.value, (msg) => { error.value = msg }, () => panelLayout.value.visible.diff)
+} = useGitDiff(() => displayRepoPath.value, (msg) => { error.value = msg }, () => viewActive.value && visiblePanels.value.diff)
 
 const {
   fetchLoading, pushLoading, pullLoading, rebaseLoading, remoteLoading,
@@ -704,11 +763,19 @@ const {
 
 // ── UI-only state ──
 const {
-  PANEL_LIMITS, workspaceBody, panelLayout, workspaceGridStyle, effectiveCommitWidth, commitMaxWidth,
+  PANEL_LIMITS, workspaceBody, workspaceWidth, panelLayout, workspaceGridStyle, effectiveCommitWidth, commitMaxWidth,
   leadingHandleLabel, leadingHandleValue, leadingHandleMin, leadingHandleMax,
   togglePanel, resetPanelLayout, resetPanelWidth, resizeCommitPanel, resizeLeadingPanel, resetLeadingPanelWidth,
   observeWorkspaceBody, disconnectWorkspaceObserver,
 } = useGitWorkspaceLayout(t)
+
+const compactPanels = ['changes', 'diff', 'commit'] as const
+const compactPanel = ref<(typeof compactPanels)[number]>('changes')
+const compactLayout = computed(() => workspaceWidth.value > 0 && workspaceWidth.value < 840)
+const visiblePanels = computed(() => compactLayout.value
+  ? { changes: compactPanel.value === 'changes', diff: compactPanel.value === 'diff', commit: compactPanel.value === 'commit' }
+  : panelLayout.value.visible)
+const snapshotIdentity = computed(() => `${displayRepoPath.value}\0${snapshot.value?.branch ?? ''}`)
 
 const keyword = ref('')
 const statusFilter = ref<GitAssistantStatusFilter>('all')
@@ -772,21 +839,39 @@ function toggleFileSelection({ raw, checked }: { raw: string; checked: boolean }
   else selectedRaws.value = selectedRaws.value.filter(item => item !== raw)
 }
 
-const { branchOptions, currentBranchValue, mergeSourceOptions, mergeModeOptions } = useGitBranchOptions(snapshot, t)
+const { branchOptions, currentBranchValue, mergeSourceOptions, mergeModeOptions } = useGitBranchOptions(branches, t)
 const {
-  branchLoading, branchSelectorOpen, branchSelectionValue, newBranchDraft,
+  branchLoading, branchSelectorOpen, branchSelectionValue, newBranchDraft, remoteCollision, trackingBranchDraft, trackingNameTaken,
   mergeDialogOpen, mergeLoading, mergeSourceValue, mergeMode,
-  openBranchSelector, openMergeDialog, handleCreateBranch, handleMergeBranch, handleBranchSelection,
+  openBranchSelector, openMergeDialog, handleCreateBranch, handleMergeBranch, handleBranchSelection, chooseCollisionAction,
 } = useGitBranchActions({
   getRepositoryPath: () => displayRepoPath.value,
   getCurrentBranchValue: () => currentBranchValue.value,
-  snapshot,
+  getCurrentBranch: () => snapshot.value?.branch ?? '',
+  getBranches: () => branches.value ?? [],
   setError: message => { error.value = message },
   translate: t,
-  loadSnapshot: loadSnapshotByPath,
+  loadSnapshot: refreshCurrentSnapshot,
   startGitCommand,
   finishGitCommand,
   failGitCommand,
+})
+
+const branchSelect = ref<SelectInst | null>(null)
+const branchMenuId = `git-branch-menu-${useId()}`
+const branchTrigger = shallowRef<HTMLElement | null>(null)
+
+function showBranchSelector(trigger: HTMLElement) {
+  branchTrigger.value = trigger
+  openBranchSelector()
+}
+
+function restoreBranchFocus() {
+  if (!gitCommandDialog.value.visible) branchTrigger.value?.focus({ preventScroll: true })
+}
+
+watch([branchSelectorOpen, mergeDialogOpen, branches], ([branchOpen, mergeOpen, refs]) => {
+  if ((branchOpen || mergeOpen) && refs === null) void ensureBranches()
 })
 const { handleStageFiles } = useGitStaging({
   getRepositoryPath: () => displayRepoPath.value,
@@ -802,10 +887,9 @@ const {
   repositorySetupOpen, repositorySetupMode, repositoryLoading, repositoryPathDraft, cloneUrlDraft,
   openRepositorySetup, pickRepositoryTarget, handleRepositorySetup,
 } = useGitRepositorySetup({
-  repoPath,
   setError: message => { error.value = message },
   translate: t,
-  loadSnapshot: loadSnapshotByPath,
+  loadSnapshot: selectRepository,
   finishGitCommand,
 })
 const promptFileGroups = computed(() => {
@@ -918,7 +1002,14 @@ async function handleFileAction(payload: { action: 'open-diff' | 'diff-previous'
   const file = allFiles.value.find(i => i.raw === payload.raw)
   if (!file) return
   if (payload.action === 'open-diff') { await handleOpenDiff(payload.raw); return }
-  if (payload.action === 'diff-previous') { activeFileRaw.value = payload.raw; diffMode.value = 'head'; showDiff.value = true; return }
+  if (payload.action === 'diff-previous') {
+    if (compactLayout.value) compactPanel.value = 'diff'
+    else if (!visiblePanels.value.diff) togglePanel('diff')
+    activeFileRaw.value = payload.raw
+    diffMode.value = 'head'
+    showDiff.value = true
+    return
+  }
   if (payload.action === 'file-history') { await handleOpenLog(file.path); return }
   if (payload.action === 'open-external') { await handleOpenExternalFile(file.path); return }
   if (payload.action === 'mark-resolved') { await handleMarkResolved([file.path]) }
@@ -990,9 +1081,14 @@ function handleSwitchRecentRepoFromManager(path: string) {
 }
 
 // ── Watchers ──
-watch(filteredFiles, files => {
+watch([snapshotIdentity, filteredFiles], ([identity, files], [previousIdentity, previousFiles]) => {
   if (files.length === 0) { activeFileRaw.value = null; return }
-  if (!files.some(f => f.raw === activeFileRaw.value)) activeFileRaw.value = files[0]?.raw ?? null
+  if (identity !== previousIdentity) {
+    activeFileRaw.value = files[0]?.raw ?? null
+  } else if (!files.some(f => f.raw === activeFileRaw.value)) {
+    const activePath = previousFiles?.find(file => file.raw === activeFileRaw.value)?.path
+    activeFileRaw.value = (files.find(file => file.path === activePath) ?? files[0])?.raw ?? null
+  }
 }, { immediate: true })
 
 watch(allFiles, files => {
@@ -1012,10 +1108,12 @@ watch([() => selectedFile.value?.raw, snapshot], () => {
   diffMode.value = file.unstaged ? 'unstaged' : 'staged'
 }, { immediate: true })
 
-watch([() => selectedFile.value?.raw, snapshot, diffMode, () => panelLayout.value.visible.diff, showDiff], async () => {
+watch([() => selectedFile.value?.raw, snapshot, diffMode, () => visiblePanels.value.diff, showDiff, viewActive], async () => {
   const file = selectedFile.value
   if (!file || !displayRepoPath.value) { clearDiff(); return }
-  await loadDiffForFile(file, diffMode.value)
+  const immediate = showDiff.value
+  if (immediate) showDiff.value = false
+  await loadDiffForFile(file, diffMode.value, { revision: snapshot.value, immediate })
 }, { immediate: true })
 
 // MainLayout keeps this view alive. Route deactivation must not refresh the snapshot:
@@ -1026,8 +1124,7 @@ onMounted(async () => {
   observeWorkspaceBody()
   const saved = localStorage.getItem(GIT_REPO_STORAGE_KEY)
   if (!saved) return
-  repoPath.value = saved
-  await loadSnapshotByPath(saved)
+  await selectRepository(saved)
 })
 
 onUnmounted(() => {

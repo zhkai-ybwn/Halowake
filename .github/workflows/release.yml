@@ -14,9 +14,26 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+    outputs:
+      release_notes: ${{ steps.release-notes.outputs.body }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read release notes
+        id: release-notes
+        shell: pwsh
+        run: |
+          $path = Join-Path 'docs/releases' "$($env:GITHUB_REF_NAME).md"
+          $notes = if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Get-Content -LiteralPath $path -Raw
+          } else {
+            'See the assets below to download Halowake for your platform.'
+          }
+          $delimiter = [Guid]::NewGuid().ToString('N')
+          "body<<$delimiter" >> $env:GITHUB_OUTPUT
+          $notes.TrimEnd() >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -95,8 +112,36 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Halowake ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download Halowake for your platform.'
+          releaseBody: ${{ needs.verify.outputs.release_notes }}
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish:
+    name: Publish completed release
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify updater manifest and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ ! -s "$notes" ]]; then
+            echo "Release notes are missing. Keeping this release as a draft."
+            exit 0
+          fi
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json --output - |
+            jq -e --arg version "${GITHUB_REF_NAME#v}" '
+              .version == $version and
+              (.platforms["windows-x86_64"].signature | length > 0) and
+              all(.platforms[]; (.url | length > 0) and (.signature | length > 0))
+            ' >/dev/null
+          gh release edit "$GITHUB_REF_NAME" --verify-tag --notes-file "$notes" --draft=false

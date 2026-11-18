@@ -16,7 +16,6 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub const DEFAULT_GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_NETWORK_GIT_TIMEOUT: Duration = Duration::from_secs(60);
-pub const DEFAULT_HEAVY_GIT_TIMEOUT: Duration = Duration::from_secs(60);
 pub const GIT_CLONE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[cfg(windows)]
@@ -434,6 +433,87 @@ pub(super) fn run_git_capture(
     capture_git_result(command, output)
 }
 
+pub(super) fn run_git_checkout<F>(repo_path: &str, args: &[&str], on_progress: &mut F) -> Result<GitCommandResult, String>
+where
+    F: FnMut(GitCommandProgressEvent),
+{
+    let command = format!("git {}", args.join(" "));
+    let mut progress = |bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes);
+        let mut event = build_progress_event(repo_path, &command, "stderr", &text);
+        event.phase = Some("Updating worktree".to_string());
+        on_progress(event);
+    };
+    let output = run_git_worktree_output(repo_path, args, &command, Some(&mut progress))?;
+    capture_git_result(command, output)
+}
+
+pub(super) fn run_git_worktree(repo_path: &str, args: &[&str]) -> Result<GitCommandResult, String> {
+    let command = format!("git {}", args.join(" "));
+    let output = run_git_worktree_output(repo_path, args, &command, None)?;
+    capture_git_result(command, output)
+}
+
+fn run_git_worktree_output(
+    repo_path: &str,
+    args: &[&str],
+    command: &str,
+    on_stderr: Option<&mut dyn FnMut(&[u8])>,
+) -> Result<Output, String> {
+    let mut cmd = git_command(repo_path);
+    cmd.args(args);
+    wait_for_worktree_command(cmd, on_stderr)
+        .map_err(|error| format!("执行命令失败 ({command}): {error}"))
+}
+
+fn wait_for_worktree_command(
+    mut cmd: Command,
+    on_stderr: Option<&mut dyn FnMut(&[u8])>,
+) -> std::io::Result<Output> {
+    // Let Git finish writing the worktree and index. Files also let us collect
+    // its output without waiting for EOF from background hook processes.
+    let stdout_file = tempfile::NamedTempFile::new()?;
+    let stderr_file = tempfile::NamedTempFile::new()?;
+    let mut child = cmd
+        .stdout(stdout_file.reopen()?)
+        .stderr(stderr_file.reopen()?)
+        .spawn()?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let status = if let Some(on_stderr) = on_stderr {
+        let mut emitted = 0;
+        loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            // Progress is best-effort. A read error must not end the wait
+            // while Git is still writing the worktree.
+            let _ = read_worktree_output(stderr_file.as_file(), &mut stderr);
+            if let Some(last_break) = stderr[emitted..]
+                .iter()
+                .rposition(|&byte| matches!(byte, b'\r' | b'\n'))
+            {
+                let end = emitted + last_break + 1;
+                on_stderr(&stderr[emitted..end]);
+                emitted = end;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    } else {
+        child.wait()?
+    };
+
+    read_worktree_output(stdout_file.as_file(), &mut stdout)?;
+    read_worktree_output(stderr_file.as_file(), &mut stderr)?;
+    Ok(Output { status, stdout, stderr })
+}
+
+fn read_worktree_output(file: &std::fs::File, output: &mut Vec<u8>) -> std::io::Result<()> {
+    let remaining = file.metadata()?.len().saturating_sub(output.len() as u64);
+    file.take(remaining).read_to_end(output).map(|_| ())
+}
+
 pub(super) fn run_git_pathspec<'a>(
     repo_path: &str,
     action: &[&str],
@@ -618,14 +698,12 @@ where
     })
 }
 
-pub(super) fn run_git_capture_status(
+pub(super) fn run_git_worktree_status(
     repo_path: &str,
     args: &[&str],
 ) -> Result<(bool, GitCommandResult), String> {
     let command = format!("git {}", args.join(" "));
-    let mut cmd = git_command(repo_path);
-    cmd.args(args);
-    let output = run_command_with_timeout(cmd, DEFAULT_HEAVY_GIT_TIMEOUT, &command)?;
+    let output = run_git_worktree_output(repo_path, args, &command, None)?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let success = output.status.success();

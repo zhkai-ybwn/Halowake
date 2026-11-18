@@ -4,7 +4,7 @@
       <n-dialog-provider>
         <n-notification-provider>
           <router-view />
-          <UpdateModal />
+          <UpdateModal v-if="mainWindow" />
         </n-notification-provider>
       </n-dialog-provider>
     </n-message-provider>
@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { darkTheme, type GlobalThemeOverrides, NConfigProvider } from 'naive-ui'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -20,11 +20,18 @@ import { useUpdaterStore } from '@/stores/updater'
 import { getInitialMarkdownFile } from '@/services/markdown/markdown-files'
 import UpdateModal from '@/components/updater/UpdateModal.vue'
 
+const props = defineProps<{ mainWindow: boolean }>()
 const router = useRouter()
 const preferencesStore = usePreferencesStore()
-const updaterStore = useUpdaterStore()
+let updateTimer: ReturnType<typeof setTimeout> | undefined
 
 onMounted(async () => {
+  if (!props.mainWindow) return
+  const updaterStore = useUpdaterStore()
+  updateTimer = setTimeout(() => {
+    void updaterStore.checkForUpdates({ silent: true, openModalIfAvailable: true })
+  }, 3000)
+
   try {
     const initialFile = await getInitialMarkdownFile()
     if (initialFile) {
@@ -36,14 +43,8 @@ onMounted(async () => {
   } catch (err) {
     console.error('Failed to get initial markdown file:', err)
   }
-
-  // Silent lightweight check on app startup (3s delay)
-  setTimeout(() => {
-    updaterStore.checkForUpdates({ silent: true, openModalIfAvailable: true }).catch(() => {
-      // Intentionally ignored in silent mode
-    })
-  }, 3000)
 })
+onUnmounted(() => clearTimeout(updateTimer))
 const naiveTheme = computed(() => preferencesStore.resolvedTheme === 'dark' ? darkTheme : null)
 
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
