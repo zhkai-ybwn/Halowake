@@ -52,6 +52,8 @@ describe('Git Assistant selected-file commit', () => {
       defaultModelId: 'local',
       models: [{ id: 'local', name: 'Local', provider: 'ollama', model: 'local', baseUrl: 'http://localhost', enabled: true }],
     })
+    const providerError = 'OpenAI compatible API error 400: invalid model ID'
+    let generationError = providerError
     setTauriInvokeHandler(command => {
       switch (command) {
         case 'load_git_snapshot':
@@ -64,7 +66,9 @@ describe('Git Assistant selected-file commit', () => {
         case 'load_git_file_diff': return { diff: 'file diff' }
         case 'build_git_commit_prompt':
           return { prompt: 'selected changes', trace: { selectedFiles: [], rules: [], evidenceCount: 0 } }
-        case 'generate_git_ai_analysis_from_prompt': return { title: 'Update checked file', body: 'One change' }
+        case 'generate_git_ai_analysis_from_prompt':
+          if (generationError) throw generationError
+          return { title: 'Update checked file', body: 'One change' }
         case 'commit_git_changes': return { command: 'git commit', stdout: '', stderr: '', message: 'Committed' }
         case 'load_git_commit_history': return []
         case 'save_git_commit_history':
@@ -91,6 +95,14 @@ describe('Git Assistant selected-file commit', () => {
       expect(invokeMock).toHaveBeenCalledWith('build_git_commit_prompt', {
         payload: expect.objectContaining({ selectedFiles: ['checked.ts'] }),
       })
+      expect(wrapper.get('.error-banner').text()).toContain(providerError)
+      generationError = 'AI_GENERATION_CANCELLED'
+      await generate.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.error-banner').exists()).toBe(false)
+      generationError = ''
+      await generate.trigger('click')
+      await flushPromises()
       expect(wrapper.get<HTMLInputElement>('.field-input').element.value).toBe('Update checked file')
       await wrapper.get('.commit-submit-btn').trigger('click')
       await flushPromises()

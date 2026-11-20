@@ -363,7 +363,20 @@ pub async fn test_ai_model_connection(model: AiModelConfig) -> Result<String, St
                 .await
         }
         AiProviderType::OpenaiCompatible => {
-            let mut request = client.get(format!("{}/models", model.base_url.trim_end_matches('/')));
+            let base_url = model.base_url.trim().trim_end_matches('/');
+            let models_url = format!("{base_url}/models");
+            let mut url = reqwest::Url::parse(&models_url)
+                .map_err(|error| format!("Invalid model API URL: {error}"))?;
+            if qwencloud::is_official_openai_endpoint(base_url) {
+                let model_id = model.model.trim();
+                if model_id.is_empty() {
+                    return Err("OpenAI model ID is required".to_string());
+                }
+                url.path_segments_mut()
+                    .map_err(|_| "Invalid OpenAI models URL".to_string())?
+                    .push(model_id);
+            }
+            let mut request = client.get(url);
             if let Some(api_key) = model.api_key.as_ref().map(|key| key.trim()).filter(|key| !key.is_empty()) {
                 request = request.header("Authorization", format!("Bearer {}", api_key));
             }

@@ -1,4 +1,4 @@
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -26,6 +26,10 @@ fn clean_json(text: &str) -> String {
         .to_string()
 }
 
+pub(crate) fn is_official_openai_endpoint(base_url: &str) -> bool {
+    Url::parse(base_url).is_ok_and(|url| url.host_str() == Some("api.openai.com"))
+}
+
 pub async fn call_openai_compatible_generate(
     config: &AiModelConfig,
     prompt: &str,
@@ -35,8 +39,9 @@ pub async fn call_openai_compatible_generate(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let body = json!({
-        "model": config.model,
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    let mut body = json!({
+        "model": config.model.trim(),
         "messages": [
             {
                 "role": "system",
@@ -47,18 +52,15 @@ pub async fn call_openai_compatible_generate(
                 "content": prompt
             }
         ],
-        "temperature": 0.2,
-        "response_format": { "type": "json_object" },
-        "extra_body": {
-            "enable_thinking": false
-        }
+        "response_format": { "type": "json_object" }
     });
+    if !is_official_openai_endpoint(base_url) {
+        body["temperature"] = json!(0.2);
+        body["extra_body"] = json!({ "enable_thinking": false });
+    }
 
     let mut request = client
-        .post(format!(
-            "{}/chat/completions",
-            config.base_url.trim_end_matches('/')
-        ))
+        .post(format!("{base_url}/chat/completions"))
         .header("Content-Type", "application/json")
         .json(&body);
 

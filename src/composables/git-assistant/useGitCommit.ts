@@ -185,10 +185,11 @@ export function useGitCommit(
 
       promptDrawerOpen.value = true
     } catch (err) {
-      const cancelled = aiGenerationCancelled || (err instanceof Error && err.message.includes('AI_GENERATION_CANCELLED'))
+      const message = typeof err === 'string' ? err : err instanceof Error ? err.message : ''
+      const cancelled = aiGenerationCancelled || message.includes('AI_GENERATION_CANCELLED')
       if (!cancelled) {
         console.error(err)
-        setError(err instanceof Error ? err.message : t('gitAssistant.errorFallback'))
+        setError(message || t('gitAssistant.errorFallback'))
       }
     } finally {
       aiLoading.value = false
